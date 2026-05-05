@@ -1507,3 +1507,15 @@ func (h *Handler) handleInheritToken(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
+
+// RegisterSaaSBridge mounts the legacy admin handlers that the SaaS UI needs
+// (request-log queries + Anthropic OAuth quota probe) on the supplied group.
+// Caller is responsible for attaching the right auth middleware — this method
+// does NOT install the legacy admin_token gate. The expected use is binding
+// it under /api/v2/admin/* after the SaaS RequireAdmin middleware.
+func (h *Handler) RegisterSaaSBridge(g *gin.RouterGroup) {
+	g.GET("/requests", h.handleRequestsQuery)
+	g.GET("/requests/clients", h.handleRequestsClients)
+	g.GET("/requests/hourly", h.handleRequestsHourly)
+	g.POST("/credentials/:id/anthropic-usage", h.handleAnthropicUsage)
+}

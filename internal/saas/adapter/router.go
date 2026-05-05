@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	legacyadmin "github.com/wjsoj/CPA-Claude/internal/admin"
 	"github.com/wjsoj/CPA-Claude/internal/saas/admin"
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
@@ -14,8 +15,10 @@ import (
 
 // Mount attaches all /api/v2/* SaaS routes onto engine. Public-routes (auth
 // + billing notify) sit outside RequireUser. credH may be nil — when set,
-// /api/v2/admin/credentials/* is exposed.
-func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer) {
+// /api/v2/admin/credentials/* is exposed. legacyH may be nil — when set, the
+// /api/v2/admin/* group also exposes request-log queries + Anthropic OAuth
+// quota probe (handlers reused from the legacy /mgmt-console panel).
+func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler) {
 	v2 := engine.Group("/api/v2")
 
 	// Public.
@@ -65,5 +68,8 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	adminH.Routes(adminG)
 	if credH != nil {
 		credH.Routes(adminG)
+	}
+	if legacyH != nil {
+		legacyH.RegisterSaaSBridge(adminG)
 	}
 }

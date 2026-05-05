@@ -203,7 +203,7 @@ func main() {
 			return billingH.ReconcileOrder(c, out)
 		}
 		adminH := saasadmin.New(saasDB)
-		credH := saasadmin.NewCred(pool)
+		credH := saasadmin.NewCred(pool, cfg.AuthDir, cfg.UseUTLS)
 
 		// Catalog used for pricing computation (same instance as the proxy's
 		// internal billing — the SaaS layer only adds the multiplier on top).
@@ -218,8 +218,9 @@ func main() {
 		if f, ferr := admin.SaaSDistFS(); ferr == nil {
 			spaFS = f
 		}
+		legacyAdmin := s.LegacyAdmin()
 		for _, h := range s.GinEngines() {
-			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer)
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin)
 			if spaFS != nil {
 				saasadapter.MountSPA(h, spaFS)
 			}

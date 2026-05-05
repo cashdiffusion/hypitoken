@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, Routes, Route } from "react-router-dom";
-import { Users, Tag, KeyRound, ShoppingCart } from "lucide-react";
+import { NavLink, Routes, Route } from "react-router-dom";
+import { Users, Tag, KeyRound, ShoppingCart, LayoutDashboard, ScrollText, Gauge } from "lucide-react";
+import { OverviewPanel } from "@/components/admin/overview-panel";
+import { RequestsExplorer } from "@/components/admin/requests-explorer";
+import { UpstreamUsageDialog } from "@/components/admin/upstream-usage-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { fmtUSD } from "@/lib/utils";
@@ -14,9 +18,11 @@ import { cn } from "@/lib/utils";
 import type { PricingGroup } from "@/lib/types";
 
 const TABS = [
+  { to: "overview", label: "Overview", icon: LayoutDashboard },
   { to: "users", label: "Users", icon: Users },
   { to: "groups", label: "Pricing groups", icon: Tag },
   { to: "credentials", label: "Credentials", icon: KeyRound },
+  { to: "requests", label: "Requests", icon: ScrollText },
   { to: "payments", label: "Payments", icon: ShoppingCart },
 ];
 
@@ -49,10 +55,12 @@ export default function AdminPage() {
       </div>
 
       <Routes>
-        <Route index element={<UsersTab />} />
+        <Route index element={<OverviewPanel refreshTick={0} />} />
+        <Route path="overview" element={<OverviewPanel refreshTick={0} />} />
         <Route path="users" element={<UsersTab />} />
         <Route path="groups" element={<GroupsTab />} />
         <Route path="credentials" element={<CredentialsTab />} />
+        <Route path="requests" element={<RequestsExplorer refreshTick={0} />} />
         <Route path="payments" element={<PaymentsTab />} />
       </Routes>
     </div>
@@ -288,7 +296,9 @@ function CreateGroupButton({ onDone }: { onDone: () => void }) {
 
 function CredentialsTab() {
   const [creds, setCreds] = useState<any[]>([]);
-  const [open, setOpen] = useState(false);
+  const [openKey, setOpenKey] = useState(false);
+  const [openOAuth, setOpenOAuth] = useState<null | "anthropic" | "openai">(null);
+  const [usageFor, setUsageFor] = useState<{ id: string; label: string } | null>(null);
   const reload = async () => {
     const r = await apiGet<any>("/admin/credentials");
     setCreds(r.credentials || []);
@@ -304,11 +314,10 @@ function CredentialsTab() {
               <CardTitle>Upstream credentials</CardTitle>
               <CardDescription>OAuth + API-key credentials in the live pool.</CardDescription>
             </div>
-            <div className="flex gap-2">
-              <Button onClick={() => setOpen(true)}>+ Add API key</Button>
-              <Button asChild variant="outline">
-                <a href="/mgmt-console/" target="_blank" rel="noreferrer">OAuth uploads ↗</a>
-              </Button>
+            <div className="flex gap-2 flex-wrap justify-end">
+              <Button onClick={() => setOpenKey(true)}>+ Add API key</Button>
+              <Button variant="outline" onClick={() => setOpenOAuth("anthropic")}>+ OAuth (Claude)</Button>
+              <Button variant="outline" onClick={() => setOpenOAuth("openai")}>+ OAuth (Codex)</Button>
             </div>
           </div>
         </CardHeader>
@@ -324,6 +333,7 @@ function CredentialsTab() {
                   <TableHead>Provider</TableHead>
                   <TableHead>Group</TableHead>
                   <TableHead className="text-right">Active</TableHead>
+                  <TableHead>Expires</TableHead>
                   <TableHead>Health</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
@@ -339,14 +349,27 @@ function CredentialsTab() {
                     <TableCell className="capitalize">{c.provider}</TableCell>
                     <TableCell className="font-mono text-xs">{c.group || "—"}</TableCell>
                     <TableCell className="font-mono tabular-nums text-right">{c.active_clients}</TableCell>
+                    <TableCell className="font-mono text-xs"><Expiry at={c.expires_at} /></TableCell>
                     <TableCell><HealthPill cred={c} /></TableCell>
                     <TableCell className="text-right">
-                      <Button size="sm" variant="ghost" className="text-destructive" onClick={async () => {
-                        if (!confirm(`Remove credential "${c.label}"?`)) return;
-                        await apiDelete(`/admin/credentials/${encodeURIComponent(c.id)}`);
-                        toast.success("Removed");
-                        reload();
-                      }}>Remove</Button>
+                      <div className="flex items-center justify-end gap-1">
+                        {c.kind === "oauth" && c.provider === "anthropic" && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            title="Probe upstream Anthropic usage windows"
+                            onClick={() => setUsageFor({ id: c.id, label: c.label })}
+                          >
+                            <Gauge className="size-3.5" />
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" className="text-destructive" onClick={async () => {
+                          if (!confirm(`Remove credential "${c.label}"?`)) return;
+                          await apiDelete(`/admin/credentials/${encodeURIComponent(c.id)}`);
+                          toast.success("Removed");
+                          reload();
+                        }}>Remove</Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -356,17 +379,231 @@ function CredentialsTab() {
         </CardContent>
       </Card>
 
-      <AddAPIKeyDialog open={open} onOpenChange={setOpen} onCreated={reload} />
+      <AddAPIKeyDialog open={openKey} onOpenChange={setOpenKey} onCreated={reload} />
+      <AddOAuthDialog provider={openOAuth} onClose={() => setOpenOAuth(null)} onCreated={reload} />
+      <UpstreamUsageDialog
+        authId={usageFor?.id ?? null}
+        authLabel={usageFor?.label || ""}
+        onClose={() => setUsageFor(null)}
+      />
     </div>
+  );
+}
+
+function AddOAuthDialog({
+  provider,
+  onClose,
+  onCreated,
+}: {
+  provider: "anthropic" | "openai" | null;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [proxy, setProxy] = useState("");
+  const [label, setLabel] = useState("");
+  const [maxC, setMaxC] = useState("5");
+  const [group, setGroup] = useState("");
+  const [sess, setSess] = useState<{ session_id: string; auth_url: string; redirect_uri: string } | null>(null);
+  const [callback, setCallback] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    // Reset state when dialog opens with a fresh provider.
+    if (provider) {
+      setStep(1);
+      setProxy("");
+      setLabel("");
+      setMaxC("5");
+      setGroup("");
+      setSess(null);
+      setCallback("");
+    }
+  }, [provider]);
+
+  if (!provider) return null;
+
+  const copy =
+    provider === "anthropic"
+      ? {
+          title: "Sign in with Claude",
+          intro:
+            "We'll generate a Claude OAuth login URL. If this server can't reach claude.ai / api.anthropic.com directly, set a proxy — it's used for the token exchange and every subsequent request with this credential.",
+          primary: "Generate login URL",
+        }
+      : {
+          title: "Sign in with ChatGPT (Codex)",
+          intro:
+            "We'll generate a ChatGPT Codex OAuth login URL. If this server can't reach auth.openai.com / chatgpt.com directly, set a proxy — it's used for the token exchange and every subsequent request with this credential.",
+          primary: "Generate login URL",
+        };
+
+  const start = async () => {
+    setBusy(true);
+    try {
+      const r = await apiPost<any>("/admin/credentials/oauth/start", {
+        provider,
+        proxy_url: proxy,
+        label,
+      });
+      setSess({ session_id: r.session_id, auth_url: r.auth_url, redirect_uri: r.redirect_uri });
+      setStep(2);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyURL = async () => {
+    if (!sess) return;
+    try {
+      await navigator.clipboard.writeText(sess.auth_url);
+      toast.success("Login URL copied");
+    } catch {
+      // ignore
+    }
+  };
+
+  const finish = async () => {
+    if (!sess) return;
+    setBusy(true);
+    try {
+      await apiPost("/admin/credentials/oauth/finish", {
+        session_id: sess.session_id,
+        callback: callback.trim(),
+        max_concurrent: Number(maxC) || 0,
+        group,
+      });
+      toast.success("OAuth credential added");
+      onCreated();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!provider} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>{copy.title}</DialogTitle>
+        </DialogHeader>
+        {step === 1 && (
+          <div className="grid gap-3 py-2">
+            <p className="text-sm text-muted-foreground">{copy.intro}</p>
+            <div className="space-y-2">
+              <Label>Proxy URL (optional)</Label>
+              <Input
+                placeholder="http:// or socks5://"
+                value={proxy}
+                onChange={(e) => setProxy(e.target.value)}
+                className="font-mono"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Label</Label>
+                <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="team-a" />
+              </div>
+              <div className="space-y-2">
+                <Label>Max concurrent</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={maxC}
+                  onChange={(e) => setMaxC(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Group (optional)</Label>
+              <Input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="empty = public" />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancel</Button>
+              <Button disabled={busy} onClick={start}>
+                {busy ? "Starting…" : copy.primary}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+        {step === 2 && sess && (
+          <div className="grid gap-3 py-2">
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p><b>1.</b> Copy the login URL and open it in a browser where you can sign in:</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Login URL</Label>
+              <div className="flex gap-2">
+                <Input
+                  readOnly
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="flex-1 font-mono text-xs bg-muted"
+                  value={sess.auth_url}
+                />
+                <Button variant="outline" onClick={copyURL}>Copy</Button>
+              </div>
+            </div>
+            <div className="text-sm text-muted-foreground space-y-2 pt-2">
+              <p>
+                <b>2.</b> After you authorize, the browser redirects to{" "}
+                <code className="font-mono break-all">{sess.redirect_uri}?code=…&amp;state=…</code>. That page usually fails to load — that's fine.
+              </p>
+              <p>
+                <b>3.</b> Copy the full URL from the address bar (or the <code className="font-mono">code#state</code> string shown on a manual-copy page) and paste it below.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Callback URL or code#state</Label>
+              <Textarea
+                className="font-mono text-xs h-28"
+                placeholder={`${sess.redirect_uri}?code=xxx&state=yyy`}
+                value={callback}
+                onChange={(e) => setCallback(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
+              <Button disabled={busy || !callback.trim()} onClick={finish}>
+                {busy ? "Exchanging…" : "Finish"}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function HealthPill({ cred }: { cred: any }) {
   if (cred.disabled) return <span className="rounded border border-muted-foreground/30 bg-muted/40 px-2 py-0.5 text-xs font-mono uppercase text-muted-foreground">disabled</span>;
   if (cred.hard_failure) return <span className="rounded border border-destructive/30 bg-destructive/15 px-2 py-0.5 text-xs font-mono uppercase text-destructive" title={cred.failure_reason}>hard fail</span>;
-  if (cred.quota_exceeded) return <span className="rounded border border-warning/30 bg-warning/15 px-2 py-0.5 text-xs font-mono uppercase text-warning">quota</span>;
-  if (cred.healthy) return <span className="rounded border border-success/30 bg-success/15 px-2 py-0.5 text-xs font-mono uppercase text-success">ok</span>;
-  return <span className="rounded border border-warning/30 bg-warning/15 px-2 py-0.5 text-xs font-mono uppercase text-warning">cooldown</span>;
+  if (cred.quota_exceeded) return <span className="rounded border border-warning/30 bg-warning/15 px-2 py-0.5 text-xs font-mono uppercase text-warning" title={cred.quota_reset_at ? `Resets ${new Date(cred.quota_reset_at).toLocaleString()}` : ""}>quota</span>;
+  if (cred.healthy) return <span className="rounded border border-success/30 bg-success/15 px-2 py-0.5 text-xs font-mono uppercase text-success" title={cred.failure_reason || ""}>ok</span>;
+  return <span className="rounded border border-warning/30 bg-warning/15 px-2 py-0.5 text-xs font-mono uppercase text-warning" title={cred.failure_reason || ""}>cooldown</span>;
+}
+
+function Expiry({ at }: { at?: string }) {
+  if (!at || at.startsWith("0001-")) return <span className="text-muted-foreground">—</span>;
+  const d = new Date(at);
+  const now = Date.now();
+  const dt = d.getTime() - now;
+  const days = Math.round(dt / 86400000);
+  const cls =
+    dt < 0
+      ? "text-destructive"
+      : days < 7
+      ? "text-warning"
+      : "text-muted-foreground";
+  const rel = dt < 0
+    ? `expired ${-days}d ago`
+    : days < 1
+    ? `${Math.round(dt / 3600000)}h`
+    : `${days}d`;
+  return <span className={cls} title={d.toLocaleString()}>{rel}</span>;
 }
 
 function AddAPIKeyDialog({ open, onOpenChange, onCreated }: any) {

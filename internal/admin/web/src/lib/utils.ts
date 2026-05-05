@@ -5,6 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export const fmtInt = (n: number | null | undefined): string => {
+  if (n == null) return "—";
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "—";
+  return v.toLocaleString();
+};
+
 // fmtUSD: 2 decimals once the figure is "real money" ($0.01+), otherwise
 // 4 decimals so per-request micro-costs stay visible. Zero/missing → "—".
 export const fmtUSD = (n: number | null | undefined): string => {
