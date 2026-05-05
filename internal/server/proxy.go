@@ -537,9 +537,19 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	}
 	s.usage.Record(a.ID, a.Label, counts)
 	// Charge the client for the tokens they actually consumed.
+	// billedCost applies the per-credential billing rate: bill = official / rate.
 	var costUSD float64
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
-		costUSD = s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
+		officialCost := s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
+		var defaultRate float64
+		if s.saas != nil {
+			defaultRate = s.saas.DefaultBillingRate(auth.NormalizeProvider(a.Provider))
+		}
+		if defaultRate <= 0 {
+			defaultRate = 1.0
+		}
+		rate := a.GetBillingRate(defaultRate)
+		costUSD = officialCost / rate
 	}
 	// Advisor (server-side opus sub-call) is billed alongside the main
 	// request: same auth absorbs the load, same client is charged, but the
@@ -700,7 +710,15 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	if resp.StatusCode < 400 {
 		s.usage.Record(a.ID, a.Label, counts)
 		if counts.Requests > 0 && clientToken != "" {
-			costUSD = s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
+			officialCost := s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
+			var defaultRate float64
+			if s.saas != nil {
+				defaultRate = s.saas.DefaultBillingRate(auth.NormalizeProvider(a.Provider))
+			}
+			if defaultRate <= 0 {
+				defaultRate = 1.0
+			}
+			costUSD = officialCost / a.GetBillingRate(defaultRate)
 		}
 		advisorCost := s.recordSubUsage(a, "apikey", clientToken, clientName, model, path, resp.StatusCode, sub)
 		if counts.Requests > 0 && clientToken != "" {

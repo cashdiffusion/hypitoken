@@ -38,6 +38,7 @@ func (c *CredHandler) Routes(g *gin.RouterGroup) {
 	g.POST("/credentials/oauth/start", c.oauthStart)
 	g.POST("/credentials/oauth/finish", c.oauthFinish)
 	g.DELETE("/credentials/:id", c.remove)
+	g.PATCH("/credentials/:id/billing-rate", c.setBillingRate)
 }
 
 func (c *CredHandler) list(ctx *gin.Context) {
@@ -58,6 +59,7 @@ func (c *CredHandler) list(ctx *gin.Context) {
 		QuotaExceeded bool      `json:"quota_exceeded,omitempty"`
 		QuotaResetAt  time.Time `json:"quota_reset_at,omitempty"`
 		ExpiresAt     time.Time `json:"expires_at,omitempty"`
+		BillingRate   float64   `json:"billing_rate"`
 	}
 	out := make([]row, 0)
 	for _, st := range c.Pool.Status() {
@@ -91,6 +93,7 @@ func (c *CredHandler) list(ctx *gin.Context) {
 			QuotaExceeded: !st.Auth.QuotaExceededAt.IsZero(),
 			QuotaResetAt:  st.Auth.QuotaResetAt,
 			ExpiresAt:     st.Auth.ExpiresAt,
+			BillingRate:   st.Auth.BillingRate,
 		})
 	}
 	ctx.JSON(http.StatusOK, gin.H{"credentials": out})
@@ -253,6 +256,31 @@ func (c *CredHandler) oauthFinish(ctx *gin.Context) {
 	}
 	c.Pool.AddOAuth(a)
 	ctx.JSON(http.StatusOK, gin.H{"id": a.ID, "email": a.Email})
+}
+
+func (c *CredHandler) setBillingRate(ctx *gin.Context) {
+	id := ctx.Param("id")
+	a := c.Pool.FindByID(id)
+	if a == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	var req struct {
+		Rate float64 `json:"rate"`
+	}
+	if err := ctx.BindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		return
+	}
+	if req.Rate < 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "rate must be >= 0"})
+		return
+	}
+	a.SetBillingRate(req.Rate)
+	if err := a.Persist(); err != nil {
+		log.Warnf("saas-admin: persist billing rate for %s: %v", id, err)
+	}
+	ctx.JSON(http.StatusOK, gin.H{"id": id, "billing_rate": req.Rate})
 }
 
 var fnameSafe = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)

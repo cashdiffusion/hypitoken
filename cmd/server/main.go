@@ -209,6 +209,8 @@ func main() {
 		// internal billing — the SaaS layer only adds the multiplier on top).
 		catalog := pricing.NewCatalog(cfg.Pricing)
 		adapter := saasadapter.NewAdapter(saasDB, catalog, rate)
+		adapter.DefaultClaudeBillingRate = cfg.SaaS.DefaultClaudeBillingRate
+		adapter.DefaultCodexBillingRate = cfg.SaaS.DefaultCodexBillingRate
 		s.SetSaaS(adapter)
 
 		// Mount /api/v2/* on every gin engine the server hosts. Both Claude

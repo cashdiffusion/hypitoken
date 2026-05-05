@@ -57,6 +57,12 @@ type Config struct {
 	ExchangeRateURL string  `yaml:"exchange_rate_url"`
 	FallbackCNYPerUSD float64 `yaml:"fallback_cny_per_usd"`
 
+	// Default billing rates per provider (1r = X USD of official compute).
+	// Formula: bill = official_cost_usd / rate. Higher rate = cheaper for user.
+	// Per-credential billing_rate overrides these defaults when set.
+	DefaultClaudeBillingRate float64 `yaml:"default_claude_billing_rate"`
+	DefaultCodexBillingRate  float64 `yaml:"default_codex_billing_rate"`
+
 	// HealthCheck cadence for API-key credentials.
 	HealthCheckInterval time.Duration `yaml:"health_check_interval"`
 }
@@ -103,6 +109,12 @@ func (c *Config) ApplyDefaults(configDir string) {
 	}
 	if c.FallbackCNYPerUSD <= 0 {
 		c.FallbackCNYPerUSD = 7.2
+	}
+	if c.DefaultClaudeBillingRate <= 0 {
+		c.DefaultClaudeBillingRate = 0.5
+	}
+	if c.DefaultCodexBillingRate <= 0 {
+		c.DefaultCodexBillingRate = 3.0
 	}
 	if c.HealthCheckInterval == 0 {
 		c.HealthCheckInterval = 30 * time.Minute

@@ -17,6 +17,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/usage"
 )
 
+
 // Adapter implements server.SaaSAdapter against the SaaS DB. It is created
 // in main.go and passed into server.New via WithSaaS.
 type Adapter struct {
@@ -24,12 +25,16 @@ type Adapter struct {
 	Catalog *pricing.Catalog
 	Rate    *billing.Rate
 
+	// Provider-level default billing rates (1r = X USD).
+	DefaultClaudeBillingRate float64
+	DefaultCodexBillingRate  float64
+
 	// groupCache memoizes pricing groups for the request hot path. Groups
 	// change rarely (admin action) so a 30s TTL is plenty.
-	groupMu    sync.RWMutex
-	groups     map[int64]*db.PricingGroup
-	groupsAt   time.Time
-	groupsTTL  time.Duration
+	groupMu   sync.RWMutex
+	groups    map[int64]*db.PricingGroup
+	groupsAt  time.Time
+	groupsTTL time.Duration
 }
 
 func NewAdapter(store *db.DB, catalog *pricing.Catalog, rate *billing.Rate) *Adapter {
@@ -122,19 +127,33 @@ func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *serv
 	return nil
 }
 
-func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provider, model string, counts usage.Counts, officialCostUSD float64) (float64, error) {
-	g := a.group(ctx, info.GroupID)
-	live := a.Rate.CNYPerUSD()
-	bill := billing.Cost(a.Catalog, provider, model, counts, g, live)
-	if bill <= 0 {
+// Charge deducts billedCostUSD (already scaled by the per-credential billing
+// rate in proxy.go) from the user's wallet.
+func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provider, model string, counts usage.Counts, billedCostUSD float64) (float64, error) {
+	if billedCostUSD <= 0 {
 		return 0, nil
 	}
 	ref := fmt.Sprintf("token=%d model=%s", info.TokenID, model)
-	if _, err := a.DB.AddBalance(ctx, info.UserID, db.TxKindCharge, -bill, ref, "", true); err != nil {
+	if _, err := a.DB.AddBalance(ctx, info.UserID, db.TxKindCharge, -billedCostUSD, ref, "", true); err != nil {
 		return 0, err
 	}
 	a.DB.TouchUserToken(ctx, info.TokenID)
-	return bill, nil
+	return billedCostUSD, nil
+}
+
+func (a *Adapter) DefaultBillingRate(provider string) float64 {
+	switch provider {
+	case "openai":
+		if a.DefaultCodexBillingRate > 0 {
+			return a.DefaultCodexBillingRate
+		}
+		return 3.0
+	default:
+		if a.DefaultClaudeBillingRate > 0 {
+			return a.DefaultClaudeBillingRate
+		}
+		return 0.5
+	}
 }
 
 func (a *Adapter) CredentialGroup(info server.SaaSTokenInfo) string {
