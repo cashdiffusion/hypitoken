@@ -53,7 +53,15 @@ type Server struct {
 	// account whose request stream contains zero quota probes is
 	// trivially flagged as a third-party tool.
 	sidecar *sidecarMgr
+
+	// saas, when non-nil, layers multi-tenant user-token resolution + balance
+	// billing on top of the legacy clienttoken.Store. nil-safe: when unset,
+	// the proxy behaves exactly like the OSS build.
+	saas SaaSAdapter
 }
+
+// SetSaaS attaches the SaaS multi-tenant adapter. Must be called before Start.
+func (s *Server) SetSaaS(a SaaSAdapter) { s.saas = a }
 
 // New constructs the multi-endpoint server. At least one endpoint must be
 // enabled — otherwise the returned Server has no listeners and Start will
@@ -121,6 +129,18 @@ func (s *Server) Endpoints() []EndpointInfo {
 		out = append(out, EndpointInfo{
 			Name: ep.name, Provider: ep.provider, Addr: ep.http.Addr, Primary: ep.primary,
 		})
+	}
+	return out
+}
+
+// GinEngines returns every per-endpoint gin engine. Used by the SaaS layer
+// to mount /api/v2/* routes on the same listeners as the proxy.
+func (s *Server) GinEngines() []*gin.Engine {
+	out := make([]*gin.Engine, 0, len(s.endpoints))
+	for _, ep := range s.endpoints {
+		if eng, ok := ep.http.Handler.(*gin.Engine); ok {
+			out = append(out, eng)
+		}
 	}
 	return out
 }
@@ -206,7 +226,15 @@ func (s *Server) buildClaudeEngine(adminH *admin.Handler, primary bool) *gin.Eng
 	engine.GET("/status.json", s.clientAuth(), s.handleStatus)
 
 	if primary {
-		adminH.RegisterStatus(engine)
+		// Legacy /status SPA is mounted only when SaaS is off — when SaaS
+		// runs, /status is the new React-based statuspage served via the
+		// SPA fallback in saas/adapter.MountSPA.
+		// Legacy /status SPA is only mounted when SaaS is off — when SaaS
+		// is enabled, /status is the new React-based statuspage served
+		// via the SPA fallback in saas/adapter.MountSPA.
+		if !s.cfg.SaaS.Enabled {
+			adminH.RegisterStatus(engine)
+		}
 		adminH.Register(engine)
 	}
 	return engine
@@ -232,7 +260,12 @@ func (s *Server) buildCodexEngine(adminH *admin.Handler, primary bool) *gin.Engi
 	}
 
 	if primary {
-		adminH.RegisterStatus(engine)
+		// Legacy /status SPA is only mounted when SaaS is off — when SaaS
+		// is enabled, /status is the new React-based statuspage served
+		// via the SPA fallback in saas/adapter.MountSPA.
+		if !s.cfg.SaaS.Enabled {
+			adminH.RegisterStatus(engine)
+		}
 		adminH.Register(engine)
 	}
 	return engine
@@ -260,11 +293,25 @@ func corsMiddleware() gin.HandlerFunc {
 }
 
 // clientAuth matches the incoming Authorization: Bearer or x-api-key against
-// the live client token store (config.yaml tokens + runtime-added tokens).
-// If the store is empty the proxy runs in open mode.
+// the SaaS user-token DB first (when enabled), then the legacy clienttoken
+// store. If both are empty the proxy runs in open mode.
 func (s *Server) clientAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tok := extractClientToken(c.Request)
+		// SaaS path: per-user token in DB.
+		if s.saas != nil && tok != "" {
+			if info, ok := s.saas.Lookup(tok); ok {
+				if info.Disabled {
+					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token or account disabled"})
+					return
+				}
+				c.Set("client_token", tok)
+				c.Set("client_name", info.Name)
+				c.Set("saas_info", info)
+				c.Next()
+				return
+			}
+		}
 		if s.tokens.Empty() {
 			if tok == "" {
 				tok = c.ClientIP()
@@ -287,6 +334,17 @@ func (s *Server) clientAuth() gin.HandlerFunc {
 		c.Set("client_name", name)
 		c.Next()
 	}
+}
+
+// saasInfoFrom returns the SaaS token info attached by clientAuth, or
+// (zero, false) if this request is on a legacy / open token.
+func saasInfoFrom(c *gin.Context) (SaaSTokenInfo, bool) {
+	v, ok := c.Get("saas_info")
+	if !ok {
+		return SaaSTokenInfo{}, false
+	}
+	info, ok := v.(SaaSTokenInfo)
+	return info, ok
 }
 
 func extractClientToken(r *http.Request) string {
@@ -354,8 +412,12 @@ func (s *Server) handleStatus(c *gin.Context) {
 }
 
 // clientMaxConcurrent returns the effective max concurrent requests for this
-// client. Per-token override wins; otherwise the global default applies.
-func (s *Server) clientMaxConcurrent(clientToken string) int {
+// client. SaaS-token override wins, then per-token override, then the global
+// default.
+func (s *Server) clientMaxConcurrent(c *gin.Context, clientToken string) int {
+	if info, ok := saasInfoFrom(c); ok && info.MaxConcurrent > 0 {
+		return info.MaxConcurrent
+	}
 	if _, _, maxConc, _, ok := s.tokens.Lookup(clientToken); ok && maxConc > 0 {
 		return maxConc
 	}
@@ -363,9 +425,10 @@ func (s *Server) clientMaxConcurrent(clientToken string) int {
 }
 
 // clientRPM returns the effective requests-per-minute cap for this client.
-// Per-token override wins; otherwise the global default applies. Returns 0
-// when both are unset (no cap).
-func (s *Server) clientRPM(clientToken string) int {
+func (s *Server) clientRPM(c *gin.Context, clientToken string) int {
+	if info, ok := saasInfoFrom(c); ok && info.RPM > 0 {
+		return info.RPM
+	}
 	if rpm, ok := s.tokens.RPM(clientToken); ok && rpm > 0 {
 		return rpm
 	}

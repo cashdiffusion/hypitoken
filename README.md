@@ -1,212 +1,305 @@
-# CPA-Claude
+# HypiToken
 
-A native Claude (Anthropic) + OpenAI Codex API proxy. Fans out client
-requests across multiple upstream credentials (OAuth + API keys) on
-**two independent HTTP endpoints** — one per provider, shared pool
-infrastructure — with per-user sticky slot allocation, per-credential
-proxies, persistent usage tracking, and automatic API-key fallback.
-Admin panel, client tokens, request log, pricing, and stats are shared
-across providers; credentials are strictly separated per upstream.
+> A multi-tenant LLM API gateway for **Claude** and **Codex** — one binary, real USD wallet, Alipay top-up, status-page health.
 
-> **Codex OAuth validation pending.** The ChatGPT-backend proxy
-> (`/v1/responses` path) is implemented end-to-end — header set, body
-> sanitization, usage extraction, plan-tier model listing — mirroring
-> CLIProxyAPI's upstream implementation. It has **not yet been
-> validated in production with a real ChatGPT Plus/Pro subscription
-> token**; the auth-layer test paths (token exchange, refresh, JWT
-> parsing) are exercised, but full request/response parity against
-> chatgpt.com/backend-api is pending a real-token smoke. If you hit
-> an unexpected 400, please open an issue with the error body.
+[![CI](https://github.com/cashdiffusion/hypitoken/actions/workflows/ci.yml/badge.svg)](https://github.com/cashdiffusion/hypitoken/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/cashdiffusion/hypitoken?display_name=tag)](https://github.com/cashdiffusion/hypitoken/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Credit.** This project is a derivative of
-> [**CLIProxyAPI**](https://github.com/router-for-me/CLIProxyAPI) (MIT).
-> The original supports many AI providers (Gemini, Codex/OpenAI, Qwen,
-> Kimi, iFlow, Antigravity, Vertex, Claude, …) and ships a management
-> UI, TUI, translator layer, and multi-protocol entry points.
-> CPA-Claude keeps the Claude + Codex passthroughs and adds slot-based
-> concurrency, per-credential SOCKS/HTTP proxies, persistent usage
-> tracking, and per-provider endpoint routing. The Anthropic OAuth
-> refresh flow, the Codex OAuth flow + JWT parsing, and the uTLS
-> Chrome transport were borrowed from the upstream project — huge
-> thanks to its authors.
+HypiToken is a self-hostable LLM gateway that fans out client requests across many upstream credentials (Anthropic OAuth + API keys, OpenAI / ChatGPT OAuth + API keys), bills users in real USD via an Alipay-funded wallet, and ships a complete operator console at the same URL — all in a single static Go binary.
+
+It started life as a reverse proxy for personal credential pooling. The commercial SaaS layer adds per-user accounts, payments, pricing groups, and an operator panel — turning one binary into a self-serve API resale platform.
+
+---
+
+## Why
+
+Anthropic and OpenAI subscription credentials are dramatically cheaper per token than pay-as-you-go API access — but a single account can't serve a team. HypiToken lets one operator pool credentials and resell access at a fair, transparent rate, with real-USD wallets billed against an RMB peg the operator controls.
+
+```text
+bill_usd = official_cost × (peg_rmb / live_cny) × group_multiplier
+```
+
+A `$0.10` Claude Sonnet call at the default tier (peg `¥2`, live rate `¥7.20`) bills **`$0.0278`** from the user's wallet — about a quarter of API list price.
+
+---
 
 ## Features
 
-- **Two endpoints, one fleet** — Claude on `:8317` (`/v1/messages`) and
-  Codex on `:8318` (`/v1/chat/completions`, `/v1/responses`). Each can
-  be enabled/disabled independently; the admin panel mounts on
-  whichever is "primary" (Claude by default).
-- **Native Claude passthrough** — no protocol translation for the
-  Anthropic path, pure passthrough to
-  `api.anthropic.com/v1/messages` (SSE streaming preserved).
-- **Slot-based concurrency per OAuth file** — each OAuth credential has a
-  `max_concurrent` cap. A client session that makes a request within the last
-  10 minutes (configurable) occupies one slot. Idle clients release their
-  slot automatically.
-- **Per-credential upstream proxy** — every OAuth file may set its own
-  `proxy_url`, useful when different accounts must egress from different IPs.
-- **Persistent usage tracking** — input/output/cache-read/cache-write token
-  counts per credential survive restarts in `state.json`.
-- **API-key fallback** — when every OAuth credential is saturated, quota-
-  exceeded, or dead, requests fall through to the unlimited API-key pool.
-- **Codex passthrough** — OpenAI-format `/v1/chat/completions` and
-  `/v1/responses` on the Codex endpoint. API-key credentials forward to
-  `api.openai.com`; OAuth (ChatGPT Plus/Pro/Team) credentials forward to
-  `chatgpt.com/backend-api/codex/responses` with the session/account
-  headers the Codex CLI sends. `/v1/models` synthesizes the plan-tier
-  catalog per subscription.
-- **Per-client weekly budgets** — each access token can have a `weekly_usd`
-  cap that applies across **both** providers. Spend is tracked by ISO
-  week and costed with a built-in pricing table covering Claude
-  (Haiku 4.5, Opus 4.6/4.7, Sonnet 4.6) and OpenAI (gpt-5, gpt-5-mini,
-  gpt-5-nano, gpt-5.x codex tiers, gpt-4o/mini) — cache-read and
-  cache-create priced separately. Exceeded → 429 until the next Monday.
-- **Per-request JSONL log** — one line per terminal request (who, which
-  credential, model, tokens, cost, status, duration). Daily-rotated file,
-  default 30-day retention.
-- **uTLS (Chrome)** — bypasses Anthropic's TLS fingerprinting.
-- **Proxy schemes** — `http://`, `https://`, `socks5://`, `socks5h://` all
-  supported, both with and without uTLS.
+### Core proxy
 
-## Install
+- **Two endpoints, one fleet** — Claude on `:8317` (`/v1/messages`), Codex on `:8318` (`/v1/chat/completions`, `/v1/responses`). Each can be enabled independently; per-provider concurrency budgets never share buckets.
+- **Native passthrough** — no protocol translation. Anthropic / OpenAI SDKs and CLIs (`claude`, `codex`) work unchanged.
+- **Sticky sessions** — one client token always lands on the same upstream credential within an active window, preserving prompt cache hits and conversation continuity.
+- **Smart credential rotation** — automatic retries across credentials on 429 / 5xx / quota exceeded; sticky-session break on auth errors; configurable cooldowns; daily reset job for transient API-key failures.
+- **Per-credential proxies** — each OAuth file can specify its own SOCKS/HTTP proxy; uTLS Chrome fingerprint optional.
+- **Request log** — append-only JSONL, daily rotated, with retention.
 
-One-liner (Linux/macOS, amd64/arm64) — installs to `/usr/local/bin`:
+### Multi-tenant SaaS layer
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/wjsoj/CPA-Claude/main/install.sh | bash
-```
+- **Email + password auth** with SMTP-based 6-digit verification, password reset, JWT bearer for `/api/v2/*`. Open-registration toggleable per deployment.
+- **USD wallet** billed on every successful response. Top up via Alipay at the live USD/CNY rate (refreshed hourly from a free public API); mock gateway in dev auto-confirms after 2s.
+- **Per-user API tokens** (`sk-cpa-…`) with daily / monthly USD caps, concurrency limit, and RPM cap.
+- **Pricing groups** — each group sets its own RMB↔USD peg per provider plus a small multiplier. Defaults: Codex `¥0.5 = $1`, Claude `¥2 = $1`.
+- **Status page** — big-banner uptime UI, per-model probes against API-key credentials every 30 minutes.
+- **Operator panel** — users, pricing groups, upstream credentials, payments, manual reconciliation.
+- **Documentation site** — fumadocs-style three-column docs at `/docs`, sourced from plain Markdown files in `internal/admin/web/src/content/docs/`.
 
-Pin a version or change prefix:
+### Production hardening
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/wjsoj/CPA-Claude/main/install.sh \
-  | bash -s -- --version v0.1.0 --prefix ~/.local
-```
+> [!IMPORTANT]
+> Wallet integrity is enforced at every layer. Every notification — async or operator-triggered — funnels through one validator that checks signature, `app_id`, `total_amount`, `trade_status`, order TTL, and pending state. Late or replayed notifications are silently rejected.
 
-Re-run the same command to upgrade.
+- Append-only `wallet_tx` ledger — balance is `SUM(amount)` over a user's transactions; immune to schema rewrites.
+- Per-user create-rate limit (`10/hr`) + max-pending cap (`5`) on `/topup`. Per-email + per-IP rate limits on `/auth/send-code`.
+- Background sweeper marks pending Alipay orders older than 30 min as expired.
+- `alipay.trade.query` reconciliation endpoint to repair lost notifications without touching SQL.
+- SQLite WAL + automatic pre-migration backups (`saas.db.backup-vN-<ts>`); refuses to start an older binary against a newer DB.
 
-From source:
-
-```bash
-go install github.com/wjsoj/CPA-Claude/cmd/server@latest
-# binary will be named "server"; rename to cpa-claude or adjust PATH usage.
-```
+---
 
 ## Quick start
 
+### Build
+
 ```bash
-cp config.example.yaml config.yaml
-# edit config.yaml, populate ./auths/*.json, then:
-cpa-claude -config config.yaml
+git clone https://github.com/cashdiffusion/hypitoken.git
+cd hypitoken
+make build
+# => bin/hypitoken
 ```
 
-## OAuth credential file format
+Requires Go ≥ 1.25 and [Bun](https://bun.sh) for the frontend.
 
-`./auths/<any-name>.json`:
+### Install (binary)
 
-```json
-{
-  "type": "claude",
-  "access_token": "sk-ant-oat01-...",
-  "refresh_token": "sk-ant-ort01-...",
-  "expired": "2026-05-01T12:00:00Z",
-  "email": "alice@example.com",
-  "label": "alice",
-  "proxy_url": "http://10.0.0.1:3128",
-  "max_concurrent": 5,
-  "disabled": false
+```bash
+curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash
+```
+
+The installer downloads the latest release for your platform, puts the binary in `/usr/local/bin`, and writes a systemd unit if available.
+
+### Configure
+
+```bash
+cp config.example.yaml config.yaml
+$EDITOR config.yaml
+./bin/hypitoken -config config.yaml
+```
+
+Out of the box:
+
+- Claude proxy on `:8317` (primary)
+- Codex proxy on `:8318` (disabled — opt in)
+- SaaS mode **off** — behaves exactly like the underlying OSS proxy
+
+Enable the commercial layer:
+
+```yaml
+saas:
+  enabled: true
+  db_path: ./saas.db
+  admin_email: you@example.com
+  admin_password: change-me-now-change-me-now
+  smtp:
+    host: smtp.example.com
+    port: 587
+    username: postmaster
+    password: ${SMTP_PASS}
+    from: noreply@example.com
+    use_tls: true
+  alipay:
+    app_id: ""        # empty = mock gateway (dev auto-confirms in 2s)
+    private_key: "@/etc/cpa/alipay_private.pem"
+    alipay_public_key: "@/etc/cpa/alipay_public.pem"
+    is_production: true
+    notify_url: https://your.host/api/v2/billing/notify
+```
+
+On first start, the admin user is bootstrapped with the configured email + password. After that, change credentials from the panel.
+
+> [!TIP]
+> Read [`config.example.yaml`](config.example.yaml) in full — every field has an inline comment explaining the default.
+
+---
+
+## Architecture
+
+```
+                  ┌─────────────────────────────────────┐
+                  │           HypiToken binary          │
+                  │                                     │
+   /v1/messages   │   ┌──────────────┐                  │
+   /v1/responses  │   │  Proxy core  │ ─────► OAuth + API key pool
+   ─────────────► │   │  (server)    │        ↳ sticky sessions, retries
+                  │   └──────┬───────┘        ↳ usage ledger
+                  │          │                ↳ uTLS / per-cred proxies
+                  │          ▼
+   /api/v2/*      │   ┌──────────────┐
+   /              │   │   SaaS       │
+   ─────────────► │   │   adapter    │ ─────► users, tokens, wallet,
+                  │   │              │        pricing groups, orders,
+                  │   │              │        model health
+                  │   └──────────────┘                  │
+                  │          │                          │
+                  │          ▼                          │
+                  │   ┌──────────────┐                  │
+                  │   │  SQLite WAL  │  saas.db         │
+                  │   │  + backups   │                  │
+                  │   └──────────────┘                  │
+                  └─────────────────────────────────────┘
+                              │
+                              ▼
+                Alipay  ◀ ──  ────  ──▶  Anthropic / OpenAI
+                         signed                upstream
+                         notify
+```
+
+| Component | Where it lives | Notes |
+| --- | --- | --- |
+| Proxy core | `internal/server/`, `internal/auth/`, `internal/usage/`, `internal/pricing/` | Provider-agnostic credential pool; sticky sessions; usage ledger; pricing catalog. |
+| SaaS adapter | `internal/saas/adapter/` | Bridges `server.SaaSAdapter`; routes `/api/v2/*`; mounts SPA shell. |
+| Auth | `internal/saas/auth/` | bcrypt + JWT(HS256); SMTP-based email codes; `(email, IP)` rate limits. |
+| Billing | `internal/saas/billing/` | Wallet, pricing math, exchange-rate fetcher, Alipay gateway, expiry sweeper. |
+| Operator panel | `internal/saas/admin/` | Users, pricing groups, credentials, payments, reconciliation. |
+| Frontend | `internal/admin/web/` | Vite + React + Tailwind v4 + shadcn/ui. Built into `dist/` and embedded. |
+| Docs source | `internal/admin/web/src/content/docs/*.md` | Plain Markdown; rendered with react-markdown + rehype-highlight. |
+
+---
+
+## Client setup
+
+Once a user has a token from `/app/tokens`, point any compatible client at the proxy. Full guides live at `/docs`.
+
+### Claude Code
+
+```bash
+export ANTHROPIC_BASE_URL="https://your.host"
+export ANTHROPIC_API_KEY="sk-cpa-•••"
+claude
+```
+
+### Codex CLI
+
+```bash
+export OPENAI_BASE_URL="https://your.host:8318/v1"
+export OPENAI_API_KEY="sk-cpa-•••"
+codex
+```
+
+### OpenAI SDK / LiteLLM
+
+```python
+client = OpenAI(api_key="sk-cpa-•••", base_url="https://your.host:8318/v1")
+```
+
+---
+
+## Deploying to production
+
+> [!WARNING]
+> The mock Alipay gateway auto-credits orders 2 seconds after creation. **Never deploy with `alipay.app_id` empty** to a public host.
+
+1. **Apply for an Alipay merchant account** at [open.alipay.com](https://open.alipay.com). Generate an RSA2 keypair, upload the public key in the merchant console, and download the Alipay platform public key.
+2. **Configure SMTP** for email verification — SendGrid, Mailgun, Resend, Aliyun Direct Mail all work. Without SMTP, verification codes only print to the server log (`LogMailer`).
+3. **Front with HTTPS** — Alipay's async notify requires a public HTTPS callback at `notify_url`. Use Cloudflare Tunnel, nginx + certbot, or Caddy.
+4. **Whitelist Alipay IPs** if you firewall the notify endpoint. The list is in the merchant console under "开发设置".
+5. **Test with sandbox first** — `alipay.is_production: false` plus the sandbox app credentials before going live.
+
+The release pipeline emits cross-platform binaries via [GoReleaser](https://goreleaser.com) on every `v*` tag.
+
+---
+
+## Operator endpoints
+
+Once logged in as an admin (`role=admin`):
+
+| Path | Action |
+| --- | --- |
+| `/app/admin/users` | List, search, role / group / disabled toggles, manual balance adjust |
+| `/app/admin/groups` | Pricing-group CRUD (peg, multiplier, credential-group filter) |
+| `/app/admin/credentials` | Add API keys, list pool credentials, remove |
+| `/app/admin/payments` | All Alipay orders, status, manual reconcile |
+| `/mgmt-console/` | Legacy operator panel — OAuth uploads, advanced credential editing |
+
+---
+
+## Configuration reference
+
+The full annotated config lives in [`config.example.yaml`](config.example.yaml). Highlights:
+
+| Block | Purpose |
+| --- | --- |
+| `endpoints.claude` / `endpoints.codex` | Per-provider HTTP listeners. |
+| `auth_dir`, `api_keys` | Upstream credential sources (OAuth files + inline API keys). |
+| `pricing` | Per-1M-token rates per (provider, model). |
+| `saas` | Multi-tenant layer — DB path, JWT, SMTP, Alipay, exchange rate, health-check cadence. |
+| `admin_token`, `admin_path` | Legacy panel auth. |
+
+---
+
+## Development
+
+```bash
+# backend only — works without a frontend build
+go build ./...
+go test ./...
+
+# frontend dev server with hot reload (proxies /api → :8317)
+make web-dev
+
+# full release build
+make build
+```
+
+Add new docs by dropping a Markdown file into `internal/admin/web/src/content/docs/`:
+
+```markdown
+---
+slug: my-page
+title: My new page
+group: Reference
+order: 70
+intro: Optional one-liner shown under the title.
+---
+
+## Heading
+
+Body in regular Markdown. Code blocks get syntax highlighting automatically.
+```
+
+`bun run build` then rebuild the Go binary; the new doc shows up in the sidebar.
+
+---
+
+## Database migrations
+
+> [!NOTE]
+> Wallet and order ledgers are append-only. Even when the schema changes substantially, historical balance can always be reconstructed from `SUM(wallet_tx.amount_usd)`.
+
+Each schema delta is a new entry appended to `migrations` in `internal/saas/db/migrations.go`. The migrator:
+
+1. Refuses to start when the binary is older than the persisted schema version.
+2. Backs up the SQLite file to `saas.db.backup-vN-<timestamp>` (with `-wal` / `-shm` siblings) before applying any new migration.
+3. Runs each migration in its own transaction; failure rolls back atomically.
+4. Logs `applying migration vN…` and `migrated vX → vY`.
+
+To add a new column:
+
+```go
+var migrations = []string{
+    `... v1 ...`, // never modify
+    `ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC';
+     UPDATE users SET timezone = 'Asia/Shanghai';`, // backfill
 }
 ```
 
-- `access_token` is auto-refreshed on every request if within 5 minutes of
-  `expired`. The refreshed token (and new `expired`) is written back to the
-  file atomically.
-- `max_concurrent: 0` means unlimited for this OAuth (not usually what you
-  want — set it to match the account's practical parallelism).
+---
 
-## Endpoints
+## Credits
 
-| Method | Path                          | Notes                           |
-| ------ | ----------------------------- | ------------------------------- |
-| POST   | `/v1/messages`                | Streaming (`stream:true`) OK    |
-| POST   | `/v1/messages/count_tokens`   | Pass-through                    |
-| GET    | `/status`                     | Auth pool + usage snapshot      |
-| GET    | `/healthz`                    | Liveness                        |
-| GET    | `/admin/`                     | Web admin panel (if configured) |
+HypiToken is built on top of [CPA-Claude](https://github.com/wjsoj/CPA-Claude), itself a derivative of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT). The Anthropic OAuth refresh, Codex OAuth + JWT parsing, and uTLS Chrome transport were lifted from the upstream — huge thanks to its authors.
 
-## Admin panel
+UI built with [shadcn/ui](https://ui.shadcn.com), [Tailwind v4](https://tailwindcss.com), and the [Bricolage Grotesque](https://fonts.google.com/specimen/Bricolage+Grotesque) + [JetBrains Mono](https://fonts.google.com/specimen/JetBrains+Mono) typeface pairing.
 
-Set `admin_token` in `config.yaml` and open `http://<host>:<port>/admin/`.
-The panel is a single embedded HTML page (Preact + Tailwind via CDN) that
-lets you:
-
-- view every OAuth / API-key credential with live slot usage, quota status,
-  expiry, and accumulated token usage;
-- toggle disabled, edit `max_concurrent` and `proxy_url`, rename labels;
-- force-refresh an OAuth token, clear a quota-exceeded flag;
-- upload a new OAuth JSON file or delete one.
-- **Sign in with Claude** — initiates the Anthropic OAuth flow (PKCE) in
-  a new tab, lets you paste the callback URL back, exchanges the code
-  for tokens, and saves a new credential file. Optional proxy for the
-  token exchange.
-
-API keys are read-only in v1 — edit `config.yaml` and restart to change
-them.
-
-## Request log format
-
-Each line in `logs/requests-YYYY-MM-DD.jsonl`:
-
-```json
-{"ts":"2026-04-14T10:23:45.123Z","client":"alice-laptop",
- "client_token":"sk-cli…yyyy","auth_id":"alice.json","auth_label":"alice",
- "auth_kind":"oauth","model":"claude-sonnet-4-6",
- "input_tokens":1234,"output_tokens":567,
- "cache_read_tokens":100,"cache_create_tokens":50,
- "cost_usd":0.01155,"status":200,"duration_ms":1842,
- "stream":true,"path":"/v1/messages","attempts":1}
-```
-
-- `client` is the `name` from `access_tokens` (or the budget `label` as
-  fallback), empty if neither set.
-- `client_token` is masked (first 6 + last 4 chars).
-- `attempts` > 1 when an initial credential was quota-flagged and the
-  request fell through to another one.
-- One line per terminal outcome (success or final 4xx/5xx). Intermediate
-  retries are not logged as separate entries.
-
-Parse with e.g. `jq -c 'select(.client=="alice-laptop" and .model!="unknown")
-  | [.ts,.model,.cost_usd] | @tsv' logs/requests-*.jsonl`.
-
-## Compatibility with upstream CLIProxyAPI
-
-OAuth JSON files produced by the original
-[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) — both the
-manual `claude setup-token` output and files created by its own login
-flow — drop into `auth_dir` unchanged. Extra keys (`id_token`,
-`last_refresh`, etc.) are preserved on save. The only caveat: files
-imported from upstream have no `max_concurrent`, so they load as
-unlimited (`∞`). Set a cap in the admin panel if you want slot-based
-routing to take effect.
-
-Clients authenticate with `Authorization: Bearer <token>` matching one of the
-`access_tokens` in `config.yaml`. Each distinct token is one "client session"
-and occupies one OAuth slot while active.
-
-## Routing / fallback semantics
-
-On each request for a client token:
-
-1. If that client already has a sticky OAuth assignment and that OAuth is
-   healthy (not disabled, not quota-exceeded), reuse it.
-2. Otherwise pick the healthy OAuth with the fewest active sessions that
-   still has spare `max_concurrent` capacity.
-3. If no OAuth has capacity, pick any usable API key.
-4. If the upstream returns 401/403/429/529, the credential is flagged
-   (quota-exceeded where applicable) and the request is retried on a
-   different credential (up to 4 attempts total).
-
-## License
-
-MIT. See [LICENSE](LICENSE) for the full text and the attribution note to
-[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
+Released under the [MIT License](LICENSE).

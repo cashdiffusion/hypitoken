@@ -2,12 +2,12 @@
 #
 # CPA-Claude installer
 # -----------------------------------------------------------------------------
-# Installs or upgrades the cpa-claude binary from GitHub Releases.
+# Installs or upgrades the hypitoken binary from GitHub Releases.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/wjsoj/CPA-Claude/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/wjsoj/CPA-Claude/main/install.sh | bash -s -- --version v0.1.0
-#   curl -fsSL https://raw.githubusercontent.com/wjsoj/CPA-Claude/main/install.sh | bash -s -- --prefix ~/.local
+#   curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash -s -- --version v0.1.0
+#   curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash -s -- --prefix ~/.local
 #
 # Options:
 #   --version <tag>   Install this exact tag (default: latest release).
@@ -27,8 +27,8 @@ set -euo pipefail
 # ===========================================================================
 # Constants
 # ===========================================================================
-REPO="wjsoj/CPA-Claude"
-BIN_NAME="cpa-claude"
+REPO="cashdiffusion/hypitoken"
+BIN_NAME="hypitoken"
 
 # ===========================================================================
 # Helper functions  (all defined before any calls — order-safe)
@@ -104,7 +104,7 @@ ask() {
   printf '%s' "$reply"
 }
 
-# Write a systemd unit file for cpa-claude.
+# Write a systemd unit file for hypitoken.
 write_unit() {
   local cfg="$1" user="$2" workdir tmp_unit
   workdir="$(getent passwd "$user" | cut -d: -f6)"
@@ -221,18 +221,18 @@ msg "installing $REPO@$TAG -> $BIN_DIR/$BIN_NAME ($OS_TAG/$ARCH_TAG)"
 # one exists). Users re-running the installer as a quick "restart the
 # running service after config changes" shortcut get that behavior for
 # free. Set CPA_FORCE=1 (or pass --force) to bypass and reinstall.
-# --version format: "cpa-claude vX.Y.Z (commit=... built=...)"
+# --version format: "hypitoken vX.Y.Z (commit=... built=...)"
 if [ "${CPA_FORCE:-}" != "1" ] && [ -x "$BIN_DIR/$BIN_NAME" ]; then
   CURRENT_TAG="$("$BIN_DIR/$BIN_NAME" --version 2>/dev/null \
     | awk '{print $2}' | head -n1 || true)"
   if [ -n "$CURRENT_TAG" ] && [ "$CURRENT_TAG" = "$TAG" ]; then
     msg "already at $TAG — skipping download"
     if [ "$OS_TAG" = "linux" ] && command -v systemctl >/dev/null 2>&1 \
-         && [ -f "/etc/systemd/system/cpa-claude.service" ]; then
-      msg "restarting cpa-claude.service"
-      run_privileged systemctl restart cpa-claude.service \
-        || warn "restart failed; check: systemctl status cpa-claude.service"
-      run_privileged systemctl --no-pager --lines=0 status cpa-claude.service \
+         && [ -f "/etc/systemd/system/hypitoken.service" ]; then
+      msg "restarting hypitoken.service"
+      run_privileged systemctl restart hypitoken.service \
+        || warn "restart failed; check: systemctl status hypitoken.service"
+      run_privileged systemctl --no-pager --lines=0 status hypitoken.service \
         || true
     else
       msg "no systemd unit found — nothing to restart"
@@ -243,7 +243,7 @@ fi
 
 # Tag is like "v0.1.0"; GoReleaser archive strips the leading "v".
 TRIMMED="${TAG#v}"
-ASSET="cpa-claude_${TRIMMED}_${OS_TAG}_${ARCH_TAG}.tar.gz"
+ASSET="hypitoken_${TRIMMED}_${OS_TAG}_${ARCH_TAG}.tar.gz"
 URL="$(gh_url "https://github.com/${REPO}/releases/download/${TAG}/${ASSET}")"
 SUM_URL="$(gh_url "https://github.com/${REPO}/releases/download/${TAG}/checksums.txt")"
 
@@ -277,7 +277,7 @@ tar -xzf "$TMP/$ASSET" -C "$TMP"
 [ -f "$TMP/$BIN_NAME" ] || err "extracted archive does not contain $BIN_NAME"
 
 # ---- detect existing systemd unit (for upgrade path) ----
-UNIT_NAME="cpa-claude.service"
+UNIT_NAME="hypitoken.service"
 UNIT_PATH="/etc/systemd/system/${UNIT_NAME}"
 UNIT_EXISTS=0
 UNIT_WAS_ACTIVE=0
@@ -315,7 +315,7 @@ if [ "$UNIT_EXISTS" = "1" ]; then
   fi
 elif [ "$OS_TAG" = "linux" ] && command -v systemctl >/dev/null 2>&1 && [ -r /dev/tty ]; then
   RUN_USER="$(id -un)"
-  DEFAULT_CFG="$HOME/.config/cpa-claude/config.yaml"
+  DEFAULT_CFG="$HOME/.config/hypitoken/config.yaml"
   reply="$(ask "Create systemd service ${UNIT_NAME} running as '${RUN_USER}'? (y/N)" "N")"
   case "$reply" in
     y|Y|yes|YES)
@@ -370,5 +370,5 @@ Next steps:
   2. $BIN_NAME --config config.yaml
 
 Upgrade later by re-running this installer (it overwrites the binary in place;
-if a cpa-claude.service exists and is running, it will be auto-restarted).
+if a hypitoken.service exists and is running, it will be auto-restarted).
 EOF

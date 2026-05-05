@@ -3,12 +3,11 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 
-// Admin panel is mounted under config.admin_path (default /mgmt-console),
-// so use relative asset paths. The Go server serves /dist/* at
-// <admin_path>/assets/* via an explicit route.
+// SaaS SPA mounted at root by the Go server. Use absolute base so asset URLs
+// remain stable across deep links like /app/billing or /pricing.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: "./",
+  base: "/",
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),

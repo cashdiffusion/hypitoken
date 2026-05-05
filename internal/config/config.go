@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/wjsoj/CPA-Claude/internal/pricing"
+	"github.com/wjsoj/CPA-Claude/internal/saas"
 	"gopkg.in/yaml.v3"
 )
 
@@ -111,6 +112,10 @@ type Config struct {
 	// Pricing overrides (optional). Built-in defaults cover claude-haiku-4-5,
 	// claude-opus-4-6, and claude-sonnet-4-6.
 	Pricing pricing.Config `yaml:"pricing"`
+
+	// SaaS multi-tenant layer (commercial mode). Disabled by default; the
+	// proxy behaves exactly like the OSS build when SaaS.Enabled is false.
+	SaaS saas.Config `yaml:"saas"`
 }
 
 func Load(path string) (*Config, error) {
@@ -192,4 +197,5 @@ func applyDefaults(c *Config, path string) {
 		p = "/mgmt-console"
 	}
 	c.AdminPath = p
+	c.SaaS.ApplyDefaults(filepath.Dir(path))
 }

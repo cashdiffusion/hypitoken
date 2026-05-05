@@ -150,3 +150,71 @@ api_keys:
   #     claude-opus-4-6:    "[0.16]稳定喵/claude-opus-4-6"
   #     claude-sonnet-4-6:  "[0.1]高质量喵/claude-sonnet-4-6"
   #     claude-haiku-4-5:   "[aws按量]cf逆/claude-haiku-4-5-20251001"
+
+# ---------------------------------------------------------------------
+# SaaS multi-tenant layer (commercial mode).
+#
+# When enabled, the proxy becomes a self-serve SaaS:
+#   - Per-user accounts (register/login with optional email verification)
+#   - Per-user API tokens with daily/monthly USD caps
+#   - USD wallet billed on every successful response
+#   - CNY top-up via Alipay at the live exchange rate
+#   - Pricing groups with independent Codex / Claude pegs
+#   - Model health page (status-page style) for API-key credentials
+#
+# When `enabled: false`, the proxy behaves exactly like the OSS build
+# and `tokens.json` continues to drive client auth.
+# ---------------------------------------------------------------------
+saas:
+  enabled: false
+  # SQLite file for users, tokens, transactions, alipay orders, etc.
+  # Created on first start. Relative paths resolve against this file's
+  # directory.
+  db_path: ./saas.db
+
+  # JWT signing key. Leave empty and the server generates a 32-byte
+  # random secret on first start, persisted to <db_path>.jwt_secret.
+  jwt_secret: ""
+  # Token TTL — defaults to 24h.
+  jwt_ttl: 24h
+
+  site_name: HypiToken
+  site_url: ""
+
+  # First-run admin bootstrap. Created only when the users table is
+  # empty. After the first start these are ignored — change the
+  # password from the panel.
+  admin_email: admin@example.com
+  admin_password: change-me-now-change-me-now
+
+  # Open registration. Set false to require operator-pre-creation.
+  free_register: true
+
+  # Outbound mail. Empty host = log-only mailer (verification codes
+  # appear in server logs — useful for development).
+  smtp:
+    host: ""
+    port: 587
+    username: ""
+    password: ""
+    from: ""
+    use_tls: true
+
+  # Alipay gateway. Empty app_id = mock gateway: orders auto-confirm
+  # 2 seconds after creation. Useful for local dev without sandbox
+  # credentials.
+  alipay:
+    app_id: ""
+    private_key: ""        # PEM string or @/path/to/file
+    alipay_public_key: ""  # PEM string or @/path/to/file
+    is_production: false
+    notify_url: ""         # public URL for Alipay webhooks
+    return_url: ""         # browser redirect after pay
+
+  # Live USD/CNY rate source. Default is the public fawazahmed0
+  # currency-api (no key, no rate limit). Refreshed every hour.
+  exchange_rate_url: ""
+  fallback_cny_per_usd: 7.2
+
+  # Background API-key health checker cadence.
+  health_check_interval: 30m

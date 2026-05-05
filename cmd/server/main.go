@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -13,11 +14,22 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wjsoj/CPA-Claude/internal/admin"
 	"github.com/wjsoj/CPA-Claude/internal/auth"
 	"github.com/wjsoj/CPA-Claude/internal/clienttoken"
 	"github.com/wjsoj/CPA-Claude/internal/config"
 	"github.com/wjsoj/CPA-Claude/internal/logging"
+	"github.com/wjsoj/CPA-Claude/internal/pricing"
 	"github.com/wjsoj/CPA-Claude/internal/requestlog"
+	"github.com/wjsoj/CPA-Claude/internal/saas"
+	saasadapter "github.com/wjsoj/CPA-Claude/internal/saas/adapter"
+	saasadmin "github.com/wjsoj/CPA-Claude/internal/saas/admin"
+	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
+	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
+	saasdb "github.com/wjsoj/CPA-Claude/internal/saas/db"
+	"github.com/wjsoj/CPA-Claude/internal/saas/health"
+	"github.com/wjsoj/CPA-Claude/internal/saas/mail"
+	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	"github.com/wjsoj/CPA-Claude/internal/server"
 	"github.com/wjsoj/CPA-Claude/internal/usage"
 )
@@ -116,28 +128,112 @@ func main() {
 		return store.Sum5h(authID).WeightedTotal()
 	})
 
-	// Background OAuth refresher: keeps access tokens fresh even when the
-	// credential sees no traffic, so a long quiet period can't leave a token
-	// expired. Single-goroutine — combined with the per-auth refresh mutex
-	// this also prevents the rotating refresh_token from being burned by
-	// concurrent exchanges.
 	refresherCtx, refresherCancel := context.WithCancel(context.Background())
 	go pool.RunRefresher(refresherCtx, time.Minute, 10*time.Minute)
-
-	// Daily 00:00 reset for unhealthy Anthropic API-key credentials.
-	// Consecutive upstream errors auto-promote those creds to a sticky
-	// hard-failure (see doForwardAnthropicAPIKey); without this job the
-	// admin would have to clear them manually after every transient outage.
 	go pool.RunDailyAnthropicAPIKeyReset(refresherCtx)
 
 	tokensPath := filepath.Join(filepath.Dir(cfg.StateFile), "tokens.json")
-	tokens, err := clienttoken.Open(tokensPath)
+	clientTokens, err := clienttoken.Open(tokensPath)
 	if err != nil {
 		log.Fatalf("open client token store: %v", err)
 	}
-	log.Infof("client tokens: %d loaded from %s", len(tokens.List()), tokensPath)
+	log.Infof("client tokens: %d loaded from %s", len(clientTokens.List()), tokensPath)
 
-	s := server.New(cfg, pool, store, reqLog, tokens)
+	s := server.New(cfg, pool, store, reqLog, clientTokens)
+
+	// SaaS layer (multi-tenant). Wires SQLite-backed user/token resolution +
+	// wallet billing on top of the proxy. Disabled by default — when off,
+	// nothing changes from the OSS build.
+	var saasDB *saasdb.DB
+	var saasShutdown []func()
+	if cfg.SaaS.Enabled {
+		log.Infof("SaaS: opening DB at %s", cfg.SaaS.DBPath)
+		if err := cfg.SaaS.EnsureJWTSecret(); err != nil {
+			log.Fatalf("saas jwt secret: %v", err)
+		}
+		saasDB, err = saasdb.Open(cfg.SaaS.DBPath)
+		if err != nil {
+			log.Fatalf("open saas db: %v", err)
+		}
+		bootstrapAdmin(saasDB, cfg.SaaS)
+		bootstrapPricingFromCatalog(cfg.SaaS, saasDB)
+
+		mailer := mail.New(mail.SMTPConfig{
+			Host: cfg.SaaS.SMTP.Host, Port: cfg.SaaS.SMTP.Port,
+			Username: cfg.SaaS.SMTP.Username, Password: cfg.SaaS.SMTP.Password,
+			From: cfg.SaaS.SMTP.From, UseTLS: cfg.SaaS.SMTP.UseTLS,
+		}, cfg.SaaS.SiteName)
+		issuer := saasauth.NewIssuer(cfg.SaaS.JWTSecret, cfg.SaaS.JWTTTL)
+
+		freeReg := true
+		if cfg.SaaS.FreeRegister != nil {
+			freeReg = *cfg.SaaS.FreeRegister
+		}
+		authH := saasauth.NewHandler(saasDB, issuer, mailer, cfg.SaaS.SiteName, freeReg)
+		tokensH := tokens.New(saasDB)
+		rate := billing.NewRate(cfg.SaaS.ExchangeRateURL, cfg.SaaS.FallbackCNYPerUSD)
+		go rate.RunRefresher(refresherCtx, time.Hour)
+
+		var gateway billing.Gateway
+		if strings.TrimSpace(cfg.SaaS.Alipay.AppID) != "" {
+			gw, err := billing.NewAlipayGateway(billing.AlipayParams{
+				AppID:           cfg.SaaS.Alipay.AppID,
+				PrivateKey:      cfg.SaaS.Alipay.PrivateKey,
+				AlipayPublicKey: cfg.SaaS.Alipay.AlipayPublicKey,
+				IsProduction:    cfg.SaaS.Alipay.IsProduction,
+				NotifyURL:       cfg.SaaS.Alipay.NotifyURL,
+			})
+			if err != nil {
+				log.Fatalf("alipay gateway: %v", err)
+			}
+			gateway = gw
+		} else {
+			log.Warn("Alipay not configured (saas.alipay.app_id empty) — using mock gateway (orders auto-confirm after 2s)")
+			gateway = &billing.MockGateway{}
+		}
+		billingH := billing.NewHandler(saasDB, rate, gateway, cfg.SaaS.SiteName)
+		// Background sweeper: marks pending alipay orders older than the
+		// TTL as expired so late notifications can't credit them.
+		go billingH.RunExpirySweeper(refresherCtx)
+		// Admin "Sync from Alipay" hook — calls alipay.trade.query through
+		// the same applyNotification funnel as the async notify path.
+		saasadmin.Reconciler = func(ctx interface{ Done() <-chan struct{} }, out string) (string, error) {
+			c, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			return billingH.ReconcileOrder(c, out)
+		}
+		adminH := saasadmin.New(saasDB)
+		credH := saasadmin.NewCred(pool)
+
+		// Catalog used for pricing computation (same instance as the proxy's
+		// internal billing — the SaaS layer only adds the multiplier on top).
+		catalog := pricing.NewCatalog(cfg.Pricing)
+		adapter := saasadapter.NewAdapter(saasDB, catalog, rate)
+		s.SetSaaS(adapter)
+
+		// Mount /api/v2/* on every gin engine the server hosts. Both Claude
+		// and Codex listeners get the same SaaS routes — operators can hit
+		// either port for management.
+		var spaFS fs.FS
+		if f, ferr := admin.SaaSDistFS(); ferr == nil {
+			spaFS = f
+		}
+		for _, h := range s.GinEngines() {
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer)
+			if spaFS != nil {
+				saasadapter.MountSPA(h, spaFS)
+			}
+		}
+
+		// Model health background checker.
+		hc := health.New(saasDB, pool, nil, cfg.SaaS.HealthCheckInterval)
+		go hc.Run(refresherCtx)
+		saasadmin.HealthRefresher = hc.Refresh
+
+		saasShutdown = append(saasShutdown, func() { _ = saasDB.Close() })
+		log.Info("SaaS: enabled")
+	}
+
 	for _, ep := range s.Endpoints() {
 		primary := ""
 		if ep.Primary {
@@ -146,8 +242,7 @@ func main() {
 		log.Infof("endpoint %s [%s] → %s%s", ep.Name, ep.Provider, ep.Addr, primary)
 	}
 
-	// Graceful shutdown. We block main on the done channel so store.Close()
-	// is guaranteed to finish (final usage flush + fsync) before we exit.
+	// Graceful shutdown.
 	shutdownDone := make(chan struct{})
 	go func() {
 		defer close(shutdownDone)
@@ -163,6 +258,9 @@ func main() {
 		if reqLog != nil {
 			reqLog.Close()
 		}
+		for _, fn := range saasShutdown {
+			fn()
+		}
 	}()
 
 	if err := s.Start(); err != nil {
@@ -170,3 +268,45 @@ func main() {
 	}
 	<-shutdownDone
 }
+
+// bootstrapAdmin creates the configured admin user on first run if the users
+// table is empty. Subsequent starts ignore admin_email/password.
+func bootstrapAdmin(db *saasdb.DB, cfg saas.Config) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	n, err := db.CountUsers(ctx)
+	if err != nil {
+		log.Warnf("saas: count users: %v", err)
+		return
+	}
+	if n > 0 {
+		return
+	}
+	email := strings.TrimSpace(cfg.AdminEmail)
+	pw := strings.TrimSpace(cfg.AdminPassword)
+	if email == "" || pw == "" {
+		log.Warn("saas: no admin user — set saas.admin_email + saas.admin_password to auto-bootstrap one on first start, or register via /api/v2/auth/register")
+		return
+	}
+	hash, err := saasauth.HashPassword(pw)
+	if err != nil {
+		log.Warnf("saas: bootstrap admin hash: %v", err)
+		return
+	}
+	def, err := db.DefaultGroup(ctx)
+	if err != nil {
+		log.Warnf("saas: default group: %v", err)
+		return
+	}
+	u, err := db.CreateUser(ctx, email, hash, saasdb.RoleAdmin, def.ID, true)
+	if err != nil {
+		log.Warnf("saas: bootstrap admin: %v", err)
+		return
+	}
+	log.Infof("saas: bootstrapped admin user id=%d email=%s", u.ID, u.Email)
+}
+
+// bootstrapPricingFromCatalog seeds nothing — the migration creates the
+// default group. This hook exists so future expansions (per-provider rate
+// imports, etc.) have a place to land. Intentionally a no-op for now.
+func bootstrapPricingFromCatalog(_ saas.Config, _ *saasdb.DB) {}
