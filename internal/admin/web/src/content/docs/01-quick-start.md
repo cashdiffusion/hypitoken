@@ -3,34 +3,28 @@ slug: quick-start
 title: Quick start
 group: Getting started
 order: 1
-intro: One unified address fronts both Claude and Codex. Signup → first billed request in under five minutes.
+intro: One unified gateway fronts both Claude and Codex. Account → token → first request in under five minutes.
 ---
 
 ## One address, two providers
 
 | Tool | Base URL |
 | --- | --- |
-| Claude Code (Anthropic) | `https://api.novadiffusion.com` |
+| Claude Code / Anthropic SDK | `https://api.novadiffusion.com` |
 | Codex CLI / OpenAI SDK | `https://api.novadiffusion.com/v1` |
 
-The same API token works for both — billing is per-request, USD wallet,
-priced from the live CNY/USD rate.
+The same API token works for both. Caddy routes `/v1/chat/*`, `/v1/responses*`, and `/v1/models` to the Codex endpoint; everything else goes to Claude.
 
 ## Create an account
 
-Register with email + password. Email verification is optional in dev.
+Register with email + password at `/register`.
 
-## Top up your wallet
+## Issue a token
 
-Open **Billing → Top up**. Pay via Alipay; the wallet is credited at the live
-USD/CNY rate when the order is confirmed.
+Go to **Tokens → New token**. Per-token limits you can set:
 
-## Mint an API token
-
-Go to **Tokens → New token**. Per-token caps you can set:
-
-- Daily USD cap
-- Monthly USD cap
+- Daily spend cap (USD)
+- Monthly spend cap (USD)
 - Concurrency limit
 - RPM cap
 
@@ -47,5 +41,4 @@ curl https://api.novadiffusion.com/v1/messages \
   }'
 ```
 
-> **That's it.** The charge lands in your wallet ledger as a `charge`
-> transaction. Refresh `/app` to see the balance update.
+> **That's it.** The request is routed through the credential pool and the response is returned unchanged.

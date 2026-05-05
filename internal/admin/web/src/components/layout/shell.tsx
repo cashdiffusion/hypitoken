@@ -2,7 +2,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { LogOut, User as UserIcon, Wallet, KeyRound, LayoutDashboard, Activity, Tag, Shield, Home, BookOpen, ExternalLink } from "lucide-react";
+import { LogOut, User as UserIcon, Wallet, KeyRound, LayoutDashboard, Activity, Shield, Home, BookOpen, ExternalLink } from "lucide-react";
 import { fmtUSD } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +17,6 @@ const NAV = [
 const PUBLIC_NAV = [
   { to: "/", label: "Home", icon: Home, external: false },
   { to: "/docs", label: "Documentation", icon: BookOpen, external: false },
-  { to: "/pricing", label: "Pricing", icon: Tag, external: false },
   { to: "/status", label: "System status", icon: Activity, external: false },
 ];
 
@@ -101,12 +100,9 @@ function Header() {
             </span>
             HypiToken
           </Link>
-          {/* Cross-links to the public pages — visible on every authed page so
-              users can always reach the homepage / docs / pricing / status. */}
           <nav className="hidden items-center gap-1 md:flex">
             <Link to="/" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">Home</Link>
             <Link to="/docs" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">Docs</Link>
-            <Link to="/pricing" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">Pricing</Link>
             <Link to="/status" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">Status</Link>
           </nav>
         </div>
@@ -155,7 +151,6 @@ export function PublicHeader() {
         </Link>
         <nav className="hidden items-center gap-1 sm:flex">
           <NavLink to="/" end className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>Home</NavLink>
-          <NavLink to="/pricing" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>Pricing</NavLink>
           <NavLink to="/docs" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>Docs</NavLink>
           <NavLink to="/status" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>Status</NavLink>
         </nav>

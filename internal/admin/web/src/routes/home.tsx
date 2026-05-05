@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import {
-  ArrowRight, Sparkles, Wallet, Activity, ShieldCheck, KeyRound, Zap,
-  Terminal, Globe2, Check, Code2, Boxes, BookOpen, Github
+  ArrowRight, Activity, ShieldCheck, Zap,
+  Terminal, Check, KeyRound, BookOpen, GitBranch,
+  Cpu, Network, Eye, BrainCircuit,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PublicHeader } from "@/components/layout/shell";
@@ -11,33 +12,35 @@ export default function HomePage() {
     <div className="min-h-dvh bg-background text-foreground">
       <PublicHeader />
 
-      {/* Hero — single-column, terminal below as a separate band */}
+      {/* Hero */}
       <section className="relative overflow-hidden border-b border-border">
         <BackgroundMesh />
         <Grid />
         <div className="relative mx-auto max-w-6xl px-4 py-20 text-center md:px-6 md:py-28">
           <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-mono uppercase tracking-wider text-primary backdrop-blur">
-            <Sparkles className="h-3 w-3" /> Pay-as-you-go LLM gateway
+            <Cpu className="h-3 w-3" /> Self-developed LLM gateway middleware
           </span>
-          <h1 className="mx-auto mt-6 max-w-4xl text-balance font-display text-[2.25rem] font-semibold leading-[1.08] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl"
-              style={{ overflowWrap: "break-word" }}>
-            Claude & Codex,{" "}
+          <h1
+            className="mx-auto mt-6 max-w-4xl text-balance font-display text-[2.25rem] font-semibold leading-[1.08] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl"
+            style={{ overflowWrap: "break-word" }}
+          >
+            Intelligent routing for{" "}
             <span
               className="bg-clip-text text-transparent"
               style={{ backgroundImage: "linear-gradient(120deg, var(--color-primary), var(--color-info))" }}
             >
-              priced like RMB.
+              Claude & Codex.
             </span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground md:text-xl">
-            Top up real USD via Alipay. Run any model through one bearer token.
-            Codex billed at <strong className="text-foreground">¥0.5/USD</strong>,
-            Claude at <strong className="text-foreground">¥2/USD</strong> — pegged below market.
+            A purpose-built reverse proxy with credential pool management, sticky sessions,
+            and full Claude Code compatibility — including{" "}
+            <strong className="text-foreground">advisor, extended thinking, and sub-agents</strong>.
           </p>
           <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
             <Button asChild size="lg" className="gap-2 text-base">
               <Link to="/register">
-                Create account <ArrowRight className="h-4 w-4" />
+                Get started <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
             <Button asChild variant="outline" size="lg" className="text-base">
@@ -47,12 +50,11 @@ export default function HomePage() {
             </Button>
           </div>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-success" /> $1 minimum top-up</span>
-            <span className="inline-flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-success" /> No subscription</span>
-            <span className="inline-flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-success" /> SDK-compatible</span>
+            <span className="inline-flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-success" /> Advisor & sub-agent support</span>
+            <span className="inline-flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-success" /> Drop-in SDK compatible</span>
+            <span className="inline-flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-success" /> Per-token access control</span>
           </div>
 
-          {/* Terminal demo — full width below the hero text, framed properly */}
           <div className="relative mx-auto mt-16 max-w-4xl">
             <TerminalDemo />
           </div>
@@ -75,10 +77,10 @@ export default function HomePage() {
       <section className="mx-auto max-w-7xl px-4 py-24 md:px-6">
         <div className="mb-12 max-w-2xl">
           <span className="text-xs font-mono uppercase tracking-wider text-primary">Engineering</span>
-          <h2 className="mt-2 font-display text-4xl font-semibold tracking-tight md:text-5xl">Built for serious load.</h2>
+          <h2 className="mt-2 font-display text-4xl font-semibold tracking-tight md:text-5xl">Built on a self-developed routing core.</h2>
           <p className="mt-3 text-lg text-muted-foreground">
-            One reverse proxy in front of dozens of upstream credentials. Health checks, sticky sessions,
-            per-token caps — no surprises at scale.
+            One gateway in front of a credential pool. Adaptive routing, health monitoring,
+            and session continuity — engineered to be invisible to your clients.
           </p>
         </div>
         <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-2 lg:grid-cols-3">
@@ -94,25 +96,31 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Pricing math callout */}
+      {/* Architecture callout */}
       <section className="relative overflow-hidden border-y border-border bg-card/30">
         <div className="mx-auto max-w-7xl px-4 py-20 md:px-6">
           <div className="grid items-center gap-12 lg:grid-cols-2">
             <div>
-              <span className="text-xs font-mono uppercase tracking-wider text-primary">Math</span>
-              <h2 className="mt-2 font-display text-4xl font-semibold tracking-tight md:text-5xl">A nicer rate, transparently.</h2>
+              <span className="text-xs font-mono uppercase tracking-wider text-primary">Architecture</span>
+              <h2 className="mt-2 font-display text-4xl font-semibold tracking-tight md:text-5xl">Routing that mirrors real CC behaviour.</h2>
               <p className="mt-4 max-w-lg text-lg text-muted-foreground">
-                Each request is billed at the official cost <em>scaled by your tier's RMB peg</em>.
-                No fixed markup, no usage tier surprises — the formula is on every receipt.
+                The gateway maintains a full Claude Code session identity per account — same
+                device fingerprint, consistent session IDs across turns, and all the
+                auxiliary traffic that keeps Claude subscriptions healthy.
               </p>
-              <div className="mt-8 space-y-3">
-                <FormulaLine token="bill_usd" expr="official × (peg_rmb ÷ live_cny) × multiplier" />
-              </div>
+              <ul className="mt-8 space-y-3">
+                {ARCH_POINTS.map((p) => (
+                  <li key={p} className="flex items-start gap-3 text-sm">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+                    <span className="text-foreground/85">{p}</span>
+                  </li>
+                ))}
+              </ul>
               <Button asChild variant="outline" className="mt-8">
-                <Link to="/pricing" className="gap-2">See all pricing tiers <ArrowRight className="h-4 w-4" /></Link>
+                <Link to="/docs/self-host" className="gap-2">See architecture docs <ArrowRight className="h-4 w-4" /></Link>
               </Button>
             </div>
-            <PricingCards />
+            <ArchDiagram />
           </div>
         </div>
       </section>
@@ -141,12 +149,12 @@ export default function HomePage() {
           <div className="rounded-2xl border border-border-strong bg-card p-10 md:p-14">
             <div className="flex flex-col items-start justify-between gap-8 md:flex-row md:items-center">
               <div>
-                <h2 className="font-display text-3xl font-semibold tracking-tight md:text-4xl">Stop paying retail.</h2>
-                <p className="mt-2 max-w-md text-muted-foreground">$1 to start. No card, no contract — just Alipay and a bearer token.</p>
+                <h2 className="font-display text-3xl font-semibold tracking-tight md:text-4xl">Start routing today.</h2>
+                <p className="mt-2 max-w-md text-muted-foreground">Create an account, issue a token, and your entire Claude Code workflow is proxied through the gateway.</p>
               </div>
               <div className="flex gap-3">
                 <Button asChild size="lg" className="gap-2 text-base">
-                  <Link to="/register">Start free <ArrowRight className="h-4 w-4" /></Link>
+                  <Link to="/register">Create account <ArrowRight className="h-4 w-4" /></Link>
                 </Button>
                 <Button asChild size="lg" variant="outline" className="text-base">
                   <Link to="/docs">Read docs</Link>
@@ -166,9 +174,9 @@ export default function HomePage() {
               </span>
               HypiToken
             </Link>
-            <p className="mt-3 max-w-xs text-sm text-muted-foreground">A tenant-multiplexed proxy in front of Anthropic and OpenAI. Pay-as-you-go in real USD via Alipay.</p>
+            <p className="mt-3 max-w-xs text-sm text-muted-foreground">Self-developed LLM gateway middleware for Claude and Codex. Intelligent routing, credential pool management, full Claude Code compatibility.</p>
           </div>
-          <FooterCol title="Product" links={[{ to: "/pricing", label: "Pricing" }, { to: "/status", label: "Status" }, { to: "/docs", label: "Documentation" }]} />
+          <FooterCol title="Product" links={[{ to: "/status", label: "Status" }, { to: "/docs", label: "Documentation" }]} />
           <FooterCol title="Account" links={[{ to: "/register", label: "Sign up" }, { to: "/login", label: "Sign in" }]} />
         </div>
         <div className="border-t border-border">
@@ -230,20 +238,19 @@ function Grid() {
 }
 
 function TerminalDemo() {
-  // Each entry is a logical line. Rendered with proper newlines so the
-  // browser doesn't collapse them into one long scrollbar.
   const lines: Array<{ kind: "cmd" | "out" | "sep"; segs: Array<{ t: string; c?: string }> }> = [
-    { kind: "cmd", segs: [{ t: "$ ", c: "muted" }, { t: "export ", c: "success" }, { t: "ANTHROPIC_BASE_URL=" }, { t: "https://hypi.token", c: "info" }] },
-    { kind: "cmd", segs: [{ t: "$ ", c: "muted" }, { t: "export ", c: "success" }, { t: "ANTHROPIC_API_KEY=" }, { t: "sk-cpa-•••", c: "info" }] },
-    { kind: "cmd", segs: [{ t: "$ ", c: "muted" }, { t: "claude " }, { t: '"refactor this Go file"', c: "warn" }] },
-    { kind: "out", segs: [{ t: "─ thinking ─", c: "muted" }] },
-    { kind: "out", segs: [{ t: "Here's a cleaner split…", c: "dim" }] },
+    { kind: "cmd", segs: [{ t: "$ ", c: "muted" }, { t: "export ", c: "success" }, { t: "ANTHROPIC_BASE_URL=" }, { t: "https://api.novadiffusion.com", c: "info" }] },
+    { kind: "cmd", segs: [{ t: "$ ", c: "muted" }, { t: "export ", c: "success" }, { t: "ANTHROPIC_AUTH_TOKEN=" }, { t: "sk-cpa-•••", c: "info" }] },
+    { kind: "cmd", segs: [{ t: "$ ", c: "muted" }, { t: "claude " }, { t: '"review this PR"', c: "warn" }] },
+    { kind: "out", segs: [{ t: "─ advisor ─────────────────────────", c: "muted" }] },
+    { kind: "out", segs: [{ t: "Routing to  ", c: "muted" }, { t: "claude-sonnet-4-6", c: "info" }, { t: "  [pool: 3 active]", c: "muted" }] },
+    { kind: "out", segs: [{ t: "Session     ", c: "muted" }, { t: "sticky → credential #2", c: "dim" }] },
     { kind: "sep", segs: [] },
-    { kind: "out", segs: [{ t: "─ usage ──────────────────────────", c: "muted" }] },
-    { kind: "out", segs: [{ t: "in     1,842 tok" }] },
-    { kind: "out", segs: [{ t: "out      612 tok" }] },
-    { kind: "out", segs: [{ t: "cost   " }, { t: "$0.0094 ", c: "success" }, { t: "(claude-sonnet-4-6)", c: "muted" }] },
-    { kind: "out", segs: [{ t: "balance: $24.17", c: "muted" }] },
+    { kind: "out", segs: [{ t: "─ response ─────────────────────────", c: "muted" }] },
+    { kind: "out", segs: [{ t: "Here's my analysis of the changes…", c: "dim" }] },
+    { kind: "sep", segs: [] },
+    { kind: "out", segs: [{ t: "in     2,841 tok · out    914 tok", c: "muted" }] },
+    { kind: "out", segs: [{ t: "duration  ", c: "muted" }, { t: "1.24s", c: "success" }, { t: "  (claude-sonnet-4-6)", c: "muted" }] },
   ];
   const cls = (c?: string) =>
     c === "muted" ? "text-muted-foreground"
@@ -260,7 +267,7 @@ function TerminalDemo() {
           <span className="h-2.5 w-2.5 rounded-full bg-destructive/70" />
           <span className="h-2.5 w-2.5 rounded-full bg-warning/70" />
           <span className="h-2.5 w-2.5 rounded-full bg-success/70" />
-          <span className="ml-2 font-mono text-xs text-muted-foreground">claude-cli — wallet $24.18</span>
+          <span className="ml-2 font-mono text-xs text-muted-foreground">claude-code — gateway routing</span>
         </div>
         <div className="overflow-x-auto px-6 py-5 font-mono text-[13px] leading-[1.7] md:text-sm">
           {lines.map((l, i) =>
@@ -280,48 +287,95 @@ function TerminalDemo() {
   );
 }
 
-function FormulaLine({ token, expr }: { token: string; expr: string }) {
+function ArchDiagram() {
+  const nodes = [
+    { label: "Claude Code", sub: "advisor / thinking / sub-agents", color: "text-primary" },
+    { label: "Codex CLI", sub: "openai-compatible", color: "text-info" },
+    { label: "Any SDK", sub: "anthropic / openai / litellm", color: "text-muted-foreground" },
+  ];
+  const creds = ["OAuth credential 1", "OAuth credential 2", "API key fallback"];
   return (
-    <div className="rounded-lg border border-border-strong bg-muted/40 px-5 py-4 font-mono text-sm">
-      <span className="text-primary">{token}</span> <span className="text-muted-foreground">=</span> <span className="text-foreground/85">{expr}</span>
-    </div>
-  );
-}
-
-function PricingCards() {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <PriceCard label="Codex" peg="¥0.5" hint="≈ $0.0069 per $0.10 official" accent />
-      <PriceCard label="Claude" peg="¥2.0" hint="≈ $0.0278 per $0.10 official" />
-    </div>
-  );
-}
-
-function PriceCard({ label, peg, hint, accent }: any) {
-  return (
-    <div className={`rounded-xl border p-6 ${accent ? "border-primary/40 bg-primary/[0.06]" : "border-border bg-card"}`}>
-      <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-muted-foreground">
-        <span>{label}</span>
-        <Code2 className="h-3.5 w-3.5" />
+    <div className="rounded-xl border border-border bg-card p-6 font-mono text-sm">
+      <div className="space-y-2">
+        {nodes.map((n) => (
+          <div key={n.label} className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2.5">
+            <span className={`font-medium ${n.color}`}>{n.label}</span>
+            <span className="text-xs text-muted-foreground">{n.sub}</span>
+          </div>
+        ))}
       </div>
-      <div className="mt-3 font-mono text-4xl font-semibold tabular-nums tracking-tight">{peg}</div>
-      <div className="mt-1 text-xs text-muted-foreground">= $1 wallet</div>
-      <div className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">{hint}</div>
+      <div className="my-4 flex items-center justify-center gap-2 text-muted-foreground">
+        <div className="h-px flex-1 border-t border-dashed border-border-strong" />
+        <span className="text-xs uppercase tracking-wider">gateway routing</span>
+        <div className="h-px flex-1 border-t border-dashed border-border-strong" />
+      </div>
+      <div className="space-y-2">
+        {creds.map((c, i) => (
+          <div key={c} className="flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-2.5">
+            <span className="text-xs font-mono text-success">●</span>
+            <span className="text-foreground/80">{c}</span>
+            {i === 0 && <span className="ml-auto text-xs text-muted-foreground">sticky</span>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
+
+const ARCH_POINTS = [
+  "Per-account device fingerprint anchored to the OAuth credential, not the client token",
+  "Session IDs derived from (account, client, first message) — consistent across turns",
+  "Auxiliary bootstrap traffic emitted on first touch per account to maintain subscription health",
+  "Hard-failure sticky, daily reset job, automatic stealth-ban detection",
+];
 
 const FEATURES = [
-  { title: "Sticky sessions", body: "One token gets the same upstream credential — preserves cache hits and conversation continuity at no extra cost.", icon: Activity },
-  { title: "Per-token caps", body: "Daily and monthly USD limits per API token. Concurrency and RPM controls. No noisy neighbors.", icon: ShieldCheck },
-  { title: "Wallet billing", body: "Real USD wallet, top up via Alipay at the live exchange rate. Charged on every successful response.", icon: Wallet },
-  { title: "Subscription pegs", body: "Codex ¥0.5 = $1, Claude ¥2 = $1 — far below the market rate. Pricing groups customise the multiplier per cohort.", icon: Sparkles },
-  { title: "Live health", body: "Status-page style UI for every upstream model. Automatic credential rotation on failure, daily reset jobs.", icon: Zap },
-  { title: "One bearer token", body: "Drop into Anthropic, OpenAI, or Codex SDKs unchanged. Native passthrough — we never re-shape your request.", icon: KeyRound },
+  {
+    title: "Adaptive routing",
+    body: "Credential pool with fewest-active-sessions scheduling. Automatic failover, cooldown management, and daily reset jobs keep the pool healthy.",
+    icon: Network,
+  },
+  {
+    title: "Sticky sessions",
+    body: "Each client token gets a consistent upstream credential within its active window — preserving cache hits and conversation continuity.",
+    icon: Activity,
+  },
+  {
+    title: "Claude Code native",
+    body: "Full CC fingerprint: advisor mode, extended thinking, sub-agents, MCP tools — every feature works exactly as the official CLI intended.",
+    icon: BrainCircuit,
+  },
+  {
+    title: "Per-token access control",
+    body: "Daily and monthly spend caps, concurrency limits, and RPM controls on each issued token. No noisy-neighbour effects.",
+    icon: ShieldCheck,
+  },
+  {
+    title: "Live health dashboard",
+    body: "Status-page style UI for every upstream credential and model. Automatic rotation on hard failures; per-credential usage gauges.",
+    icon: Eye,
+  },
+  {
+    title: "Dual provider",
+    body: "Claude (Anthropic) and Codex (OpenAI) behind one gateway domain. Route by path — same bearer token, same host.",
+    icon: GitBranch,
+  },
 ];
 
 const STEPS = [
-  { title: "Sign up & top up", body: "$1 minimum via Alipay. The exchange rate is the public live rate, no spread, no fees.", icon: Wallet },
-  { title: "Mint a token", body: "Generate sk-cpa-• tokens per app. Set daily & monthly caps separately on each.", icon: KeyRound },
-  { title: "Point your CLI here", body: "Set ANTHROPIC_BASE_URL or OPENAI_BASE_URL. Run claude / codex normally — billing happens automatically.", icon: Terminal },
+  {
+    title: "Create an account",
+    body: "Register, then add your Anthropic or OpenAI credentials in the admin panel. The pool manager takes it from there.",
+    icon: KeyRound,
+  },
+  {
+    title: "Issue a bearer token",
+    body: "Mint sk-cpa-• tokens per app or team. Set per-token caps: daily spend, concurrency, RPM.",
+    icon: Zap,
+  },
+  {
+    title: "Point your CLI",
+    body: "Set ANTHROPIC_BASE_URL or OPENAI_BASE_URL. Run claude or codex normally — advisor, thinking, sub-agents all work.",
+    icon: Terminal,
+  },
 ];
