@@ -11,23 +11,28 @@ intro: Run HypiToken from source for your own organisation or team.
 - **Go ≥ 1.24**
 - **Bun** (frontend build)
 - *Optional:* SMTP server for email verification
-- *Optional:* Alipay merchant account (mock gateway in dev)
 
 ## Build
 
 ```bash
-git clone https://github.com/wjsoj/CPA-Claude.git
-cd CPA-Claude
+git clone https://github.com/cashdiffusion/hypitoken.git
+cd hypitoken
 make build
 # binary at bin/cpa-claude
 ```
 
 ## Configure
 
-Copy `config.example.yaml` to `config.yaml`. Set `saas.enabled: true` and
-fill in `admin_email` / `admin_password` to bootstrap the first admin user.
+Copy `config.example.yaml` to `config.yaml`. Set `saas.enabled: true` and fill in `admin_email` / `admin_password` to bootstrap the first admin user.
 
 ```yaml
+auth_dir: /var/lib/hypitoken/auths   # credential files live here
+log_dir:  /var/lib/hypitoken/requests
+
+endpoints:
+  claude: { host: 0.0.0.0, port: 8317 }
+  codex:  { host: 0.0.0.0, port: 8318 }
+
 saas:
   enabled: true
   db_path: ./saas.db
@@ -40,12 +45,6 @@ saas:
     password: ${SMTP_PASS}
     from: noreply@example.com
     use_tls: true
-  alipay:
-    app_id: ""        # empty = mock gateway (dev)
-    private_key: "@/etc/cpa/alipay.key"
-    alipay_public_key: "@/etc/cpa/alipay-public.key"
-    is_production: true
-    notify_url: https://your.host/api/v2/billing/notify
 ```
 
 ## Run
@@ -55,9 +54,17 @@ saas:
 # Listening on:
 #   :8317  Claude  (primary, hosts SaaS site at /)
 #   :8318  Codex
-# Legacy admin panel: /mgmt-console
-# SaaS site:          /
 ```
 
-> **Reverse proxy.** Put nginx or Cloudflare Tunnel in front. The Alipay
-> webhook (`/api/v2/billing/notify`) needs to be publicly reachable.
+## Reverse proxy
+
+Put Caddy or nginx in front. Example Caddy config for path-based routing:
+
+```
+api.example.com {
+  handle /v1/chat/* { reverse_proxy localhost:8318 }
+  handle /v1/responses* { reverse_proxy localhost:8318 }
+  handle /v1/models { reverse_proxy localhost:8318 }
+  handle { reverse_proxy localhost:8317 }
+}
+```

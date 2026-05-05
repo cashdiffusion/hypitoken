@@ -5,22 +5,22 @@ group: Reference
 order: 60
 ---
 
-## Can I refund top-ups?
+## Does advisor mode work?
 
-Operator-side: yes, via **Admin → Users → Adjust**. Self-serve refunds are
-not exposed to end users.
+Yes. The gateway maintains a full Claude Code session identity per upstream credential, so advisor, extended thinking, sub-agents, and MCP tool use all work exactly as the official CLI intends.
 
 ## What happens at rate limit?
 
-The proxy retries automatically across upstream credentials. If your
-token's RPM cap fires, the response is `429` with a `Retry-After` header.
+The proxy retries automatically across credentials in the pool. If your token's own RPM or concurrency cap fires, the response is `429` with a `Retry-After` header.
 
 ## Where is my data stored?
 
-Conversation contents pass through the proxy in memory only — they are not
-logged. Wallet ledger, tokens, orders are persisted in SQLite.
+Conversation contents pass through the proxy in memory only — they are not logged. Token metadata, usage stats, and billing ledger are persisted in SQLite.
 
 ## Can I bring my own API key?
 
-Yes — operators add API keys via the admin **Credentials** tab. Add a key
-under any pricing group; users in that group will route through it.
+Yes — add API keys or OAuth credentials via the admin **Credentials** tab. The pool scheduler picks the healthiest credential for each request.
+
+## What is a sticky session?
+
+Each client token gets the same upstream credential for all requests within a 10-minute activity window. This keeps prompt-cache hits intact across conversation turns and maintains session continuity for advisor.

@@ -1,39 +1,34 @@
 ---
 slug: pricing-billing
-title: Pricing & billing
+title: Usage & billing
 group: Reference
 order: 50
-intro: How wallet charges are computed.
+intro: Per-request billing based on official token counts. Transparent and auditable.
 ---
 
-## The formula
+## How charges work
+
+Every successful request is charged based on the official Anthropic / OpenAI token counts reported in the response. The operator sets per-group pricing multipliers; the formula is:
 
 ```text
-bill_usd = official_cost_usd
-         × (peg_rmb_per_usd / live_cny_per_usd)
-         × group_multiplier
+bill_usd = official_cost_usd × group_multiplier
 ```
 
-| field | meaning |
+Default multiplier is `1.0` — you pay exactly the official rate.
+
+## Per-token limits
+
+You can cap each issued token independently:
+
+| Limit | What it controls |
 | --- | --- |
-| `official_cost_usd` | Per-1M-token rates from the pricing catalog. Same as Anthropic / OpenAI's published prices. |
-| `peg_rmb_per_usd` | Per-tier virtual peg. Default Codex `0.5`, Claude `2.0`. |
-| `live_cny_per_usd` | Public exchange rate, refreshed hourly (fallback `¥7.20`). |
-| `group_multiplier` | Per-tier surcharge. Default `1.0`. |
+| Daily cap (USD) | Resets at midnight UTC |
+| Monthly cap (USD) | Resets on the 1st |
+| Concurrency | Max simultaneous requests |
+| RPM | Requests per minute |
 
-## Worked example
+When a cap is reached the gateway returns `429` with a `Retry-After` header.
 
-Claude Sonnet request that officially costs `$0.10` at the default tier:
+## Request log
 
-```text
-bill = 0.10 × (2.0 / 7.2) × 1.0
-     = 0.10 × 0.2778
-     = $0.0278
-```
-
-The same request on Codex at peg `0.5`:
-
-```text
-bill = 0.10 × (0.5 / 7.2) × 1.0
-     = $0.0069
-```
+Every request is logged with timestamp, model, token counts, cost, status, and duration. Accessible in the admin panel under **Requests**.

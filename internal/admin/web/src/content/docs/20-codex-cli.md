@@ -16,17 +16,14 @@ npm install -g @openai/codex
 codex --version
 ```
 
-## Point it at HypiToken
+## Point it at the gateway
 
 ```bash
 export OPENAI_BASE_URL="https://api.novadiffusion.com/v1"
 export OPENAI_API_KEY="sk-cpa-••••••••••••••••••••••••••••••••"
 ```
 
-> **Same key, same host.** Claude Code and Codex share the gateway domain
-> and your API token. Caddy routes `/v1/chat/*`, `/v1/responses*`, and
-> `/v1/models` to the OpenAI-compatible endpoint; everything else
-> (`/v1/messages`) goes to Claude.
+> **Same key, same host.** Claude Code and Codex share the gateway domain and your API token. Caddy routes `/v1/chat/*`, `/v1/responses*`, and `/v1/models` to the OpenAI-compatible endpoint; everything else (`/v1/messages`) goes to Claude.
 
 ## Run it
 
@@ -35,11 +32,9 @@ export OPENAI_API_KEY="sk-cpa-••••••••••••••••�
 codex
 
 # one-shot
-codex --model gpt-5.3-codex "explain this stack trace"
+codex "explain this stack trace"
 ```
 
 ## Direct API
 
-The endpoint speaks both `/v1/chat/completions` and OpenAI's newer
-`/v1/responses`. POST the OpenAI request shape, get the OpenAI response
-shape — your existing tooling works unchanged.
+The endpoint speaks both `/v1/chat/completions` and OpenAI's newer `/v1/responses`. POST the OpenAI request shape, get the OpenAI response shape — your existing tooling works unchanged.
