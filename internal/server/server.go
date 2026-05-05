@@ -58,7 +58,16 @@ type Server struct {
 	// billing on top of the legacy clienttoken.Store. nil-safe: when unset,
 	// the proxy behaves exactly like the OSS build.
 	saas SaaSAdapter
+
+	// adminH is the legacy /mgmt-console handler. Stored so the SaaS layer
+	// can borrow its requests-log + Anthropic-usage handlers under the
+	// /api/v2/admin/* path with SaaS-side auth.
+	adminH *admin.Handler
 }
+
+// LegacyAdmin returns the legacy admin handler so main.go can wire its
+// requests-log + anthropic-usage endpoints under the SaaS admin group.
+func (s *Server) LegacyAdmin() *admin.Handler { return s.adminH }
 
 // SetSaaS attaches the SaaS multi-tenant adapter. Must be called before Start.
 func (s *Server) SetSaaS(a SaaSAdapter) { s.saas = a }
@@ -79,6 +88,7 @@ func New(cfg *config.Config, pool *auth.Pool, store *usage.Store, reqLog *reques
 
 	primary := pickPrimary(cfg)
 	adminH := admin.New(cfg, pool, store, cat, tokens)
+	s.adminH = adminH
 
 	if cfg.Endpoints.Claude.IsEnabled() {
 		eng := s.buildClaudeEngine(adminH, primary == "claude")

@@ -3,12 +3,22 @@ slug: quick-start
 title: Quick start
 group: Getting started
 order: 1
-intro: From signup to first billed request in under five minutes.
+intro: One unified address fronts both Claude and Codex. Signup → first billed request in under five minutes.
 ---
+
+## One address, two providers
+
+| Tool | Base URL |
+| --- | --- |
+| Claude Code (Anthropic) | `https://api.novadiffusion.com` |
+| Codex CLI / OpenAI SDK | `https://api.novadiffusion.com/v1` |
+
+The same API token works for both — billing is per-request, USD wallet,
+priced from the live CNY/USD rate.
 
 ## Create an account
 
-Register with email + password. SMTP verification is optional in dev.
+Register with email + password. Email verification is optional in dev.
 
 ## Top up your wallet
 
@@ -17,7 +27,7 @@ USD/CNY rate when the order is confirmed.
 
 ## Mint an API token
 
-Go to the **Tokens** page and click **New token**. Per-token caps you can set:
+Go to **Tokens → New token**. Per-token caps you can set:
 
 - Daily USD cap
 - Monthly USD cap
@@ -27,7 +37,7 @@ Go to the **Tokens** page and click **New token**. Per-token caps you can set:
 ## First call
 
 ```bash
-curl https://your.host/v1/messages \
+curl https://api.novadiffusion.com/v1/messages \
   -H "Authorization: Bearer sk-cpa-•••" \
   -H "Content-Type: application/json" \
   -d '{
@@ -37,5 +47,5 @@ curl https://your.host/v1/messages \
   }'
 ```
 
-> **That's it.** The bill lands in your wallet ledger as a `charge`
-> transaction. Refresh `/app` to see your balance update.
+> **That's it.** The charge lands in your wallet ledger as a `charge`
+> transaction. Refresh `/app` to see the balance update.

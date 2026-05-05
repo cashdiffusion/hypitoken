@@ -3,16 +3,13 @@ slug: codex-cli
 title: Codex CLI setup
 group: Clients
 order: 20
-intro: OpenAI's Codex CLI works against the /v1/chat/completions and /v1/responses endpoints.
+intro: OpenAI's Codex CLI runs against the unified gateway via `/v1`.
 ---
 
 ## Install Codex CLI
 
 ```bash
-# Codex CLI lives on the OpenAI tap
-brew install openai/tap/codex
-
-# or via npm
+# macOS / Linux
 npm install -g @openai/codex
 
 # verify
@@ -21,13 +18,15 @@ codex --version
 
 ## Point it at HypiToken
 
-Codex listens on a separate port (`8318` by default) so per-provider
-concurrency and budgets don't share buckets.
-
 ```bash
-export OPENAI_BASE_URL="https://your.host:8318/v1"
-export OPENAI_API_KEY="sk-cpa-••••••••••••••••••••••••••••••••••••••••••••••••"
+export OPENAI_BASE_URL="https://api.novadiffusion.com/v1"
+export OPENAI_API_KEY="sk-cpa-••••••••••••••••••••••••••••••••"
 ```
+
+> **Same key, same host.** Claude Code and Codex share the gateway domain
+> and your API token. Caddy routes `/v1/chat/*`, `/v1/responses*`, and
+> `/v1/models` to the OpenAI-compatible endpoint; everything else
+> (`/v1/messages`) goes to Claude.
 
 ## Run it
 
@@ -39,7 +38,8 @@ codex
 codex --model gpt-5.3-codex "explain this stack trace"
 ```
 
-## Native /v1/responses
+## Direct API
 
-If you're integrating directly, the Codex endpoint also serves OpenAI's
-newer `/v1/responses` path natively. POST the same OpenAI request shape.
+The endpoint speaks both `/v1/chat/completions` and OpenAI's newer
+`/v1/responses`. POST the OpenAI request shape, get the OpenAI response
+shape — your existing tooling works unchanged.

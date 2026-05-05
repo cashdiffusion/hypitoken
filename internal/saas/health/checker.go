@@ -39,7 +39,7 @@ type ModelTarget struct {
 // DefaultTargets returns a sensible probe set.
 func DefaultTargets() []ModelTarget {
 	return []ModelTarget{
-		{Provider: auth.ProviderAnthropic, Model: "claude-haiku-4-5"},
+		{Provider: auth.ProviderAnthropic, Model: "claude-haiku-4-5-20251001"},
 		{Provider: auth.ProviderAnthropic, Model: "claude-sonnet-4-6"},
 		{Provider: auth.ProviderOpenAI, Model: "gpt-5.3-codex"},
 	}
@@ -124,10 +124,22 @@ func (c *Checker) probe(ctx context.Context, a *auth.Auth, m ModelTarget) (statu
 
 	switch auth.NormalizeProvider(a.Provider) {
 	case auth.ProviderAnthropic:
+		// Some Anthropic resellers gate by request shape — they only honour
+		// the canonical Claude Code request (streaming + a system block).
+		// Probe with the same shape: stream:true, a tiny system prompt, and
+		// max_tokens=1. We only need the first SSE event to confirm success.
 		body := map[string]any{
 			"model":      m.Model,
 			"max_tokens": 1,
-			"messages":   []any{map[string]any{"role": "user", "content": "ping"}},
+			"stream":     true,
+			"system": []any{map[string]any{
+				"type": "text",
+				"text": "You are Claude Code, Anthropic's official CLI for Claude.",
+			}},
+			"messages": []any{map[string]any{
+				"role":    "user",
+				"content": []any{map[string]any{"type": "text", "text": "ping"}},
+			}},
 		}
 		buf, _ := json.Marshal(body)
 		base := strings.TrimRight(a.Snapshot().BaseURL, "/")
@@ -136,18 +148,33 @@ func (c *Checker) probe(ctx context.Context, a *auth.Auth, m ModelTarget) (statu
 		}
 		req, _ := http.NewRequestWithContext(cliCtx, http.MethodPost, base+"/v1/messages", bytes.NewReader(buf))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
 		req.Header.Set("x-api-key", a.AccessToken)
 		req.Header.Set("anthropic-version", "2023-06-01")
+		req.Header.Set("anthropic-beta", "claude-code-20250219,prompt-caching-2024-07-31")
 		resp, err := cli.Do(req)
 		if err != nil {
 			return "fail", err.Error()
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode < 400 {
-			return "ok", ""
+		if resp.StatusCode >= 400 {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 400))
+			return "fail", fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 		}
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 400))
-		return "fail", fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		// 2xx with SSE: read just enough to confirm a real event arrived.
+		// An "error" event in the stream still means upstream is reachable
+		// but rejected the request (model gate, account exhausted, etc).
+		head := make([]byte, 4096)
+		n, _ := io.ReadFull(io.LimitReader(resp.Body, int64(len(head))), head)
+		s := string(head[:n])
+		if strings.Contains(s, "event: error") || strings.Contains(s, `"type":"error"`) {
+			snippet := strings.TrimSpace(s)
+			if len(snippet) > 200 {
+				snippet = snippet[:200] + "…"
+			}
+			return "fail", "stream error: " + snippet
+		}
+		return "ok", ""
 	case auth.ProviderOpenAI:
 		body := map[string]any{
 			"model":      m.Model,
