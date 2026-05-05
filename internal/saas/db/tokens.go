@@ -1,0 +1,152 @@
+package db
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"errors"
+	"math/big"
+	"time"
+)
+
+type UserToken struct {
+	ID             int64
+	UserID         int64
+	Token          string
+	Name           string
+	DailyUSDCap    float64
+	MonthlyUSDCap  float64
+	MaxConcurrent  int
+	RPM            int
+	Disabled       bool
+	LastUsedAt     time.Time
+	CreatedAt      time.Time
+}
+
+const tokenCols = `id, user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at`
+
+func scanToken(row interface{ Scan(...any) error }) (*UserToken, error) {
+	var t UserToken
+	var disabled int
+	var lastUsed, created int64
+	if err := row.Scan(&t.ID, &t.UserID, &t.Token, &t.Name, &t.DailyUSDCap, &t.MonthlyUSDCap, &t.MaxConcurrent, &t.RPM, &disabled, &lastUsed, &created); err != nil {
+		return nil, err
+	}
+	t.Disabled = disabled != 0
+	if lastUsed > 0 {
+		t.LastUsedAt = time.Unix(lastUsed, 0)
+	}
+	t.CreatedAt = time.Unix(created, 0)
+	return &t, nil
+}
+
+type TokenParams struct {
+	Name           string
+	DailyUSDCap    float64
+	MonthlyUSDCap  float64
+	MaxConcurrent  int
+	RPM            int
+}
+
+func (db *DB) CreateUserToken(ctx context.Context, userID int64, p TokenParams) (*UserToken, error) {
+	tok, err := GenerateToken()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().Unix()
+	res, err := db.ExecContext(ctx, `INSERT INTO user_tokens
+		(user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`,
+		userID, tok, p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, now)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return db.GetUserToken(ctx, id)
+}
+
+func (db *DB) GetUserToken(ctx context.Context, id int64) (*UserToken, error) {
+	row := db.QueryRowContext(ctx, `SELECT `+tokenCols+` FROM user_tokens WHERE id = ?`, id)
+	t, err := scanToken(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return t, err
+}
+
+func (db *DB) GetUserTokenByValue(ctx context.Context, tok string) (*UserToken, error) {
+	row := db.QueryRowContext(ctx, `SELECT `+tokenCols+` FROM user_tokens WHERE token = ?`, tok)
+	t, err := scanToken(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return t, err
+}
+
+func (db *DB) ListUserTokens(ctx context.Context, userID int64) ([]*UserToken, error) {
+	rows, err := db.QueryContext(ctx, `SELECT `+tokenCols+` FROM user_tokens WHERE user_id = ? ORDER BY id DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*UserToken
+	for rows.Next() {
+		t, err := scanToken(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (db *DB) UpdateUserToken(ctx context.Context, id int64, p TokenParams, disabled *bool) error {
+	if disabled != nil {
+		d := 0
+		if *disabled {
+			d = 1
+		}
+		_, err := db.ExecContext(ctx, `UPDATE user_tokens SET name=?, daily_usd_cap=?, monthly_usd_cap=?, max_concurrent=?, rpm=?, disabled=? WHERE id=?`,
+			p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, d, id)
+		return err
+	}
+	_, err := db.ExecContext(ctx, `UPDATE user_tokens SET name=?, daily_usd_cap=?, monthly_usd_cap=?, max_concurrent=?, rpm=? WHERE id=?`,
+		p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, id)
+	return err
+}
+
+func (db *DB) DeleteUserToken(ctx context.Context, id int64) error {
+	_, err := db.ExecContext(ctx, `DELETE FROM user_tokens WHERE id = ?`, id)
+	return err
+}
+
+func (db *DB) RotateUserToken(ctx context.Context, id int64) (*UserToken, error) {
+	tok, err := GenerateToken()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE user_tokens SET token = ? WHERE id = ?`, tok, id); err != nil {
+		return nil, err
+	}
+	return db.GetUserToken(ctx, id)
+}
+
+func (db *DB) TouchUserToken(ctx context.Context, id int64) {
+	_, _ = db.ExecContext(ctx, `UPDATE user_tokens SET last_used_at = ? WHERE id = ?`, time.Now().Unix(), id)
+}
+
+// GenerateToken returns a fresh token string of form "sk-cpa-<48 chars>".
+func GenerateToken() (string, error) {
+	const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	const n = 48
+	max := big.NewInt(int64(len(alpha)))
+	b := make([]byte, n)
+	for i := 0; i < n; i++ {
+		v, err := rand.Int(rand.Reader, max)
+		if err != nil {
+			return "", err
+		}
+		b[i] = alpha[v.Int64()]
+	}
+	return "sk-cpa-" + string(b), nil
+}

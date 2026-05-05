@@ -1,19 +1,32 @@
-const TOKEN_KEY = "cpa.admin.token";
-export const getToken = (): string => localStorage.getItem(TOKEN_KEY) || "";
-export const setToken = (t: string): void => {
+// SaaS API client. JWT-based; token persisted in localStorage.
+
+const TOKEN_KEY = "hypi.jwt";
+const USER_KEY = "hypi.user";
+
+export const getJWT = (): string => localStorage.getItem(TOKEN_KEY) || "";
+export const setJWT = (t: string): void => {
   if (t) localStorage.setItem(TOKEN_KEY, t);
   else localStorage.removeItem(TOKEN_KEY);
 };
 
-// Derive the mount prefix from window.location so the SPA works at any
-// admin_path the operator picked (e.g. /mgmt-console, /mngt-ctrl).
-// In Vite dev mode the SPA is served at / but the proxy forwards
-// /mgmt-console/api; we detect that and hardcode the dev prefix.
-export const ADMIN_BASE: string = (() => {
-  const p = window.location.pathname || "/";
-  if (import.meta.env.DEV) return "/mgmt-console";
-  return p.replace(/\/(assets(\/.*)?|app(\/.*)?)?\/?$/, "") || "";
-})();
+export const getCachedUser = () => {
+  const raw = localStorage.getItem(USER_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+export const setCachedUser = (u: any): void => {
+  if (u) localStorage.setItem(USER_KEY, JSON.stringify(u));
+  else localStorage.removeItem(USER_KEY);
+};
+
+export const logout = () => {
+  setJWT("");
+  setCachedUser(null);
+};
 
 export class ApiError extends Error {
   status: number;
@@ -23,18 +36,16 @@ export class ApiError extends Error {
   }
 }
 
+const BASE = "/api/v2";
+
 export async function api<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
-  const token = getToken();
-  let p = path;
-  if (p.startsWith("/admin/")) p = ADMIN_BASE + p.slice("/admin".length);
-  const res = await fetch(p, {
-    ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Admin-Token": token,
-      ...(opts.headers || {}),
-    },
-  });
+  const token = getJWT();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((opts.headers as Record<string, string>) || {}),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(BASE + path, { ...opts, headers });
   const text = await res.text();
   let data: any = null;
   try {
@@ -43,7 +54,15 @@ export async function api<T = any>(path: string, opts: RequestInit = {}): Promis
     data = { raw: text };
   }
   if (!res.ok) {
-    throw new ApiError((data && data.error) || `HTTP ${res.status}`, res.status);
+    const msg = (data && data.error) || `HTTP ${res.status}`;
+    throw new ApiError(msg, res.status);
   }
   return data as T;
 }
+
+export const apiGet = <T = any>(p: string) => api<T>(p, { method: "GET" });
+export const apiPost = <T = any>(p: string, body?: any) =>
+  api<T>(p, { method: "POST", body: body == null ? undefined : JSON.stringify(body) });
+export const apiPatch = <T = any>(p: string, body?: any) =>
+  api<T>(p, { method: "PATCH", body: body == null ? undefined : JSON.stringify(body) });
+export const apiDelete = <T = any>(p: string) => api<T>(p, { method: "DELETE" });

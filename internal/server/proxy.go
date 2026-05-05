@@ -80,30 +80,48 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		model = "unknown"
 	}
 
-	// Weekly-budget pre-check.
-	_, weeklyLimit, _, clientGroup, tokOK := s.tokens.Lookup(clientToken)
-	if tokOK && weeklyLimit > 0 {
-		spent := s.usage.WeeklyCostUSD(clientToken)
-		if spent >= weeklyLimit {
-			c.Header("Retry-After", "604800")
-			c.AbortWithStatusJSON(429, gin.H{
-				"error":     "weekly budget exceeded",
-				"spent_usd": spent,
-				"limit_usd": weeklyLimit,
-				"week":      s.usage.CurrentWeekKey(),
-			})
+	// SaaS path: balance + per-token caps pre-check; credential group from user's
+	// pricing group. Legacy weekly-budget logic still applies to non-SaaS tokens.
+	saasInfo, saasOK := saasInfoFrom(c)
+	var clientGroup string
+	if saasOK && s.saas != nil {
+		clientGroup = s.saas.CredentialGroup(saasInfo)
+		if pre := s.saas.PreCheck(c.Request.Context(), saasInfo); pre != nil {
+			c.AbortWithStatusJSON(pre.Status, pre.Body)
 			s.emitLog(requestlog.Record{
-				Client:      clientName,
-				ClientToken: maskClientToken(clientToken),
-				Provider:    provider,
-				Model:       model,
-				Stream:      peek.Stream,
-				Path:        path,
-				Status:      429,
-				DurationMs:  time.Since(start).Milliseconds(),
-				Error:       "weekly budget exceeded",
+				Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider, Model: model,
+				Stream: peek.Stream, Path: path, Status: pre.Status,
+				DurationMs: time.Since(start).Milliseconds(), Error: "saas pre-check rejected",
 			})
 			return
+		}
+	} else {
+		var weeklyLimit float64
+		var tokOK bool
+		_, weeklyLimit, _, clientGroup, tokOK = s.tokens.Lookup(clientToken)
+		if tokOK && weeklyLimit > 0 {
+			spent := s.usage.WeeklyCostUSD(clientToken)
+			if spent >= weeklyLimit {
+				c.Header("Retry-After", "604800")
+				c.AbortWithStatusJSON(429, gin.H{
+					"error":     "weekly budget exceeded",
+					"spent_usd": spent,
+					"limit_usd": weeklyLimit,
+					"week":      s.usage.CurrentWeekKey(),
+				})
+				s.emitLog(requestlog.Record{
+					Client:      clientName,
+					ClientToken: maskClientToken(clientToken),
+					Provider:    provider,
+					Model:       model,
+					Stream:      peek.Stream,
+					Path:        path,
+					Status:      429,
+					DurationMs:  time.Since(start).Milliseconds(),
+					Error:       "weekly budget exceeded",
+				})
+				return
+			}
 		}
 	}
 
@@ -130,7 +148,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	// share one cap. Checked before the concurrency gate so a burst of
 	// 429s doesn't briefly occupy slots.
 	rpmKey := auth.NormalizeProvider(provider) + "|" + clientToken
-	if limit := s.clientRPM(clientToken); limit > 0 {
+	if limit := s.clientRPM(c, clientToken); limit > 0 {
 		if ok, retry := s.rpm.allow(rpmKey, limit); !ok {
 			c.Header("Retry-After", strconv.Itoa(retry))
 			c.AbortWithStatusJSON(429, gin.H{
@@ -154,7 +172,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	}
 
 	// Concurrency limit per client token.
-	maxConc := s.clientMaxConcurrent(clientToken)
+	maxConc := s.clientMaxConcurrent(c, clientToken)
 	if maxConc > 0 {
 		// Scope the counter per provider so Claude and Codex share a token
 		// but not a concurrency bucket — matches the per-provider session
@@ -538,6 +556,16 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 			clientCounts.Add(sc)
 		}
 		s.usage.RecordClient(clientToken, clientName, clientCounts, costUSD+advisorCost)
+		// SaaS billing: deduct from user wallet (if applicable). Note we
+		// charge against `counts` (the main request) — advisor sub-call
+		// charging would double-bill since advisorCost already shows up
+		// in the main path; the SaaS layer can revisit this if/when we
+		// expose advisor as a separately-priced product.
+		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
+			if _, err := s.saas.Charge(c.Request.Context(), info, auth.NormalizeProvider(a.Provider), model, counts, costUSD); err != nil {
+				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
+			}
+		}
 	}
 	s.emitLog(requestlog.Record{
 		Client:      clientName,

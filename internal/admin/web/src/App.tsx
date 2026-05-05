@@ -1,22 +1,59 @@
-import { useState, useEffect } from "react";
-import { api, getToken, setToken, ApiError } from "@/lib/api";
-import { Login } from "@/components/login";
-import { Dashboard } from "@/components/dashboard";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { Toaster } from "sonner";
+import { AuthProvider } from "@/hooks/use-auth";
+import { RequireAdmin, RequireAuth } from "@/components/require-auth";
+import { AppShell } from "@/components/layout/shell";
+import HomePage from "@/routes/home";
+import LoginPage from "@/routes/login";
+import RegisterPage from "@/routes/register";
+import DashboardPage from "@/routes/dashboard";
+import TokensPage from "@/routes/tokens";
+import BillingPage from "@/routes/billing";
+import PricingPage from "@/routes/pricing";
+import StatusPage from "@/routes/status";
+import AdminPage from "@/routes/admin";
+import DocsLayout, { DocsIndex } from "@/routes/docs";
 
-export function App() {
-  const [authed, setAuthed] = useState(!!getToken());
-  useEffect(() => {
-    if (!authed) return;
-    api("/admin/api/summary").catch((x) => {
-      if (x instanceof ApiError && x.status === 401) {
-        setToken("");
-        setAuthed(false);
-      }
-    });
-  }, [authed]);
-  return authed ? (
-    <Dashboard onLogout={() => setAuthed(false)} />
-  ) : (
-    <Login onOk={() => setAuthed(true)} />
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* public */}
+          <Route path="/" element={<HomePage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/status" element={<StatusPage />} />
+          <Route path="/docs" element={<DocsIndex />} />
+          <Route path="/docs/:slug" element={<DocsLayout />} />
+
+          {/* authed */}
+          <Route
+            path="/app"
+            element={
+              <RequireAuth>
+                <AppShell />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<DashboardPage />} />
+            <Route path="tokens" element={<TokensPage />} />
+            <Route path="billing" element={<BillingPage />} />
+            <Route
+              path="admin/*"
+              element={
+                <RequireAdmin>
+                  <AdminPage />
+                </RequireAdmin>
+              }
+            />
+          </Route>
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+      <Toaster position="top-right" richColors closeButton />
+    </AuthProvider>
   );
 }

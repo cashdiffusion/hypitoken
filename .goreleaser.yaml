@@ -1,15 +1,15 @@
 version: 2
 
-project_name: cpa-claude
+project_name: hypitoken
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: cpa-claude
+  - id: hypitoken
     main: ./cmd/server
-    binary: cpa-claude
+    binary: hypitoken
     env:
       - CGO_ENABLED=0
     goos:
@@ -68,8 +68,8 @@ changelog:
 
 release:
   github:
-    owner: wjsoj
-    name: CPA-Claude
+    owner: cashdiffusion
+    name: hypitoken
   draft: false
   prerelease: auto
   mode: replace
@@ -77,11 +77,11 @@ release:
     ## Install
 
     ```bash
-    curl -fsSL https://raw.githubusercontent.com/wjsoj/CPA-Claude/main/install.sh | bash
+    curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash
     ```
 
     Or pin a version:
 
     ```bash
-    curl -fsSL https://raw.githubusercontent.com/wjsoj/CPA-Claude/main/install.sh | bash -s -- --version {{ .Tag }}
+    curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash -s -- --version {{ .Tag }}
     ```

@@ -42,6 +42,10 @@ import (
 //go:embed all:web/dist
 var webFS embed.FS
 
+// SaaSDistFS exposes the embedded web/dist tree to the SaaS adapter so it can
+// serve the new SPA at the root path without re-embedding the same files.
+func SaaSDistFS() (fs.FS, error) { return fs.Sub(webFS, "web/dist") }
+
 type Handler struct {
 	cfg     *config.Config
 	pool    *auth.Pool
