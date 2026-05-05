@@ -299,19 +299,46 @@ function CredentialsTab() {
   const [openKey, setOpenKey] = useState(false);
   const [openOAuth, setOpenOAuth] = useState<null | "anthropic" | "openai">(null);
   const [usageFor, setUsageFor] = useState<{ id: string; label: string } | null>(null);
+  const [providerTab, setProviderTab] = useState<"anthropic" | "openai">("anthropic");
   const reload = async () => {
     const r = await apiGet<any>("/admin/credentials");
     setCreds(r.credentials || []);
   };
   useEffect(() => { reload(); }, []);
 
+  const claudeCreds = creds.filter((c) => c.provider === "anthropic");
+  const codexCreds = creds.filter((c) => c.provider === "openai");
+  const visible = providerTab === "anthropic" ? claudeCreds : codexCreds;
+
   return (
     <div className="space-y-4">
+      {/* Provider tabs */}
+      <div className="flex gap-1 border-b border-border">
+        {(["anthropic", "openai"] as const).map((p) => {
+          const count = p === "anthropic" ? claudeCreds.length : codexCreds.length;
+          return (
+            <button
+              key={p}
+              onClick={() => setProviderTab(p)}
+              className={cn(
+                "inline-flex items-center gap-2 border-b-2 px-4 py-2 text-sm transition-colors",
+                providerTab === p
+                  ? "border-primary font-medium text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {p === "anthropic" ? "Claude (Anthropic)" : "Codex (OpenAI)"}
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-mono">{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <CardTitle>Upstream credentials</CardTitle>
+              <CardTitle>{providerTab === "anthropic" ? "Claude credentials" : "Codex credentials"}</CardTitle>
               <CardDescription>OAuth + API-key credentials in the live pool.</CardDescription>
             </div>
             <div className="flex gap-2 flex-wrap justify-end">
@@ -322,7 +349,7 @@ function CredentialsTab() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {creds.length === 0 ? (
+          {visible.length === 0 ? (
             <div className="p-12 text-center text-sm text-muted-foreground">No credentials loaded.</div>
           ) : (
             <Table>
@@ -330,25 +357,25 @@ function CredentialsTab() {
                 <TableRow>
                   <TableHead>Label</TableHead>
                   <TableHead>Kind</TableHead>
-                  <TableHead>Provider</TableHead>
                   <TableHead>Group</TableHead>
                   <TableHead className="text-right">Active</TableHead>
+                  <TableHead>Billing rate</TableHead>
                   <TableHead>Expires</TableHead>
                   <TableHead>Health</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {creds.map((c) => (
+                {visible.map((c) => (
                   <TableRow key={c.id} className={c.disabled ? "opacity-50" : ""}>
                     <TableCell>
                       <div className="font-medium">{c.label}</div>
                       <code className="text-xs text-muted-foreground">{c.id}</code>
                     </TableCell>
                     <TableCell><span className="rounded border border-border bg-muted px-2 py-0.5 text-xs font-mono uppercase">{c.kind}</span></TableCell>
-                    <TableCell className="capitalize">{c.provider}</TableCell>
                     <TableCell className="font-mono text-xs">{c.group || "—"}</TableCell>
                     <TableCell className="font-mono tabular-nums text-right">{c.active_clients}</TableCell>
+                    <TableCell><BillingRateCell cred={c} onUpdated={reload} /></TableCell>
                     <TableCell className="font-mono text-xs"><Expiry at={c.expires_at} /></TableCell>
                     <TableCell><HealthPill cred={c} /></TableCell>
                     <TableCell className="text-right">
@@ -386,6 +413,48 @@ function CredentialsTab() {
         authLabel={usageFor?.label || ""}
         onClose={() => setUsageFor(null)}
       />
+    </div>
+  );
+}
+
+function BillingRateCell({ cred, onUpdated }: { cred: any; onUpdated: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(String(cred.billing_rate || ""));
+
+  const save = async () => {
+    const rate = parseFloat(val);
+    if (isNaN(rate) || rate < 0) { toast.error("Invalid rate"); return; }
+    await apiPatch(`/admin/credentials/${encodeURIComponent(cred.id)}/billing-rate`, { rate });
+    toast.success("Billing rate updated");
+    setEditing(false);
+    onUpdated();
+  };
+
+  if (!editing) {
+    return (
+      <button
+        className="flex items-center gap-1 font-mono text-xs hover:underline"
+        onClick={() => { setVal(String(cred.billing_rate || "")); setEditing(true); }}
+        title="Click to edit billing rate (1r = X USD)"
+      >
+        {cred.billing_rate > 0 ? `1r = $${cred.billing_rate}` : <span className="text-muted-foreground">default</span>}
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <span className="text-xs text-muted-foreground">1r=$</span>
+      <Input
+        className="h-6 w-20 px-1 py-0 font-mono text-xs"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+        autoFocus
+        placeholder="0 = default"
+      />
+      <Button size="sm" className="h-6 px-2 text-xs" onClick={save}>✓</Button>
+      <Button size="sm" variant="ghost" className="h-6 px-1 text-xs" onClick={() => setEditing(false)}>✕</Button>
     </div>
   );
 }
