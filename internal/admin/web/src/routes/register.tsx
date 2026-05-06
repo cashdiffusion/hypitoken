@@ -48,21 +48,6 @@ export default function RegisterPage() {
     }
   };
 
-  const skip = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      const r = await apiPost<any>("/auth/register", { email, password });
-      signIn(r.token, r.user);
-      toast.success("Account created (email verification skipped).");
-      nav("/app");
-    } catch (e: any) {
-      toast.error(e.message || "Registration failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   if (step === "verify") {
     return (
       <AuthLayout title="Verify email" sub={`We sent a 6-digit code to ${email}.`}>
@@ -72,7 +57,7 @@ export default function RegisterPage() {
             <Input id="code" inputMode="numeric" pattern="[0-9]*" maxLength={6} required value={code} onChange={(e) => setCode(e.target.value)} className="font-mono text-lg tracking-widest text-center" />
           </div>
           <Button type="submit" className="w-full" disabled={busy}>{busy ? "Verifying…" : "Verify & create account"}</Button>
-          <Button type="button" variant="ghost" className="w-full" onClick={skip}>Skip verification</Button>
+          <Button type="button" variant="ghost" className="w-full" onClick={() => setStep("start")}>Back</Button>
         </form>
       </AuthLayout>
     );
@@ -91,7 +76,6 @@ export default function RegisterPage() {
           <p className="text-xs text-muted-foreground">Min 8 characters.</p>
         </div>
         <Button type="submit" className="w-full" disabled={busy}>{busy ? "Sending code…" : "Send verification code"}</Button>
-        <Button type="button" variant="ghost" className="w-full" disabled={busy} onClick={skip}>Continue without verification</Button>
         <div className="text-center text-sm text-muted-foreground">
           Already have an account? <Link to="/login" className="text-primary underline-offset-4 hover:underline">Sign in</Link>
         </div>

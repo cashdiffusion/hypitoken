@@ -2,7 +2,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { LogOut, User as UserIcon, Wallet, KeyRound, LayoutDashboard, Activity, Shield, Home, BookOpen, ExternalLink, Tag, Terminal, Receipt } from "lucide-react";
+import { LogOut, User as UserIcon, Wallet, KeyRound, LayoutDashboard, Shield, Terminal, Receipt } from "lucide-react";
 import { fmtUSD } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
@@ -12,15 +12,6 @@ const NAV = [
   { to: "/app/billing", label: "Billing", icon: Wallet },
   { to: "/app/logs", label: "Logs", icon: Receipt },
   { to: "/app/console", label: "Console", icon: Terminal },
-];
-
-// Public-site links surfaced inside the authed shell so users can always
-// jump back to the marketing / docs / status pages without logging out.
-const PUBLIC_NAV = [
-  { to: "/", label: "Home", icon: Home, external: false },
-  { to: "/pricing", label: "Pricing", icon: Tag, external: false },
-  { to: "/docs", label: "Documentation", icon: BookOpen, external: false },
-  { to: "/status", label: "System status", icon: Activity, external: false },
 ];
 
 export function AppShell() {
@@ -68,18 +59,6 @@ export function AppShell() {
                 </NavLink>
               </>
             )}
-            <div className="mt-6 mb-1 px-3 text-xs uppercase tracking-wider text-muted-foreground">Public</div>
-            {PUBLIC_NAV.map((n) => (
-              <Link
-                key={n.to}
-                to={n.to}
-                className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <n.icon className="h-4 w-4" />
-                {n.label}
-                <ExternalLink className="ml-auto h-3 w-3 opacity-50" />
-              </Link>
-            ))}
           </nav>
         </aside>
         <main className="min-w-0 flex-1">
