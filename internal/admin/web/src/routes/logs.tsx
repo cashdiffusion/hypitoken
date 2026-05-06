@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Receipt, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -89,6 +90,7 @@ function statusClass(s: number): string {
 }
 
 export default function LogsPage() {
+  const { t } = useTranslation();
   const [data, setData] = useState<QueryResult | null>(null);
   const [offset, setOffset] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -121,13 +123,9 @@ export default function LogsPage() {
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="font-display text-3xl font-semibold tracking-tight">
-            <Receipt className="inline-block h-7 w-7 align-[-3px] text-primary" /> Billing log
+            <Receipt className="inline-block h-7 w-7 align-[-3px] text-primary" /> {t("logs.title")}
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground max-w-2xl">
-            Every request charged to your account, broken down by token type, official catalog rate,
-            and the group multiplier that scaled it. Each row is the exact dollar amount deducted
-            from your wallet.
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground max-w-2xl">{t("logs.sub")}</p>
         </div>
         <Button
           variant="outline"
@@ -136,18 +134,17 @@ export default function LogsPage() {
           className="gap-2"
         >
           <RefreshCw className={cn("h-4 w-4", busy && "animate-spin")} />
-          Refresh
+          {t("common.refresh")}
         </Button>
       </header>
 
-      {/* Summary tiles — totals across the current filter window */}
       {sum && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <SumTile label="Requests" value={sum.count.toLocaleString()} />
-          <SumTile label="Σ in (tok)" value={fmtTokens(sum.input_tokens)} />
-          <SumTile label="Σ out (tok)" value={fmtTokens(sum.output_tokens)} />
-          <SumTile label="Cache read (tok)" value={fmtTokens(sum.cache_read_tokens)} />
-          <SumTile label="Total billed" value={fmtUSD(sum.cost_usd)} accent />
+          <SumTile label={t("logs.summary.requests")} value={sum.count.toLocaleString()} />
+          <SumTile label={t("logs.summary.sumIn")} value={fmtTokens(sum.input_tokens)} />
+          <SumTile label={t("logs.summary.sumOut")} value={fmtTokens(sum.output_tokens)} />
+          <SumTile label={t("logs.summary.cacheRead")} value={fmtTokens(sum.cache_read_tokens)} />
+          <SumTile label={t("logs.summary.totalBilled")} value={fmtUSD(sum.cost_usd)} accent />
         </div>
       )}
 
@@ -162,24 +159,21 @@ export default function LogsPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/30 text-xs text-muted-foreground uppercase tracking-wider">
               <tr>
-                <th className="px-3 py-2.5 text-left font-medium">Time</th>
-                <th className="px-3 py-2.5 text-left font-medium">Model</th>
-                <th className="px-3 py-2.5 text-right font-medium">Input</th>
-                <th className="px-3 py-2.5 text-right font-medium">Output</th>
-                <th className="px-3 py-2.5 text-right font-medium">Cache R/W</th>
-                <th className="px-3 py-2.5 text-right font-medium">×</th>
-                <th className="px-3 py-2.5 text-right font-medium">Charged</th>
-                <th className="px-3 py-2.5 text-right font-medium">Status</th>
-                <th className="px-3 py-2.5 text-right font-medium">Latency</th>
+                <th className="px-3 py-2.5 text-left font-medium">{t("logs.columns.time")}</th>
+                <th className="px-3 py-2.5 text-left font-medium">{t("logs.columns.model")}</th>
+                <th className="px-3 py-2.5 text-right font-medium">{t("logs.columns.input")}</th>
+                <th className="px-3 py-2.5 text-right font-medium">{t("logs.columns.output")}</th>
+                <th className="px-3 py-2.5 text-right font-medium">{t("logs.columns.cacheRW")}</th>
+                <th className="px-3 py-2.5 text-right font-medium">{t("logs.columns.mult")}</th>
+                <th className="px-3 py-2.5 text-right font-medium">{t("logs.columns.charged")}</th>
+                <th className="px-3 py-2.5 text-right font-medium">{t("logs.columns.status")}</th>
+                <th className="px-3 py-2.5 text-right font-medium">{t("logs.columns.latency")}</th>
               </tr>
             </thead>
             <tbody>
               {entries.length === 0 && !busy && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-12 text-center text-muted-foreground">
-                    No requests billed yet. Spin up an API call against /v1/messages or
-                    /v1/chat/completions and the charge will appear here.
-                  </td>
+                  <td colSpan={9} className="px-3 py-12 text-center text-muted-foreground">{t("logs.none")}</td>
                 </tr>
               )}
               {entries.map((e, i) => (
@@ -223,8 +217,8 @@ export default function LogsPage() {
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
-          Showing {entries.length} of {data?.summary.count.toLocaleString() || 0} matching records
-          {data ? ` · scanned ${data.scanned.toLocaleString()} log lines` : ""}
+          {t("logs.showing", { shown: entries.length, total: data?.summary.count.toLocaleString() || 0 })}
+          {data ? t("logs.scanned", { n: data.scanned.toLocaleString() }) : ""}
         </span>
         <div className="flex gap-2">
           <Button
@@ -237,7 +231,7 @@ export default function LogsPage() {
               reload(next);
             }}
           >
-            ← Newer
+            {t("logs.newer")}
           </Button>
           <Button
             variant="outline"
@@ -249,7 +243,7 @@ export default function LogsPage() {
               reload(next);
             }}
           >
-            Older →
+            {t("logs.older")}
           </Button>
         </div>
       </div>
@@ -287,6 +281,7 @@ function SumTile({ label, value, accent }: { label: string; value: string; accen
 // the catalog lookup hit the global default and the model name isn't a
 // known prefix).
 function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: PriceCard }) {
+  const { t } = useTranslation();
   if (!priceCard) {
     return <span>{fmtUSD(entry.cost_usd)}</span>;
   }
@@ -322,72 +317,35 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
           sideOffset={8}
           className="max-w-md w-[22rem] p-0 bg-popover text-popover-foreground border border-border-strong shadow-2xl rounded-lg overflow-hidden"
         >
-          {/* Header */}
           <div className="bg-muted/50 px-4 py-2.5 border-b border-border">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-              How this charge was calculated
-            </div>
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t("logs.popup.header")}</div>
             <div className="font-mono text-xs text-foreground mt-0.5 truncate">{entry.model}</div>
           </div>
 
-          {/* Formula breakdown */}
           <div className="px-4 py-3 space-y-2 text-xs font-mono">
-            <FormulaRow
-              label="Input"
-              tokens={entry.input_tokens}
-              ratePer1M={priceCard.input_per_1m}
-              subtotal={inUSD}
-            />
-            <FormulaRow
-              label="Output"
-              tokens={entry.output_tokens}
-              ratePer1M={priceCard.output_per_1m}
-              subtotal={outUSD}
-            />
-            <FormulaRow
-              label="Cache read"
-              tokens={entry.cache_read_tokens}
-              ratePer1M={priceCard.cache_read_per_1m}
-              subtotal={crUSD}
-              dim
-            />
-            <FormulaRow
-              label="Cache write"
-              tokens={entry.cache_create_tokens}
-              ratePer1M={priceCard.cache_create_per_1m}
-              subtotal={cwUSD}
-              dim
-            />
+            <FormulaRow label={t("logs.popup.input")} tokens={entry.input_tokens} ratePer1M={priceCard.input_per_1m} subtotal={inUSD} />
+            <FormulaRow label={t("logs.popup.output")} tokens={entry.output_tokens} ratePer1M={priceCard.output_per_1m} subtotal={outUSD} />
+            <FormulaRow label={t("logs.popup.cacheR")} tokens={entry.cache_read_tokens} ratePer1M={priceCard.cache_read_per_1m} subtotal={crUSD} dim />
+            <FormulaRow label={t("logs.popup.cacheW")} tokens={entry.cache_create_tokens} ratePer1M={priceCard.cache_create_per_1m} subtotal={cwUSD} dim />
 
-            {/* Official subtotal */}
             <div className="pt-2 mt-2 border-t border-dashed border-border flex items-baseline justify-between">
-              <span className="text-muted-foreground text-[10px] uppercase tracking-wider">
-                Official @ catalog
-              </span>
+              <span className="text-muted-foreground text-[10px] uppercase tracking-wider">{t("logs.popup.official")}</span>
               <span className="tabular-nums">${officialUSD.toFixed(6)}</span>
             </div>
 
-            {/* Multiplier */}
             <div className="flex items-baseline justify-between">
-              <span className="text-muted-foreground text-[10px] uppercase tracking-wider">
-                × Group multiplier
-              </span>
+              <span className="text-muted-foreground text-[10px] uppercase tracking-wider">{t("logs.popup.multiplier")}</span>
               <span className="tabular-nums">{mult.toFixed(2)}×</span>
             </div>
 
-            {/* Final */}
             <div className="pt-2 mt-2 border-t border-border flex items-baseline justify-between bg-primary/[0.06] -mx-4 px-4 py-2 -mb-3">
-              <span className="text-foreground font-semibold text-[11px] uppercase tracking-wider">
-                You paid
-              </span>
-              <span className="tabular-nums text-foreground font-semibold text-sm">
-                {fmtUSD(entry.cost_usd)}
-              </span>
+              <span className="text-foreground font-semibold text-[11px] uppercase tracking-wider">{t("logs.popup.youPaid")}</span>
+              <span className="tabular-nums text-foreground font-semibold text-sm">{fmtUSD(entry.cost_usd)}</span>
             </div>
 
             {drift && (
               <div className="text-amber-500 text-[10px] pt-2">
-                ⚠ recomputed ${computed.toFixed(6)} ≠ stored {fmtUSD(entry.cost_usd)} — pricing drift
+                {t("logs.popup.drift", { recomputed: "$" + computed.toFixed(6), stored: fmtUSD(entry.cost_usd) })}
               </div>
             )}
           </div>

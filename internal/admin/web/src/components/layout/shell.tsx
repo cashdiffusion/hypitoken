@@ -1,29 +1,33 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
 import { LogOut, User as UserIcon, Wallet, KeyRound, LayoutDashboard, Shield, Terminal, Receipt } from "lucide-react";
 import { fmtUSD } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
-const NAV = [
-  { to: "/app", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/app/tokens", label: "Tokens", icon: KeyRound },
-  { to: "/app/billing", label: "Billing", icon: Wallet },
-  { to: "/app/logs", label: "Logs", icon: Receipt },
-  { to: "/app/console", label: "Console", icon: Terminal },
+// NAV_ITEMS is keyed by i18n string id rather than the literal label —
+// resolved at render time so language switching reflows the sidebar.
+const NAV_ITEMS = [
+  { to: "/app", labelKey: "nav.dashboard", icon: LayoutDashboard, end: true },
+  { to: "/app/tokens", labelKey: "nav.tokens", icon: KeyRound },
+  { to: "/app/billing", labelKey: "nav.billing", icon: Wallet },
+  { to: "/app/logs", labelKey: "nav.logs", icon: Receipt },
+  { to: "/app/console", labelKey: "nav.console", icon: Terminal },
 ];
 
 export function AppShell() {
-  const { user, signOut } = useAuth();
-  const nav = useNavigate();
+  const { user } = useAuth();
+  const { t } = useTranslation();
   return (
     <div className="min-h-dvh bg-background text-foreground">
       <Header />
       <div className="mx-auto flex max-w-7xl gap-6 px-4 py-6 md:px-6 lg:py-10">
         <aside className="hidden w-56 flex-shrink-0 lg:block">
           <nav className="sticky top-24 flex flex-col gap-1">
-            {NAV.map((n) => (
+            {NAV_ITEMS.map((n) => (
               <NavLink
                 key={n.to}
                 to={n.to}
@@ -38,12 +42,12 @@ export function AppShell() {
                 }
               >
                 <n.icon className="h-4 w-4" />
-                {n.label}
+                {t(n.labelKey)}
               </NavLink>
             ))}
             {user?.role === "admin" && (
               <>
-                <div className="mt-6 mb-1 px-3 text-xs uppercase tracking-wider text-muted-foreground">Operator</div>
+                <div className="mt-6 mb-1 px-3 text-xs uppercase tracking-wider text-muted-foreground">{t("nav.operator")}</div>
                 <NavLink
                   to="/app/admin"
                   className={({ isActive }) =>
@@ -55,7 +59,7 @@ export function AppShell() {
                     )
                   }
                 >
-                  <Shield className="h-4 w-4" /> Admin
+                  <Shield className="h-4 w-4" /> {t("nav.admin")}
                 </NavLink>
               </>
             )}
@@ -72,6 +76,7 @@ export function AppShell() {
 function Header() {
   const { user, signOut } = useAuth();
   const nav = useNavigate();
+  const { t } = useTranslation();
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
@@ -83,19 +88,20 @@ function Header() {
             HypiToken
           </Link>
           <nav className="hidden items-center gap-1 md:flex">
-            <Link to="/" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">Home</Link>
-            <Link to="/pricing" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">Pricing</Link>
-            <Link to="/docs" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">Docs</Link>
-            <Link to="/status" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">Status</Link>
+            <Link to="/" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">{t("nav.home")}</Link>
+            <Link to="/pricing" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">{t("nav.pricing")}</Link>
+            <Link to="/docs" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">{t("nav.docs")}</Link>
+            <Link to="/status" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">{t("nav.status")}</Link>
           </nav>
         </div>
         <div className="flex items-center gap-2">
           {user && (
             <div className="hidden items-center gap-3 rounded-md border border-border-strong bg-card px-3 py-1.5 sm:flex">
-              <span className="text-xs uppercase text-muted-foreground tracking-wider">Balance</span>
+              <span className="text-xs uppercase text-muted-foreground tracking-wider">{t("common.balance")}</span>
               <span className="font-mono text-sm font-semibold tabular-nums">{fmtUSD(user.balance_usd)}</span>
             </div>
           )}
+          <LanguageToggle />
           <ThemeToggle />
           {user ? (
             <Button
@@ -108,11 +114,11 @@ function Header() {
               className="gap-1.5"
             >
               <LogOut className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Sign out</span>
+              <span className="hidden sm:inline">{t("nav.signOut")}</span>
             </Button>
           ) : (
             <Button size="sm" onClick={() => nav("/login")}>
-              <UserIcon className="h-3.5 w-3.5 mr-1.5" /> Sign in
+              <UserIcon className="h-3.5 w-3.5 mr-1.5" /> {t("nav.signIn")}
             </Button>
           )}
         </div>
@@ -123,6 +129,7 @@ function Header() {
 
 export function PublicHeader() {
   const { user } = useAuth();
+  const { t } = useTranslation();
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
@@ -133,24 +140,25 @@ export function PublicHeader() {
           HypiToken
         </Link>
         <nav className="hidden items-center gap-1 sm:flex">
-          <NavLink to="/" end className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>Home</NavLink>
-          <NavLink to="/pricing" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>Pricing</NavLink>
-          <NavLink to="/docs" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>Docs</NavLink>
-          <NavLink to="/status" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>Status</NavLink>
+          <NavLink to="/" end className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>{t("nav.home")}</NavLink>
+          <NavLink to="/pricing" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>{t("nav.pricing")}</NavLink>
+          <NavLink to="/docs" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>{t("nav.docs")}</NavLink>
+          <NavLink to="/status" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>{t("nav.status")}</NavLink>
         </nav>
         <div className="flex items-center gap-2">
+          <LanguageToggle />
           <ThemeToggle />
           {user ? (
             <Button asChild size="sm">
-              <Link to="/app">Open dashboard →</Link>
+              <Link to="/app">{t("nav.dashboard")} →</Link>
             </Button>
           ) : (
             <>
               <Button asChild variant="ghost" size="sm">
-                <Link to="/login">Sign in</Link>
+                <Link to="/login">{t("nav.signIn")}</Link>
               </Button>
               <Button asChild size="sm">
-                <Link to="/register">Get started</Link>
+                <Link to="/register">{t("nav.signUp")}</Link>
               </Button>
             </>
           )}

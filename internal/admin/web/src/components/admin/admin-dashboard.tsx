@@ -18,6 +18,7 @@ import {
   UserPlus,
   RefreshCw,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -79,6 +80,7 @@ interface DashboardResp {
 }
 
 export function AdminDashboard() {
+  const { t } = useTranslation();
   const [data, setData] = useState<DashboardResp | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -105,7 +107,7 @@ export function AdminDashboard() {
   if (!data && !err) {
     return (
       <div className="rounded-xl border border-border p-8 text-center text-muted-foreground text-sm">
-        Loading admin snapshot…
+        {t("admin.dashboard.loading")}
       </div>
     );
   }
@@ -135,22 +137,21 @@ export function AdminDashboard() {
                 <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-75 animate-ping" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
               </span>
-              Admin command center
+              {t("admin.dashboard.eyebrow")}
             </div>
             <h1 className="font-display text-4xl lg:text-5xl font-semibold tracking-tight">
-              Money <span className="text-muted-foreground/70">moves</span>
+              {t("admin.dashboard.titlePart1")} <span className="text-muted-foreground/70">{t("admin.dashboard.titlePart2")}</span>
             </h1>
             <p className="mt-2 text-muted-foreground max-w-xl text-sm lg:text-base">
-              Revenue, growth and outstanding balances at a glance — the operator's
-              ledger view, refreshed every 30 seconds.
+              {t("admin.dashboard.sub")}
             </p>
           </div>
           <div className="flex items-baseline gap-1">
             <span className="font-mono tabular-nums text-5xl lg:text-6xl font-semibold tracking-tight text-primary">
               {fmtUSD(realized)}
             </span>
-            <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground ml-2">
-              realized<br />revenue
+            <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground ml-2 whitespace-pre-line">
+              {t("admin.dashboard.realizedRevenue")}
             </span>
           </div>
         </div>
@@ -160,29 +161,29 @@ export function AdminDashboard() {
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <KpiTile
           icon={<DollarSign className="h-4 w-4" />}
-          label="Topups lifetime"
+          label={t("admin.dashboard.kpi.topupsLifetime")}
           value={fmtUSD(data.revenue.topups_lifetime)}
-          sub={`+${fmtUSD(data.revenue.topups_30d)} last 30d · ${fmtUSD(data.revenue.topups_7d)} last 7d`}
+          sub={t("admin.dashboard.kpi.topupsSub", { m30: fmtUSD(data.revenue.topups_30d), m7: fmtUSD(data.revenue.topups_7d) })}
           accent="primary"
         />
         <KpiTile
           icon={<TrendingUp className="h-4 w-4" />}
-          label="Charges lifetime"
+          label={t("admin.dashboard.kpi.chargesLifetime")}
           value={fmtUSD(data.revenue.charges_lifetime)}
-          sub={`${fmtUSD(data.revenue.charges_30d)} last 30d · ${fmtUSD(data.revenue.charges_7d)} last 7d`}
+          sub={t("admin.dashboard.kpi.chargesSub", { m30: fmtUSD(data.revenue.charges_30d), m7: fmtUSD(data.revenue.charges_7d) })}
         />
         <KpiTile
           icon={<Wallet className="h-4 w-4" />}
-          label="Outstanding wallet"
+          label={t("admin.dashboard.kpi.outstanding")}
           value={fmtUSD(data.balance.outstanding)}
-          sub={`liability · margin ${margin.toFixed(1)}%`}
+          sub={t("admin.dashboard.kpi.outstandingSub", { margin: margin.toFixed(1) })}
           accent="warning"
         />
         <KpiTile
           icon={<Users className="h-4 w-4" />}
-          label="Users"
+          label={t("admin.dashboard.kpi.users")}
           value={data.users.total.toString()}
-          sub={`${data.users.verified} verified · +${data.users.new_30d} (30d) · ${data.users.disabled} disabled`}
+          sub={t("admin.dashboard.kpi.usersSub", { verified: data.users.verified, new30: data.users.new_30d, disabled: data.users.disabled })}
         />
       </div>
 
@@ -193,13 +194,13 @@ export function AdminDashboard() {
             <div className="flex items-baseline justify-between mb-4">
               <div>
                 <div className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                  Daily topups · last 14d
+                  {t("admin.dashboard.revenueChartEyebrow")}
                 </div>
-                <div className="font-display text-xl font-semibold mt-1">Revenue rhythm</div>
+                <div className="font-display text-xl font-semibold mt-1">{t("admin.dashboard.revenueChartTitle")}</div>
               </div>
               <Button variant="ghost" size="sm" onClick={reload} disabled={busy} className="gap-1.5">
                 <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
-                <span className="text-xs">Refresh</span>
+                <span className="text-xs">{t("common.refresh")}</span>
               </Button>
             </div>
             <DailyRevenueChart data={data.daily_revenue} />
@@ -211,11 +212,11 @@ export function AdminDashboard() {
           <CardContent className="p-5">
             <div className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-1">
               <Trophy className="inline-block h-3.5 w-3.5 align-[-2px] mr-1" />
-              Top spenders
+              {t("admin.dashboard.topSpendersEyebrow")}
             </div>
-            <div className="font-display text-xl font-semibold mb-4">Revenue leaders</div>
+            <div className="font-display text-xl font-semibold mb-4">{t("admin.dashboard.topSpendersTitle")}</div>
             {data.top_spenders.length === 0 ? (
-              <div className="text-sm text-muted-foreground italic">No charges yet.</div>
+              <div className="text-sm text-muted-foreground italic">{t("admin.dashboard.noCharges")}</div>
             ) : (
               <ul className="space-y-2">
                 {data.top_spenders.map((u, i) => (
@@ -244,18 +245,18 @@ export function AdminDashboard() {
               <div>
                 <div className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
                   <ShoppingCart className="inline-block h-3.5 w-3.5 align-[-2px] mr-1" />
-                  Recent topups
+                  {t("admin.dashboard.recentTopupsEyebrow")}
                 </div>
                 <div className="font-display text-xl font-semibold mt-1">
-                  Last {data.recent_topups.length} payments
+                  {t("admin.dashboard.recentTopupsTitle", { n: data.recent_topups.length })}
                 </div>
               </div>
               <span className="text-xs text-muted-foreground font-mono">
-                {data.balance.orders_paid_lifetime} all-time · {data.balance.orders_pending} pending
+                {t("admin.dashboard.ordersAllTimePending", { paid: data.balance.orders_paid_lifetime, pending: data.balance.orders_pending })}
               </span>
             </div>
             {data.recent_topups.length === 0 ? (
-              <div className="text-sm text-muted-foreground italic">No paid orders yet.</div>
+              <div className="text-sm text-muted-foreground italic">{t("admin.dashboard.noPaid")}</div>
             ) : (
               <ul className="divide-y divide-border">
                 {data.recent_topups.map((o) => (
@@ -284,19 +285,19 @@ export function AdminDashboard() {
               <div>
                 <div className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
                   <UserPlus className="inline-block h-3.5 w-3.5 align-[-2px] mr-1" />
-                  Recent signups
+                  {t("admin.dashboard.recentSignupsEyebrow")}
                 </div>
-                <div className="font-display text-xl font-semibold mt-1">New customers</div>
+                <div className="font-display text-xl font-semibold mt-1">{t("admin.dashboard.recentSignupsTitle")}</div>
               </div>
               <Link
                 to="/app/admin/users"
                 className="text-xs text-primary hover:underline inline-flex items-center gap-0.5"
               >
-                manage <ArrowUpRight className="h-3 w-3" />
+                {t("admin.dashboard.manageLink")} <ArrowUpRight className="h-3 w-3" />
               </Link>
             </div>
             {data.recent_signups.length === 0 ? (
-              <div className="text-sm text-muted-foreground italic">No users yet.</div>
+              <div className="text-sm text-muted-foreground italic">{t("admin.dashboard.noUsers")}</div>
             ) : (
               <ul className="divide-y divide-border">
                 {data.recent_signups.map((u) => (
@@ -306,17 +307,17 @@ export function AdminDashboard() {
                         <span className="font-medium truncate">{u.email}</span>
                         {u.role === "admin" && (
                           <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-mono uppercase text-primary">
-                            admin
+                            {t("admin.dashboard.badges.admin")}
                           </span>
                         )}
                         {!u.verified && (
                           <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-mono uppercase text-amber-500">
-                            unverified
+                            {t("admin.dashboard.badges.unverified")}
                           </span>
                         )}
                         {u.disabled && (
                           <span className="rounded border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-mono uppercase text-destructive">
-                            disabled
+                            {t("admin.dashboard.badges.disabled")}
                           </span>
                         )}
                       </div>
@@ -378,11 +379,10 @@ function KpiTile({
   );
 }
 
-// DailyRevenueChart renders 14 vertical bars with hover tooltips. Plain
-// SVG — no charting library dependency.
 function DailyRevenueChart({ data }: { data: Daily[] }) {
+  const { t } = useTranslation();
   if (data.length === 0) {
-    return <div className="h-32 grid place-items-center text-sm text-muted-foreground">No data</div>;
+    return <div className="h-32 grid place-items-center text-sm text-muted-foreground">{t("admin.dashboard.noData")}</div>;
   }
   const max = Math.max(...data.map((d) => d.amount), 1);
   const total = data.reduce((s, d) => s + d.amount, 0);
@@ -394,8 +394,7 @@ function DailyRevenueChart({ data }: { data: Daily[] }) {
   return (
     <div>
       <div className="text-xs text-muted-foreground font-mono mb-2">
-        Σ <span className="text-foreground font-semibold">{fmtUSD(total)}</span> over {data.length} days
-        · peak <span className="text-foreground">{fmtUSD(max)}</span>
+        {t("admin.dashboard.revenueSum", { total: fmtUSD(total), days: data.length, peak: fmtUSD(max) })}
       </div>
       <svg
         viewBox={`0 0 ${W} ${H}`}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Routes, Route } from "react-router-dom";
 import { Users, Tag, KeyRound, ShoppingCart, LayoutDashboard, ScrollText, Gauge, Sparkles } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { OverviewPanel } from "@/components/admin/overview-panel";
 import { AdminDashboard } from "@/components/admin/admin-dashboard";
 import { RequestsExplorer } from "@/components/admin/requests-explorer";
@@ -19,32 +20,30 @@ import { cn } from "@/lib/utils";
 import type { PricingGroup } from "@/lib/types";
 
 const TABS = [
-  { to: "dashboard", label: "Dashboard", icon: Sparkles },
-  { to: "fleet", label: "Fleet", icon: LayoutDashboard },
-  { to: "users", label: "Users", icon: Users },
-  { to: "groups", label: "Pricing groups", icon: Tag },
-  { to: "credentials", label: "Credentials", icon: KeyRound },
-  { to: "requests", label: "Requests", icon: ScrollText },
-  { to: "payments", label: "Payments", icon: ShoppingCart },
+  { to: "dashboard", labelKey: "admin.tabs.dashboard", icon: Sparkles },
+  { to: "fleet", labelKey: "admin.tabs.fleet", icon: LayoutDashboard },
+  { to: "users", labelKey: "admin.tabs.users", icon: Users },
+  { to: "groups", labelKey: "admin.tabs.groups", icon: Tag },
+  { to: "credentials", labelKey: "admin.tabs.credentials", icon: KeyRound },
+  { to: "requests", labelKey: "admin.tabs.requests", icon: ScrollText },
+  { to: "payments", labelKey: "admin.tabs.payments", icon: ShoppingCart },
 ];
 
 export default function AdminPage() {
+  const { t } = useTranslation();
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-3xl font-semibold tracking-tight">Operator panel</h1>
-        <p className="text-muted-foreground">Manage users, pricing groups, upstream credentials and payments.</p>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">{t("admin.panelTitle")}</h1>
+        <p className="text-muted-foreground">{t("admin.panelSub")}</p>
       </div>
 
       <div className="flex gap-1 border-b border-border">
-        {TABS.map((t) => (
+        {TABS.map((tab) => (
           <NavLink
-            key={t.to}
-            // Absolute path — relative `to="dashboard"` would append to
-            // the current URL on every click and produce
-            // /app/admin/dashboard/dashboard/dashboard… as paths stack.
-            to={`/app/admin/${t.to}`}
-            end={t.to === "dashboard"}
+            key={tab.to}
+            to={`/app/admin/${tab.to}`}
+            end={tab.to === "dashboard"}
             className={({ isActive }) =>
               cn(
                 "inline-flex items-center gap-2 border-b-2 px-4 py-2 text-sm transition-colors",
@@ -54,8 +53,8 @@ export default function AdminPage() {
               )
             }
           >
-            <t.icon className="h-3.5 w-3.5" />
-            {t.label}
+            <tab.icon className="h-3.5 w-3.5" />
+            {t(tab.labelKey)}
           </NavLink>
         ))}
       </div>
