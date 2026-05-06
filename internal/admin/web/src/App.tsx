@@ -6,6 +6,7 @@ import { AppShell } from "@/components/layout/shell";
 import HomePage from "@/routes/home";
 import LoginPage from "@/routes/login";
 import RegisterPage from "@/routes/register";
+import ForgotPasswordPage from "@/routes/forgot-password";
 import DashboardPage from "@/routes/dashboard";
 import TokensPage from "@/routes/tokens";
 import BillingPage from "@/routes/billing";
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/status" element={<StatusPage />} />
           <Route path="/docs" element={<DocsIndex />} />
