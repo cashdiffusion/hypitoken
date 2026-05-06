@@ -82,7 +82,7 @@ export default function StatusPage({ embedded }: Props) {
           {codexChecks.length > 0 && (
             <ProviderSection
               name="Codex API"
-              description="OpenAI — gpt-5.3-codex probe"
+              description="OpenAI — gpt-5.5 probe (streaming /responses)"
               checks={codexChecks}
             />
           )}
