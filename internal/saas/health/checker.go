@@ -261,30 +261,24 @@ func (c *Checker) probeAnthropic(ctx context.Context, cli *http.Client, a *auth.
 // the first event in 2-5s and we accept any 200 with content-type
 // text/event-stream as a healthy probe — no need to drain the full reply.
 //
-// Path cascade:
-//  1. {base}/v1/responses   — official OpenAI / well-behaved compatibles
-//  2. {base}/responses      — Codex-CLI-style gateways (tcdmx, etc) that
-//                             mimic the ChatGPT internal path without /v1/
-//  3. {base}/v1/chat/completions — old-style chat shim, last resort
-//
-// Each non-200 response triggers the next step. We only mark "fail" if
-// every variant errors or all return 4xx/5xx.
+// URL construction matches the forward path semantics: BaseURL is
+// authoritative — `<BaseURL>/responses` is the final URL, and the
+// operator decides whether /v1/ appears by including it in BaseURL.
+// On 404/405 we fall back to /chat/completions (the legacy shim) at
+// the same BaseURL.
 func (c *Checker) probeOpenAI(ctx context.Context, cli *http.Client, a *auth.Auth, model string) (string, string) {
 	snap := a.Snapshot()
 	base := strings.TrimRight(snap.BaseURL, "/")
 	if base == "" {
-		base = "https://api.openai.com"
+		base = "https://api.openai.com/v1"
 	}
-
-	// /v1/responses → /responses (cascade for the responses-shaped body).
-	for _, p := range []string{"/v1/responses", "/responses"} {
-		st, msg, retry := c.probeOpenAIResponses(ctx, cli, a, model, base+p)
-		if !retry {
-			return st, msg
-		}
+	st, msg, retry := c.probeOpenAIResponses(ctx, cli, a, model, base+"/responses")
+	if !retry {
+		return st, msg
 	}
-	// All responses-shaped paths returned 404/405/timeout — try the legacy
-	// /v1/chat/completions shim before giving up.
+	// Fall back to the chat/completions shim on the same BaseURL — for
+	// gateways that only ship the OpenAI-compat shim and don't implement
+	// the responses endpoint at all.
 	return c.probeOpenAIChatFallback(ctx, cli, a, model)
 }
 
@@ -362,9 +356,9 @@ func (c *Checker) probeOpenAIChatFallback(ctx context.Context, cli *http.Client,
 	snap := a.Snapshot()
 	base := strings.TrimRight(snap.BaseURL, "/")
 	if base == "" {
-		base = "https://api.openai.com"
+		base = "https://api.openai.com/v1"
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/chat/completions", bytes.NewReader(buf))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(buf))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.AccessToken)
 
