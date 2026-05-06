@@ -40,7 +40,11 @@ export default function AdminPage() {
         {TABS.map((t) => (
           <NavLink
             key={t.to}
-            to={t.to}
+            // Absolute path — relative `to="dashboard"` would append to
+            // the current URL on every click and produce
+            // /app/admin/dashboard/dashboard/dashboard… as paths stack.
+            to={`/app/admin/${t.to}`}
+            end={t.to === "dashboard"}
             className={({ isActive }) =>
               cn(
                 "inline-flex items-center gap-2 border-b-2 px-4 py-2 text-sm transition-colors",
