@@ -255,7 +255,19 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	if resp.StatusCode < 400 {
 		s.usage.Record(a.ID, a.Label, counts)
 		if counts.Requests > 0 && clientToken != "" {
-			costUSD = s.pricing.Cost(auth.ProviderOpenAI, model, counts)
+			official := s.pricing.Cost(auth.ProviderOpenAI, model, counts)
+			costUSD = official
+			// Codex apikey path used to skip the SaaS Charge funnel entirely,
+			// so wallets weren't deducted for Codex traffic. Route it through
+			// the same path Anthropic uses now.
+			if info, ok := saasInfoFrom(c); ok && s.saas != nil {
+				billed, err := s.saas.Charge(c.Request.Context(), info, auth.ProviderOpenAI, model, counts, official)
+				if err != nil {
+					log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
+				} else {
+					costUSD = billed
+				}
+			}
 			s.usage.RecordClient(clientToken, clientName, counts, costUSD)
 		}
 	}

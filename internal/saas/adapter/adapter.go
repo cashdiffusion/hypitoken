@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wjsoj/CPA-Claude/internal/auth"
 	"github.com/wjsoj/CPA-Claude/internal/pricing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
@@ -17,6 +18,13 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/usage"
 )
 
+// Default billing multipliers used when a pricing group has no value set
+// (e.g. brand-new install before the operator has visited the admin panel).
+// Match the seed values in db/migrations.go v3.
+const (
+	defaultClaudeMultiplier = 0.3
+	defaultCodexMultiplier  = 0.05
+)
 
 // Adapter implements server.SaaSAdapter against the SaaS DB. It is created
 // in main.go and passed into server.New via WithSaaS.
@@ -24,10 +32,6 @@ type Adapter struct {
 	DB      *db.DB
 	Catalog *pricing.Catalog
 	Rate    *billing.Rate
-
-	// Provider-level default billing rates (1r = X USD).
-	DefaultClaudeBillingRate float64
-	DefaultCodexBillingRate  float64
 
 	// groupCache memoizes pricing groups for the request hot path. Groups
 	// change rarely (admin action) so a 30s TTL is plenty.
@@ -127,33 +131,52 @@ func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *serv
 	return nil
 }
 
-// Charge deducts billedCostUSD (already scaled by the per-credential billing
-// rate in proxy.go) from the user's wallet.
-func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provider, model string, counts usage.Counts, billedCostUSD float64) (float64, error) {
-	if billedCostUSD <= 0 {
+// Charge applies the user's group multiplier to the upstream-side official
+// cost and deducts the result from their wallet. This is the single point
+// where billing math happens — proxy paths just compute `official` via the
+// pricing catalog and hand it off.
+//
+//	billed = official * multiplier(group, provider)
+//
+// Returns the billed amount so the caller can write it into the request log
+// (so the log row matches the wallet ledger byte-for-byte).
+func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provider, model string, counts usage.Counts, officialCostUSD float64) (float64, error) {
+	if officialCostUSD <= 0 {
+		return 0, nil
+	}
+	mult := a.MultiplierFor(ctx, info.GroupID, provider)
+	billed := billing.ChargeFromOfficial(officialCostUSD, mult)
+	if billed <= 0 {
 		return 0, nil
 	}
 	ref := fmt.Sprintf("token=%d model=%s", info.TokenID, model)
-	if _, err := a.DB.AddBalance(ctx, info.UserID, db.TxKindCharge, -billedCostUSD, ref, "", true); err != nil {
+	if _, err := a.DB.AddBalance(ctx, info.UserID, db.TxKindCharge, -billed, ref, "", true); err != nil {
 		return 0, err
 	}
 	a.DB.TouchUserToken(ctx, info.TokenID)
-	return billedCostUSD, nil
+	return billed, nil
 }
 
-func (a *Adapter) DefaultBillingRate(provider string) float64 {
-	switch provider {
-	case "openai":
-		if a.DefaultCodexBillingRate > 0 {
-			return a.DefaultCodexBillingRate
+// MultiplierFor resolves the multiplier for (group, provider). Falls back
+// to the package defaults (claude=0.3, codex=0.05) when the group is missing
+// or its value is unset.
+func (a *Adapter) MultiplierFor(ctx context.Context, groupID int64, provider string) float64 {
+	if g := a.group(ctx, groupID); g != nil {
+		switch auth.NormalizeProvider(provider) {
+		case auth.ProviderOpenAI:
+			if g.CodexMultiplier > 0 {
+				return g.CodexMultiplier
+			}
+		default:
+			if g.ClaudeMultiplier > 0 {
+				return g.ClaudeMultiplier
+			}
 		}
-		return 3.0
-	default:
-		if a.DefaultClaudeBillingRate > 0 {
-			return a.DefaultClaudeBillingRate
-		}
-		return 0.5
 	}
+	if auth.NormalizeProvider(provider) == auth.ProviderOpenAI {
+		return defaultCodexMultiplier
+	}
+	return defaultClaudeMultiplier
 }
 
 func (a *Adapter) CredentialGroup(info server.SaaSTokenInfo) string {

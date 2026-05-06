@@ -31,10 +31,6 @@ type SaaSAdapter interface {
 	// pricing group is tied to (forwarded to auth.Pool.Acquire). Empty
 	// string = public group.
 	CredentialGroup(info SaaSTokenInfo) string
-
-	// DefaultBillingRate returns the provider-level default billing rate
-	// (1r = X USD). Used when a credential has no per-credential rate set.
-	DefaultBillingRate(provider string) float64
 }
 
 // SaaSTokenInfo is the resolved identity for a SaaS Bearer token.

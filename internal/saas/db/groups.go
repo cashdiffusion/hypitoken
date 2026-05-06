@@ -7,27 +7,37 @@ import (
 	"time"
 )
 
+// Default multipliers used when CreateGroup is called with zero values.
+// Match the migration v3 UPDATE that retroactively bumps existing default
+// rows: 0.3 for Claude, 0.05 for Codex.
+const (
+	DefaultClaudeMultiplier = 0.3
+	DefaultCodexMultiplier  = 0.05
+)
+
 type PricingGroup struct {
-	ID                int64
-	Name              string
-	Description       string
-	CodexRMBPerUSD    float64
-	ClaudeRMBPerUSD   float64
-	CodexMultiplier   float64
-	ClaudeMultiplier  float64
-	CredentialGroup   string  // forwarded to auth.Pool group filter
-	IsDefault         bool
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID          int64
+	Name        string
+	Description string
+	// codex_rmb_per_usd / claude_rmb_per_usd remain in the schema for
+	// backward compatibility but are no longer read or written by Go code.
+	// The single source of truth is now the per-provider multiplier:
+	//   final_charge_USD = official_USD * multiplier
+	CodexMultiplier  float64
+	ClaudeMultiplier float64
+	CredentialGroup  string // forwarded to auth.Pool group filter
+	IsDefault        bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
-const groupCols = `id, name, description, codex_rmb_per_usd, claude_rmb_per_usd, codex_multiplier, claude_multiplier, credential_group, is_default, created_at, updated_at`
+const groupCols = `id, name, description, codex_multiplier, claude_multiplier, credential_group, is_default, created_at, updated_at`
 
 func scanGroup(row interface{ Scan(...any) error }) (*PricingGroup, error) {
 	var g PricingGroup
 	var isDefault int
 	var c, u int64
-	if err := row.Scan(&g.ID, &g.Name, &g.Description, &g.CodexRMBPerUSD, &g.ClaudeRMBPerUSD, &g.CodexMultiplier, &g.ClaudeMultiplier, &g.CredentialGroup, &isDefault, &c, &u); err != nil {
+	if err := row.Scan(&g.ID, &g.Name, &g.Description, &g.CodexMultiplier, &g.ClaudeMultiplier, &g.CredentialGroup, &isDefault, &c, &u); err != nil {
 		return nil, err
 	}
 	g.IsDefault = isDefault != 0
@@ -74,19 +84,30 @@ func (db *DB) ListGroups(ctx context.Context) ([]*PricingGroup, error) {
 type GroupParams struct {
 	Name             string
 	Description      string
-	CodexRMBPerUSD   float64
-	ClaudeRMBPerUSD  float64
 	CodexMultiplier  float64
 	ClaudeMultiplier float64
 	CredentialGroup  string
 }
 
+// applyMultiplierDefaults backfills zero multipliers with the package
+// defaults so a freshly-created group never starts at 0× (which would
+// silently zero out billing).
+func (p *GroupParams) applyMultiplierDefaults() {
+	if p.ClaudeMultiplier <= 0 {
+		p.ClaudeMultiplier = DefaultClaudeMultiplier
+	}
+	if p.CodexMultiplier <= 0 {
+		p.CodexMultiplier = DefaultCodexMultiplier
+	}
+}
+
 func (db *DB) CreateGroup(ctx context.Context, p GroupParams) (*PricingGroup, error) {
+	p.applyMultiplierDefaults()
 	now := time.Now().Unix()
 	res, err := db.ExecContext(ctx, `INSERT INTO pricing_groups
-		(name, description, codex_rmb_per_usd, claude_rmb_per_usd, codex_multiplier, claude_multiplier, credential_group, is_default, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-		p.Name, p.Description, p.CodexRMBPerUSD, p.ClaudeRMBPerUSD, p.CodexMultiplier, p.ClaudeMultiplier, p.CredentialGroup, now, now)
+		(name, description, codex_multiplier, claude_multiplier, credential_group, is_default, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+		p.Name, p.Description, p.CodexMultiplier, p.ClaudeMultiplier, p.CredentialGroup, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -95,11 +116,12 @@ func (db *DB) CreateGroup(ctx context.Context, p GroupParams) (*PricingGroup, er
 }
 
 func (db *DB) UpdateGroup(ctx context.Context, id int64, p GroupParams) (*PricingGroup, error) {
+	p.applyMultiplierDefaults()
 	_, err := db.ExecContext(ctx, `UPDATE pricing_groups SET
-		name = ?, description = ?, codex_rmb_per_usd = ?, claude_rmb_per_usd = ?,
-		codex_multiplier = ?, claude_multiplier = ?, credential_group = ?, updated_at = ?
+		name = ?, description = ?, codex_multiplier = ?, claude_multiplier = ?,
+		credential_group = ?, updated_at = ?
 		WHERE id = ?`,
-		p.Name, p.Description, p.CodexRMBPerUSD, p.ClaudeRMBPerUSD, p.CodexMultiplier, p.ClaudeMultiplier, p.CredentialGroup, time.Now().Unix(), id)
+		p.Name, p.Description, p.CodexMultiplier, p.ClaudeMultiplier, p.CredentialGroup, time.Now().Unix(), id)
 	if err != nil {
 		return nil, err
 	}

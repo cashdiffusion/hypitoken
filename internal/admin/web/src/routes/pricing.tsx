@@ -122,9 +122,9 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
       <div>
         <h1 className="font-display text-4xl font-semibold tracking-tight md:text-5xl">Pricing</h1>
         <p className="mt-3 max-w-2xl text-muted-foreground">
-          Official Anthropic and OpenAI rates. We apply a billing multiplier per access group —
-          a multiplier of <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">1.0</code> means
-          you pay the official rate exactly.
+          Official Anthropic and OpenAI rates below. The actual charge to your wallet is{' '}
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">official × multiplier</code>{' '}
+          where the multiplier is set per access group (default Claude 0.30×, Codex 0.05×).
         </p>
       </div>
 
@@ -188,26 +188,17 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
                   {g.Description && <p className="text-xs text-muted-foreground">{g.Description}</p>}
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {/* Claude line */}
-                  <div className="rounded-md border border-border bg-card p-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Claude</span>
-                      <span className="font-mono text-sm font-semibold">{g.ClaudeMultiplier.toFixed(2)}×</span>
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      ¥1 = ${(1 / (g.ClaudeRMBPerUSD || 1)).toFixed(2)} of upstream usage
-                    </div>
+                  <div className="flex items-center justify-between rounded-md border border-border bg-card p-3">
+                    <span className="text-sm text-muted-foreground">Claude</span>
+                    <span className="font-mono text-sm font-semibold">{g.ClaudeMultiplier.toFixed(2)}×</span>
                   </div>
-                  {/* Codex line */}
-                  <div className="rounded-md border border-border bg-card p-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Codex</span>
-                      <span className="font-mono text-sm font-semibold">{g.CodexMultiplier.toFixed(2)}×</span>
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      ¥1 = ${(1 / (g.CodexRMBPerUSD || 1)).toFixed(2)} of upstream usage
-                    </div>
+                  <div className="flex items-center justify-between rounded-md border border-border bg-card p-3">
+                    <span className="text-sm text-muted-foreground">Codex</span>
+                    <span className="font-mono text-sm font-semibold">{g.CodexMultiplier.toFixed(2)}×</span>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Final charge = official upstream cost × multiplier.
+                  </p>
                 </CardContent>
               </Card>
             ))}

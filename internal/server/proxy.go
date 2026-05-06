@@ -536,26 +536,28 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		authKind = "apikey"
 	}
 	s.usage.Record(a.ID, a.Label, counts)
-	// Charge the client for the tokens they actually consumed.
-	// billedCost applies the per-credential billing rate: bill = official / rate.
+	// Compute the wallet-side cost: hand the official upstream price to the
+	// SaaS adapter, which applies the per-(group × provider) multiplier and
+	// returns the dollar amount actually deducted. The same value gets
+	// written into the request log so the log row matches the wallet ledger.
 	var costUSD float64
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
 		officialCost := s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
-		var defaultRate float64
-		if s.saas != nil {
-			defaultRate = s.saas.DefaultBillingRate(auth.NormalizeProvider(a.Provider))
+		costUSD = officialCost
+		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
+			billed, err := s.saas.Charge(c.Request.Context(), info, auth.NormalizeProvider(a.Provider), model, counts, officialCost)
+			if err != nil {
+				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
+			} else {
+				costUSD = billed
+			}
 		}
-		if defaultRate <= 0 {
-			defaultRate = 1.0
-		}
-		rate := a.GetBillingRate(defaultRate)
-		costUSD = officialCost / rate
 	}
 	// Advisor (server-side opus sub-call) is billed alongside the main
 	// request: same auth absorbs the load, same client is charged, but the
 	// requestlog gets a separate row per advisor model so by-model views
 	// don't conflate sonnet-orchestrator cost with opus-advisor cost.
-	advisorCost := s.recordSubUsage(a, authKind, clientToken, clientName, model, path, resp.StatusCode, sub)
+	advisorCost := s.recordSubUsage(c, a, authKind, clientToken, clientName, model, path, resp.StatusCode, sub)
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
 		// Single RecordClient call: weekly cost ledger should reflect the
 		// total dollar cost of this /v1/messages call, advisor included.
@@ -566,16 +568,6 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 			clientCounts.Add(sc)
 		}
 		s.usage.RecordClient(clientToken, clientName, clientCounts, costUSD+advisorCost)
-		// SaaS billing: deduct from user wallet (if applicable). Note we
-		// charge against `counts` (the main request) — advisor sub-call
-		// charging would double-bill since advisorCost already shows up
-		// in the main path; the SaaS layer can revisit this if/when we
-		// expose advisor as a separately-priced product.
-		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
-			if _, err := s.saas.Charge(c.Request.Context(), info, auth.NormalizeProvider(a.Provider), model, counts, costUSD); err != nil {
-				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
-			}
-		}
 	}
 	s.emitLog(requestlog.Record{
 		Client:      clientName,
@@ -711,16 +703,17 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		s.usage.Record(a.ID, a.Label, counts)
 		if counts.Requests > 0 && clientToken != "" {
 			officialCost := s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
-			var defaultRate float64
-			if s.saas != nil {
-				defaultRate = s.saas.DefaultBillingRate(auth.NormalizeProvider(a.Provider))
+			costUSD = officialCost
+			if info, ok := saasInfoFrom(c); ok && s.saas != nil {
+				billed, err := s.saas.Charge(c.Request.Context(), info, auth.NormalizeProvider(a.Provider), model, counts, officialCost)
+				if err != nil {
+					log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
+				} else {
+					costUSD = billed
+				}
 			}
-			if defaultRate <= 0 {
-				defaultRate = 1.0
-			}
-			costUSD = officialCost / a.GetBillingRate(defaultRate)
 		}
-		advisorCost := s.recordSubUsage(a, "apikey", clientToken, clientName, model, path, resp.StatusCode, sub)
+		advisorCost := s.recordSubUsage(c, a, "apikey", clientToken, clientName, model, path, resp.StatusCode, sub)
 		if counts.Requests > 0 && clientToken != "" {
 			var clientCounts usage.Counts
 			clientCounts.Add(counts)
@@ -1077,18 +1070,28 @@ func (s *subUsage) replaceFrom(its []iterationUsageRaw) {
 // advisor iterations. Auth-side load tracking only applies to successful
 // sub-calls — a failed parent rarely has billable advisor activity, and
 // double-counting would distort WeightedTotal-driven load balancing.
-func (s *Server) recordSubUsage(a *auth.Auth, authKind, clientToken, clientName, parentModel, path string, status int, sub subUsage) float64 {
+func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientToken, clientName, parentModel, path string, status int, sub subUsage) float64 {
 	if status >= 400 || len(sub.byModel) == 0 {
 		return 0
 	}
 	provider := auth.NormalizeProvider(a.Provider)
 	var total float64
+	info, hasSaaS := saasInfoFrom(c)
 	for subModel, sc := range sub.byModel {
 		// Sub-calls bump the auth's daily/hourly bucket and WeightedTotal so
 		// the credential bears the full opus load. Requests stays 0: the
 		// parent already counted +1.
 		s.usage.Record(a.ID, a.Label, sc)
-		cost := s.pricing.Cost(provider, subModel, sc)
+		official := s.pricing.Cost(provider, subModel, sc)
+		// Advisor cost goes through the same Charge funnel as the parent
+		// request so the wallet ledger and the request log agree on what
+		// the user actually paid for the sub-call.
+		cost := official
+		if hasSaaS && s.saas != nil {
+			if billed, err := s.saas.Charge(c.Request.Context(), info, provider, subModel, sc, official); err == nil {
+				cost = billed
+			}
+		}
 		total += cost
 		s.emitLog(requestlog.Record{
 			Client:      clientName,

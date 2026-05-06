@@ -206,10 +206,8 @@ function GroupsTab() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead className="text-right">Codex peg</TableHead>
-              <TableHead className="text-right">Codex ×</TableHead>
-              <TableHead className="text-right">Claude peg</TableHead>
               <TableHead className="text-right">Claude ×</TableHead>
+              <TableHead className="text-right">Codex ×</TableHead>
               <TableHead>Cred. group</TableHead>
               <TableHead></TableHead>
             </TableRow>
@@ -221,10 +219,8 @@ function GroupsTab() {
                   <div className="font-medium">{g.Name}</div>
                   <div className="text-xs text-muted-foreground">{g.Description}</div>
                 </TableCell>
-                <TableCell className="font-mono tabular-nums text-right">¥{g.CodexRMBPerUSD.toFixed(2)}</TableCell>
-                <TableCell className="font-mono tabular-nums text-right">{g.CodexMultiplier.toFixed(2)}</TableCell>
-                <TableCell className="font-mono tabular-nums text-right">¥{g.ClaudeRMBPerUSD.toFixed(2)}</TableCell>
-                <TableCell className="font-mono tabular-nums text-right">{g.ClaudeMultiplier.toFixed(2)}</TableCell>
+                <TableCell className="font-mono tabular-nums text-right">{g.ClaudeMultiplier.toFixed(2)}×</TableCell>
+                <TableCell className="font-mono tabular-nums text-right">{g.CodexMultiplier.toFixed(2)}×</TableCell>
                 <TableCell className="font-mono text-xs">{g.CredentialGroup || "—"}</TableCell>
                 <TableCell className="text-right">
                   {!g.IsDefault && (
@@ -249,10 +245,10 @@ function CreateGroupButton({ onDone }: { onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
-  const [codexPeg, setCodexPeg] = useState("0.5");
-  const [codexMult, setCodexMult] = useState("1.0");
-  const [claudePeg, setClaudePeg] = useState("2.0");
-  const [claudeMult, setClaudeMult] = useState("1.0");
+  // Multiplier defaults match the migration v3 seed: claude=0.3, codex=0.05.
+  // Final user-facing charge is `official_USD × multiplier`.
+  const [claudeMult, setClaudeMult] = useState("0.3");
+  const [codexMult, setCodexMult] = useState("0.05");
   const [credGroup, setCredGroup] = useState("");
   return (
     <>
@@ -260,14 +256,15 @@ function CreateGroupButton({ onDone }: { onDone: () => void }) {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>New pricing group</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            Final charge per request = upstream USD × multiplier. Lower = cheaper for the user.
+          </p>
           <div className="grid gap-3 py-2">
             <div className="space-y-2"><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
             <div className="space-y-2"><Label>Description</Label><Input value={desc} onChange={(e) => setDesc(e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2"><Label>Codex ¥/USD</Label><Input value={codexPeg} onChange={(e) => setCodexPeg(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Codex multiplier</Label><Input value={codexMult} onChange={(e) => setCodexMult(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Claude ¥/USD</Label><Input value={claudePeg} onChange={(e) => setClaudePeg(e.target.value)} /></div>
               <div className="space-y-2"><Label>Claude multiplier</Label><Input value={claudeMult} onChange={(e) => setClaudeMult(e.target.value)} /></div>
+              <div className="space-y-2"><Label>Codex multiplier</Label><Input value={codexMult} onChange={(e) => setCodexMult(e.target.value)} /></div>
             </div>
             <div className="space-y-2"><Label>Credential group (auth.Pool filter)</Label><Input value={credGroup} onChange={(e) => setCredGroup(e.target.value)} placeholder="empty = public" /></div>
           </div>
@@ -276,10 +273,8 @@ function CreateGroupButton({ onDone }: { onDone: () => void }) {
             <Button onClick={async () => {
               await apiPost("/admin/groups", {
                 name, description: desc,
-                codex_rmb_per_usd: parseFloat(codexPeg),
-                codex_multiplier: parseFloat(codexMult),
-                claude_rmb_per_usd: parseFloat(claudePeg),
                 claude_multiplier: parseFloat(claudeMult),
+                codex_multiplier: parseFloat(codexMult),
                 credential_group: credGroup,
               });
               toast.success("Group created");
@@ -359,7 +354,6 @@ function CredentialsTab() {
                   <TableHead>Kind</TableHead>
                   <TableHead>Group</TableHead>
                   <TableHead className="text-right">Active</TableHead>
-                  <TableHead>Billing rate</TableHead>
                   <TableHead>Expires</TableHead>
                   <TableHead>Health</TableHead>
                   <TableHead></TableHead>
@@ -375,7 +369,6 @@ function CredentialsTab() {
                     <TableCell><span className="rounded border border-border bg-muted px-2 py-0.5 text-xs font-mono uppercase">{c.kind}</span></TableCell>
                     <TableCell className="font-mono text-xs">{c.group || "—"}</TableCell>
                     <TableCell className="font-mono tabular-nums text-right">{c.active_clients}</TableCell>
-                    <TableCell><BillingRateCell cred={c} onUpdated={reload} /></TableCell>
                     <TableCell className="font-mono text-xs"><Expiry at={c.expires_at} /></TableCell>
                     <TableCell><HealthPill cred={c} /></TableCell>
                     <TableCell className="text-right">
@@ -413,48 +406,6 @@ function CredentialsTab() {
         authLabel={usageFor?.label || ""}
         onClose={() => setUsageFor(null)}
       />
-    </div>
-  );
-}
-
-function BillingRateCell({ cred, onUpdated }: { cred: any; onUpdated: () => void }) {
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(String(cred.billing_rate || ""));
-
-  const save = async () => {
-    const rate = parseFloat(val);
-    if (isNaN(rate) || rate < 0) { toast.error("Invalid rate"); return; }
-    await apiPatch(`/admin/credentials/${encodeURIComponent(cred.id)}/billing-rate`, { rate });
-    toast.success("Billing rate updated");
-    setEditing(false);
-    onUpdated();
-  };
-
-  if (!editing) {
-    return (
-      <button
-        className="flex items-center gap-1 font-mono text-xs hover:underline"
-        onClick={() => { setVal(String(cred.billing_rate || "")); setEditing(true); }}
-        title="Click to edit billing rate (1r = X USD)"
-      >
-        {cred.billing_rate > 0 ? `1r = $${cred.billing_rate}` : <span className="text-muted-foreground">default</span>}
-      </button>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-1">
-      <span className="text-xs text-muted-foreground">1r=$</span>
-      <Input
-        className="h-6 w-20 px-1 py-0 font-mono text-xs"
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
-        autoFocus
-        placeholder="0 = default"
-      />
-      <Button size="sm" className="h-6 px-2 text-xs" onClick={save}>✓</Button>
-      <Button size="sm" variant="ghost" className="h-6 px-1 text-xs" onClick={() => setEditing(false)}>✕</Button>
     </div>
   );
 }
