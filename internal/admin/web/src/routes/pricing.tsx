@@ -41,47 +41,27 @@ const CLAUDE_MODELS = [
   },
 ];
 
-const CODEX_MODELS = [
-  {
-    name: "codex-davinci-002",
-    display: "o3",
-    input: 2.0,
-    output: 8.0,
-    cacheWrite: null,
-    cacheRead: null,
-  },
-  {
-    name: "o4-mini",
-    display: "o4-mini",
-    input: 1.1,
-    output: 4.4,
-    cacheWrite: null,
-    cacheRead: null,
-  },
-  {
-    name: "gpt-4.1",
-    display: "GPT-4.1",
-    input: 2.0,
-    output: 8.0,
-    cacheWrite: null,
-    cacheRead: null,
-  },
-  {
-    name: "gpt-4.1-mini",
-    display: "GPT-4.1 mini",
-    input: 0.4,
-    output: 1.6,
-    cacheWrite: null,
-    cacheRead: null,
-  },
-  {
-    name: "gpt-4o-mini",
-    display: "GPT-4o mini",
-    input: 0.15,
-    output: 0.6,
-    cacheWrite: null,
-    cacheRead: null,
-  },
+// Codex CLI OAuth models — covered by ChatGPT Plus/Pro/Team subscription.
+// Source: internal/auth/codex_models.go (CodexModelCatalog, Pro tier).
+const CODEX_OAUTH_MODELS = [
+  { name: "gpt-5.3-codex",       display: "GPT-5.3 Codex",       input: 1.75, output: 14.0,  cacheWrite: null, cacheRead: 0.175 },
+  { name: "gpt-5.3-codex-spark", display: "GPT-5.3 Codex Spark", input: 1.75, output: 14.0,  cacheWrite: null, cacheRead: 0.175 },
+  { name: "gpt-5.5",             display: "GPT-5.5",             input: 5.0,  output: 30.0,  cacheWrite: null, cacheRead: 0.5 },
+  { name: "gpt-5.4",             display: "GPT-5.4",             input: 2.5,  output: 15.0,  cacheWrite: null, cacheRead: 0.25 },
+  { name: "gpt-5.4-mini",        display: "GPT-5.4 mini",        input: 0.75, output: 4.5,   cacheWrite: null, cacheRead: 0.075 },
+  { name: "gpt-5.2",             display: "GPT-5.2",             input: 1.5,  output: 6.0,   cacheWrite: null, cacheRead: null },
+];
+
+// OpenAI API-key models — full lineup accessible with a standard API key.
+// Source: platform.openai.com/docs/pricing (May 2026).
+const CODEX_APIKEY_MODELS = [
+  { name: "gpt-5.5",      display: "GPT-5.5",      input: 5.0,  output: 30.0,  cacheWrite: null, cacheRead: 0.5 },
+  { name: "gpt-5.5-pro",  display: "GPT-5.5 Pro",  input: 30.0, output: 180.0, cacheWrite: null, cacheRead: null },
+  { name: "gpt-5.4",      display: "GPT-5.4",      input: 2.5,  output: 15.0,  cacheWrite: null, cacheRead: 0.25 },
+  { name: "gpt-5.4-mini", display: "GPT-5.4 mini", input: 0.75, output: 4.5,   cacheWrite: null, cacheRead: 0.075 },
+  { name: "gpt-5.4-nano", display: "GPT-5.4 nano", input: 0.2,  output: 1.25,  cacheWrite: null, cacheRead: 0.02 },
+  { name: "gpt-5.4-pro",  display: "GPT-5.4 Pro",  input: 30.0, output: 180.0, cacheWrite: null, cacheRead: null },
+  { name: "gpt-5.2",      display: "GPT-5.2",      input: 1.5,  output: 6.0,   cacheWrite: null, cacheRead: null },
 ];
 
 type ModelRow = { name: string; display: string; input: number; output: number; cacheWrite: number | null; cacheRead: number | null };
@@ -97,7 +77,7 @@ function ModelPriceTable({ models, hasCaching }: { models: ModelRow[]; hasCachin
             <th className="py-2 pr-4 font-medium text-right">Output</th>
             {hasCaching && <>
               <th className="py-2 pr-4 font-medium text-right">Cache write</th>
-              <th className="py-2 pr-4 font-medium text-right">Cache read</th>
+              <th className="py-2 pr-4 font-medium text-right">Cache read / cached input</th>
             </>}
           </tr>
         </thead>
@@ -156,10 +136,25 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
 
         <div>
           <h2 className="font-display text-2xl font-semibold tracking-tight">Codex / OpenAI models</h2>
-          <p className="mt-1 text-sm text-muted-foreground">OpenAI pricing via Codex endpoint.</p>
-          <div className="mt-4 rounded-lg border border-border">
-            <div className="p-4">
-              <ModelPriceTable models={CODEX_MODELS} hasCaching={false} />
+          <p className="mt-1 text-sm text-muted-foreground">
+            Codex CLI models require a ChatGPT Plus/Pro/Team subscription (OAuth). OpenAI API key models use a standard API key.
+          </p>
+          <div className="mt-4 space-y-4">
+            <div className="rounded-lg border border-border">
+              <div className="border-b border-border px-4 py-2.5">
+                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Codex CLI — OAuth subscription</span>
+              </div>
+              <div className="p-4">
+                <ModelPriceTable models={CODEX_OAUTH_MODELS} hasCaching={true} />
+              </div>
+            </div>
+            <div className="rounded-lg border border-border">
+              <div className="border-b border-border px-4 py-2.5">
+                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">OpenAI API key</span>
+              </div>
+              <div className="p-4">
+                <ModelPriceTable models={CODEX_APIKEY_MODELS} hasCaching={true} />
+              </div>
             </div>
           </div>
         </div>
