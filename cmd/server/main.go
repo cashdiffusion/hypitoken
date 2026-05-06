@@ -229,7 +229,7 @@ func main() {
 		}
 
 		// Model health background checker.
-		hc := health.New(saasDB, pool, nil, cfg.SaaS.HealthCheckInterval)
+		hc := health.New(saasDB, pool, cfg.SaaS.HealthCheckInterval)
 		go hc.Run(refresherCtx)
 		saasadmin.HealthRefresher = hc.Refresh
 
