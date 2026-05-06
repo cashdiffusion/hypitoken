@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { Info } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { HourBucket, Pricing, PricingEntry, RequestAgg } from "@/legacy/lib/types";
 import {
   ChartContainer,
@@ -148,6 +149,7 @@ export function DashboardBoard({
   clientsAnonymized = false,
   userPaidUSD = null,
 }: DashboardBoardProps) {
+  const { t } = useTranslation();
   const lookupPrice = (model: string): PricingEntry | null => {
     if (!pricing) return null;
     const m = (model || "").toLowerCase().trim();
@@ -377,16 +379,16 @@ export function DashboardBoard({
       <section>
         <div className="flex items-baseline justify-between mb-3 gap-4">
           <div>
-            <div className="eyebrow mb-1.5">All-time cache efficiency</div>
+            <div className="eyebrow mb-1.5">{t("legacy.cacheEyebrow")}</div>
             <h3 className="font-display text-2xl md:text-3xl tracking-tight">
-              Prompt <span className="text-muted-foreground">caching</span>
+              {t("legacy.cacheTitleA")} <span className="text-muted-foreground">{t("legacy.cacheTitleB")}</span>
             </h3>
           </div>
-          <span className="eyebrow tabular opacity-70 hidden sm:inline">since first request</span>
+          <span className="eyebrow tabular opacity-70 hidden sm:inline">{t("legacy.sinceFirst")}</span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
           <CacheCard
-            label="Cache hit rate"
+            label={t("legacy.cacheHitRate")}
             value={cacheStats ? (cacheStats.hitRate * 100).toFixed(2) + "%" : busy ? "…" : "—"}
             ratio={cacheStats?.hitRate ?? 0}
             foot={
@@ -399,12 +401,12 @@ export function DashboardBoard({
             }
           />
           <CacheCard
-            label="Saved by us"
+            label={t("legacy.savedByUs")}
             value={
               cacheStats && cacheStats.hasPricing
                 ? "$" + cacheStats.savedByUs.toFixed(2)
                 : cacheStats && !cacheStats.hasPricing
-                  ? "pricing unavailable"
+                  ? t("legacy.pricingUnavailable")
                   : busy
                     ? "…"
                     : "—"
@@ -412,17 +414,17 @@ export function DashboardBoard({
             foot={
               cacheStats && cacheStats.hasPricing ? (
                 <span className="mono tabular text-[10px] leading-relaxed block">
-                  no-cache @ official ${cacheStats.noCacheCost.toFixed(2)}
+                  {t("legacy.noCacheOfficial", { n: cacheStats.noCacheCost.toFixed(2) })}
                   <br />
-                  with-cache @ official ${cacheStats.officialWithCache.toFixed(2)}
+                  {t("legacy.withCacheOfficial", { n: cacheStats.officialWithCache.toFixed(2) })}
                   <br />
-                  actual ${cacheStats.usersPaid.toFixed(2)}
+                  {t("legacy.actualPaid", { n: cacheStats.usersPaid.toFixed(2) })}
                 </span>
               ) : null
             }
           />
           <CacheCard
-            label="Tokens per $"
+            label={t("legacy.tokensPerDollar")}
             value={
               cacheStats && cacheStats.tokensPerDollar > 0
                 ? fmtTokensCompact(cacheStats.tokensPerDollar)
@@ -447,9 +449,9 @@ export function DashboardBoard({
       <section>
         <div className="flex items-baseline justify-between mb-3 gap-4">
           <div>
-            <div className="eyebrow mb-1.5">14d throughput</div>
+            <div className="eyebrow mb-1.5">{t("legacy.last14d")}</div>
             <h3 className="font-display text-2xl md:text-3xl tracking-tight">
-              Token <span className="text-muted-foreground">volume by type</span>
+              {t("legacy.tokenVolume")} <span className="text-muted-foreground">{t("legacy.byType")}</span>
             </h3>
           </div>
           <span className="eyebrow tabular opacity-70 hidden sm:inline">{fmtInt(trendTotal)} tok</span>
@@ -514,9 +516,9 @@ export function DashboardBoard({
       <section>
         <div className="flex items-baseline justify-between mb-3 gap-4">
           <div>
-            <div className="eyebrow mb-1.5">24h pulse · hourly</div>
+            <div className="eyebrow mb-1.5">{t("legacy.pulse24")}</div>
             <h3 className="font-display text-2xl md:text-3xl tracking-tight">
-              Live <span className="text-muted-foreground">token rhythm</span>
+              {t("legacy.liveRhythm")} <span className="text-muted-foreground">{t("legacy.rhythm")}</span>
             </h3>
           </div>
           <span className="eyebrow tabular opacity-70 hidden sm:inline">
@@ -574,9 +576,9 @@ export function DashboardBoard({
         <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
           <div className="flex items-baseline justify-between mb-3 gap-2">
             <div>
-              <div className="eyebrow mb-1">Daily cost</div>
+              <div className="eyebrow mb-1">{t("legacy.dailyCost")}</div>
               <h3 className="font-display text-xl tracking-tight">
-                Spend <span className="text-muted-foreground">· last {DAYS}d</span>
+                {t("legacy.spend")} <span className="text-muted-foreground">· {t("legacy.spend14d")}</span>
               </h3>
             </div>
             <span className="eyebrow tabular opacity-70">${costTotal.toFixed(2)}</span>
@@ -616,9 +618,9 @@ export function DashboardBoard({
         <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
           <div className="flex items-baseline justify-between mb-3 gap-2">
             <div>
-              <div className="eyebrow mb-1">Daily requests</div>
+              <div className="eyebrow mb-1">{t("legacy.dailyReq")}</div>
               <h3 className="font-display text-xl tracking-tight">
-                Traffic <span className="text-muted-foreground">· last {DAYS}d</span>
+                {t("legacy.traffic14d")}
               </h3>
             </div>
             <span className="eyebrow tabular opacity-70">{fmtInt(reqTotal)} req</span>
@@ -667,9 +669,9 @@ export function DashboardBoard({
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
         <div className="bg-card border border-border-strong rounded-md p-4 md:p-5 md:col-span-2 lg:col-span-1">
           <div className="mb-4">
-            <div className="eyebrow mb-1">Auth pool health</div>
+            <div className="eyebrow mb-1">{t("legacy.poolHealth")}</div>
             <h3 className="font-display text-xl tracking-tight">
-              <span className="text-muted-foreground">{pool?.total ?? 0} credential(s)</span>
+              <span className="text-muted-foreground">{t("legacy.poolCount", { n: pool?.total ?? 0 })}</span>
             </h3>
           </div>
           {health.length === 0 ? (
@@ -699,8 +701,8 @@ export function DashboardBoard({
         </div>
 
         <TopList
-          title="Top models"
-          sub="by cost · last 14d"
+          title={t("legacy.topModels")}
+          sub={t("legacy.topModelsBy")}
           rows={
             reqData
               ? Object.entries(reqData.by_model)
@@ -712,8 +714,8 @@ export function DashboardBoard({
         />
 
         <TopList
-          title="Top clients"
-          sub="by cost · last 14d"
+          title={t("legacy.topClients")}
+          sub={t("legacy.topModelsBy")}
           titleAdornment={clientsAnonymized ? <PseudonymHint /> : undefined}
           rows={
             reqData
@@ -736,9 +738,9 @@ export function DashboardBoard({
         <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
           <div className="flex items-baseline justify-between mb-3 gap-2">
             <div>
-              <div className="eyebrow mb-1">Billing week · all-time</div>
+              <div className="eyebrow mb-1">{t("legacy.billingWeek")}</div>
               <h3 className="font-display text-xl tracking-tight">
-                Weekly <span className="text-muted-foreground">spend</span>
+                {t("legacy.weekly")} <span className="text-muted-foreground">{t("legacy.spend")}</span>
               </h3>
             </div>
             <span className="eyebrow tabular opacity-70">
@@ -790,9 +792,9 @@ export function DashboardBoard({
         <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
           <div className="flex items-baseline justify-between mb-3 gap-2">
             <div>
-              <div className="eyebrow mb-1">Calendar month · all-time</div>
+              <div className="eyebrow mb-1">{t("legacy.calendarMonth")}</div>
               <h3 className="font-display text-xl tracking-tight">
-                Monthly <span className="text-muted-foreground">spend</span>
+                {t("legacy.monthly")} <span className="text-muted-foreground">{t("legacy.spend")}</span>
               </h3>
             </div>
             <span className="eyebrow tabular opacity-70">
