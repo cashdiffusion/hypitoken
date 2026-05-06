@@ -156,7 +156,10 @@ function StatusPill({ status }: { status: string }) {
 
 function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
   const [usd, setUsd] = useState("10");
-  const [method, setMethod] = useState<"alipay" | "wxpay">("alipay");
+  // Only Alipay rail is wired up on the merchant side. The backend still
+  // accepts method=wxpay if a future operator enables WeChat — but UI-side
+  // we don't expose it because it would just error from the gateway.
+  const method = "alipay";
   const [order, setOrder] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [polling, setPolling] = useState(false);
@@ -241,13 +244,6 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
                 {PRESETS.map((p) => (
                   <Button key={p} type="button" variant="outline" size="sm" onClick={() => setUsd(String(p))}>${p}</Button>
                 ))}
-              </div>
-              <div className="space-y-2">
-                <Label>Payment method</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button type="button" variant={method === "alipay" ? "default" : "outline"} size="sm" onClick={() => setMethod("alipay")}>Alipay 支付宝</Button>
-                  <Button type="button" variant={method === "wxpay" ? "default" : "outline"} size="sm" onClick={() => setMethod("wxpay")}>WeChat 微信</Button>
-                </div>
               </div>
               <div className="rounded-md border border-border-strong bg-muted/30 p-3 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">You pay (CNY)</span><span className="font-mono tabular-nums">¥{(parseFloat(usd || "0") * (rate?.cny_per_usd || 7.2)).toFixed(2)}</span></div>
