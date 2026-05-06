@@ -839,7 +839,15 @@ func applyAnthropicHeaders(req *http.Request, a *auth.Auth, stream, isAnthropicB
 			req.Header.Set("Anthropic-Beta", existing+",oauth-2025-04-20")
 		}
 	} else {
-		req.Header.Set("Anthropic-Beta", claudeAnthropicBetaFull)
+		// Pick the right captured beta list per credential kind. The OAuth
+		// list contains tokens (oauth-2025-04-20, advanced-tool-use-2025-11-20,
+		// cache-diagnosis-2026-04-07) that strict 3rd-party apikey gateways
+		// will reject — real CC's apikey path doesn't send them either.
+		if kind == auth.KindAPIKey {
+			req.Header.Set("Anthropic-Beta", claudeAnthropicBetaApikey)
+		} else {
+			req.Header.Set("Anthropic-Beta", claudeAnthropicBetaFull)
+		}
 	}
 	// Real CC 2.1.126 OAuth captures show this header is sent on every
 	// /v1/messages, contradicting the older "OAuth never sends it" assumption.

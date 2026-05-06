@@ -207,9 +207,13 @@ func (c *Checker) probeAnthropic(ctx context.Context, cli *http.Client, a *auth.
 		req.Header.Set("Authorization", "Bearer "+a.AccessToken)
 		req.Header.Set("anthropic-beta", "oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05")
 	} else {
-		// API key: x-api-key + full CC beta list
+		// API key: x-api-key + full CC beta list.
+		// Verbatim from crack/apikey/rows/14-POST-…v1_messages.json — the
+		// strict third-party gateways (fucheers etc.) reject any unknown
+		// token, so we use exactly what real CC 2.1.126 sends and nothing
+		// more (no advanced-tool-use, no cache-diagnosis on the apikey path).
 		req.Header.Set("X-Api-Key", a.AccessToken)
-		req.Header.Set("anthropic-beta", "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01,advanced-tool-use-2025-11-24,effort-2025-11-24,cache-diagnosis-2026-04-07")
+		req.Header.Set("anthropic-beta", "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01,context-1m-2025-08-07,effort-2025-11-24")
 	}
 
 	resp, err := cli.Do(req)
