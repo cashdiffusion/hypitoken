@@ -21,11 +21,19 @@ type DB struct {
 
 // Open opens (or creates) the SQLite file at path with WAL enabled and runs
 // any pending migrations.
+//
+// synchronous=FULL: forces an fsync on every commit. Slightly slower than
+// NORMAL (one extra fsync per tx) but the only setting that survives raw
+// power loss without losing committed wallet/payment transactions. SaaS
+// traffic is nowhere near the throughput where the difference matters.
+//
+// File mode is force-chmoded to 0600 after open so the wallet ledger is
+// not world-readable even if the filesystem default umask was lax.
 func Open(path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)", path)
+	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)", path)
 	sdb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -36,6 +44,12 @@ func Open(path string) (*DB, error) {
 	sdb.SetMaxIdleConns(4)
 	if err := sdb.Ping(); err != nil {
 		return nil, err
+	}
+	// Tighten file modes on the live DB and its WAL/SHM siblings. Best-effort
+	// — siblings may not exist yet; they'll be created with the same default
+	// the OS umask gives the parent process, so we re-chmod here.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		_ = os.Chmod(path+suffix, 0o600)
 	}
 	db := &DB{DB: sdb, path: path}
 	if err := db.migrate(); err != nil {

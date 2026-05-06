@@ -158,6 +158,12 @@ func main() {
 		bootstrapAdmin(saasDB, cfg.SaaS)
 		bootstrapPricingFromCatalog(cfg.SaaS, saasDB)
 
+		// Daily VACUUM INTO snapshot, retained for 30 days. Atomic /
+		// online — request handlers don't see a pause, and each snapshot
+		// is a clean self-contained .db file (no WAL/SHM siblings) which
+		// makes off-host shipping a single-file copy.
+		go saasDB.RunDailyBackups(refresherCtx, 30)
+
 		mailer := mail.New(mail.SMTPConfig{
 			Host: cfg.SaaS.SMTP.Host, Port: cfg.SaaS.SMTP.Port,
 			Username: cfg.SaaS.SMTP.Username, Password: cfg.SaaS.SMTP.Password,

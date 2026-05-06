@@ -73,6 +73,64 @@ func (db *DB) MarkOrderPaid(ctx context.Context, outTradeNo, tradeNo string) err
 	return nil
 }
 
+// ErrOrderNotPending is returned by CreditPaidOrder when the order isn't in
+// the pending state any more — i.e. a concurrent webhook already credited
+// it. Callers should treat it as a successful no-op.
+var ErrOrderNotPending = errors.New("order not pending")
+
+// CreditPaidOrder performs the two state changes that make a top-up real —
+// marking the alipay order paid and adding the USD credit to the user's
+// balance — atomically in a single transaction. Either both happen or
+// neither does, so we can't end up with a "paid but not credited" zombie
+// order if the process crashes between the two steps.
+//
+// Idempotent against webhook replays: the UPDATE is gated on
+// `status = pending`, so a second concurrent call sees 0 rows affected and
+// returns ErrOrderNotPending without touching the wallet.
+//
+// Returns the new balance on success.
+func (db *DB) CreditPaidOrder(ctx context.Context, outTradeNo, tradeNo string, userID int64, usdCredit float64, ref, note string) (float64, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	now := time.Now().Unix()
+
+	// Step 1 — flip pending → paid. Conditional update keeps replays safe.
+	res, err := tx.ExecContext(ctx, `UPDATE alipay_orders SET status = ?, trade_no = ?, paid_at = ? WHERE out_trade_no = ? AND status = ?`,
+		OrderPaid, tradeNo, now, outTradeNo, OrderPending)
+	if err != nil {
+		return 0, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return 0, ErrOrderNotPending
+	}
+
+	// Step 2 — read current balance under the same transaction (so a
+	// concurrent charge can't race the read/write), apply the delta, write
+	// both the balance and the wallet_tx ledger row.
+	var bal float64
+	if err := tx.QueryRowContext(ctx, `SELECT balance_usd FROM users WHERE id = ?`, userID).Scan(&bal); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
+	bal += usdCredit
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET balance_usd = ?, updated_at = ? WHERE id = ?`, bal, now, userID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx (user_id, kind, amount_usd, ref, note, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		userID, TxKindTopup, usdCredit, ref, note, now); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return bal, nil
+}
+
 func (db *DB) MarkOrderExpired(ctx context.Context, outTradeNo string) error {
 	_, err := db.ExecContext(ctx, `UPDATE alipay_orders SET status = ? WHERE out_trade_no = ? AND status = ?`,
 		OrderExpired, outTradeNo, OrderPending)

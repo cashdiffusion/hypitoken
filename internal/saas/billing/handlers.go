@@ -318,13 +318,18 @@ func (h *Handler) applyNotification(ctx context.Context, n *Notification, source
 		return ErrOrderExpired
 	}
 
-	if err := h.DB.MarkOrderPaid(ctx, n.OutTradeNo, n.TradeNo); err != nil {
-		// Could be "order not pending" if a concurrent request beat us —
-		// safe; AddBalance below would double-credit so we bail.
-		return err
-	}
-	if _, err := h.DB.AddBalance(ctx, o.UserID, db.TxKindTopup, o.USDCredit, o.OutTradeNo,
-		fmt.Sprintf("alipay top-up ¥%.2f @ %.4f (%s)", o.CNYAmount, o.Rate, source), false); err != nil {
+	// Mark-paid + balance-credit + wallet_tx insert all happen in ONE
+	// transaction inside CreditPaidOrder. Without this, a process crash
+	// between MarkOrderPaid and AddBalance leaves the order paid but the
+	// user uncredited — and Alipay's webhook retries would all bail
+	// because status != pending. Single-tx eliminates that loss window.
+	note := fmt.Sprintf("alipay top-up ¥%.2f @ %.4f (%s)", o.CNYAmount, o.Rate, source)
+	if _, err := h.DB.CreditPaidOrder(ctx, o.OutTradeNo, n.TradeNo, o.UserID, o.USDCredit, o.OutTradeNo, note); err != nil {
+		if errors.Is(err, db.ErrOrderNotPending) {
+			// A concurrent webhook already credited this order. Idempotent
+			// success — Alipay's notify will see our 200 and stop retrying.
+			return nil
+		}
 		return err
 	}
 	log.Infof("alipay [%s]: credited user=%d order=%s usd=%.2f cny=%.2f trade_no=%s",
