@@ -76,6 +76,7 @@ export default function AdminPage() {
 }
 
 function UsersTab() {
+  const { t } = useTranslation();
   const [users, setUsers] = useState<any[]>([]);
   const [groups, setGroups] = useState<PricingGroup[]>([]);
   const [q, setQ] = useState("");
@@ -94,18 +95,18 @@ function UsersTab() {
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-4">
-          <CardTitle>Users ({users.length})</CardTitle>
-          <Input placeholder="Search email…" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
+          <CardTitle>{t("admin.users.headingCount", { n: users.length })}</CardTitle>
+          <Input placeholder={t("admin.users.searchPlaceholder")} value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
         </div>
       </CardHeader>
       <CardContent className="p-0">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Group</TableHead>
-              <TableHead className="text-right">Balance</TableHead>
+              <TableHead>{t("admin.users.cols.email")}</TableHead>
+              <TableHead>{t("admin.users.cols.role")}</TableHead>
+              <TableHead>{t("admin.users.cols.group")}</TableHead>
+              <TableHead className="text-right">{t("admin.users.cols.balance")}</TableHead>
               <TableHead></TableHead>
               <TableHead></TableHead>
             </TableRow>
@@ -129,7 +130,7 @@ function UsersTab() {
                       value={u.group_id}
                       onChange={async (e) => {
                         await apiPatch(`/admin/users/${u.id}`, { group_id: parseInt(e.target.value) });
-                        toast.success("Group updated");
+                        toast.success(t("admin.users.groupUpdated"));
                         reload();
                       }}
                     >
@@ -139,14 +140,14 @@ function UsersTab() {
                     </select>
                     <Button size="sm" variant="ghost" onClick={async () => {
                       await apiPatch(`/admin/users/${u.id}`, { role: u.role === "admin" ? "user" : "admin" });
-                      toast.success("Role updated");
+                      toast.success(t("admin.users.roleUpdated"));
                       reload();
-                    }}>{u.role === "admin" ? "→ user" : "→ admin"}</Button>
+                    }}>{u.role === "admin" ? t("admin.users.makeUser") : t("admin.users.makeAdmin")}</Button>
                     <Button size="sm" variant="ghost" className="text-destructive" onClick={async () => {
                       await apiPatch(`/admin/users/${u.id}`, { disabled: !u.disabled });
-                      toast.success(u.disabled ? "Enabled" : "Disabled");
+                      toast.success(u.disabled ? t("admin.users.enabled") : t("admin.users.disabled"));
                       reload();
-                    }}>{u.disabled ? "Enable" : "Disable"}</Button>
+                    }}>{u.disabled ? t("admin.users.enable") : t("admin.users.disable")}</Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -159,34 +160,35 @@ function UsersTab() {
 }
 
 function AdjustBalanceButton({ userID, onDone }: { userID: number; onDone: () => void }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [delta, setDelta] = useState("");
   const [note, setNote] = useState("");
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>Adjust</Button>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>{t("admin.users.adjust")}</Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader><DialogTitle>Adjust balance</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("admin.users.adjustTitle")}</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2">
             <div className="space-y-2">
-              <Label>Delta (USD)</Label>
-              <Input type="number" step="0.01" placeholder="+5 or -2" value={delta} onChange={(e) => setDelta(e.target.value)} />
+              <Label>{t("admin.users.delta")}</Label>
+              <Input type="number" step="0.01" placeholder={t("admin.users.deltaPlaceholder")} value={delta} onChange={(e) => setDelta(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>Note</Label>
-              <Input placeholder="reason…" value={note} onChange={(e) => setNote(e.target.value)} />
+              <Label>{t("admin.users.note")}</Label>
+              <Input placeholder={t("admin.users.notePlaceholder")} value={note} onChange={(e) => setNote(e.target.value)} />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
             <Button onClick={async () => {
               await apiPost(`/admin/users/${userID}/balance`, { delta_usd: parseFloat(delta), note });
-              toast.success("Balance updated");
+              toast.success(t("admin.users.balanceUpdated"));
               onDone();
               setOpen(false);
               setDelta(""); setNote("");
-            }}>Apply</Button>
+            }}>{t("admin.users.apply")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -195,6 +197,7 @@ function AdjustBalanceButton({ userID, onDone }: { userID: number; onDone: () =>
 }
 
 function GroupsTab() {
+  const { t } = useTranslation();
   const [groups, setGroups] = useState<PricingGroup[]>([]);
   const reload = async () => {
     const r = await apiGet<{ groups: PricingGroup[] }>("/admin/groups");
@@ -205,7 +208,7 @@ function GroupsTab() {
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle>Pricing groups</CardTitle>
+          <CardTitle>{t("admin.groups.heading")}</CardTitle>
           <CreateGroupButton onDone={reload} />
         </div>
       </CardHeader>
@@ -213,10 +216,10 @@ function GroupsTab() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead className="text-right">Claude ×</TableHead>
-              <TableHead className="text-right">Codex ×</TableHead>
-              <TableHead>Cred. group</TableHead>
+              <TableHead>{t("admin.groups.cols.name")}</TableHead>
+              <TableHead className="text-right">{t("admin.groups.cols.claudeMult")}</TableHead>
+              <TableHead className="text-right">{t("admin.groups.cols.codexMult")}</TableHead>
+              <TableHead>{t("admin.groups.cols.credGroup")}</TableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
@@ -233,11 +236,11 @@ function GroupsTab() {
                 <TableCell className="text-right">
                   {!g.IsDefault && (
                     <Button size="sm" variant="ghost" className="text-destructive" onClick={async () => {
-                      if (!confirm(`Delete group "${g.Name}"? Users will be moved to default.`)) return;
+                      if (!confirm(t("admin.groups.confirmDelete", { name: g.Name }))) return;
                       await apiDelete(`/admin/groups/${g.ID}`);
-                      toast.success("Deleted");
+                      toast.success(t("admin.groups.deleted"));
                       reload();
-                    }}>Delete</Button>
+                    }}>{t("common.delete")}</Button>
                   )}
                 </TableCell>
               </TableRow>
@@ -250,34 +253,31 @@ function GroupsTab() {
 }
 
 function CreateGroupButton({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
-  // Multiplier defaults match the migration v3 seed: claude=0.3, codex=0.05.
-  // Final user-facing charge is `official_USD × multiplier`.
   const [claudeMult, setClaudeMult] = useState("0.3");
   const [codexMult, setCodexMult] = useState("0.05");
   const [credGroup, setCredGroup] = useState("");
   return (
     <>
-      <Button onClick={() => setOpen(true)}>+ New group</Button>
+      <Button onClick={() => setOpen(true)}>{t("admin.groups.newBtn")}</Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>New pricing group</DialogTitle></DialogHeader>
-          <p className="text-xs text-muted-foreground">
-            Final charge per request = upstream USD × multiplier. Lower = cheaper for the user.
-          </p>
+          <DialogHeader><DialogTitle>{t("admin.groups.newTitle")}</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground">{t("admin.groups.newSub")}</p>
           <div className="grid gap-3 py-2">
-            <div className="space-y-2"><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
-            <div className="space-y-2"><Label>Description</Label><Input value={desc} onChange={(e) => setDesc(e.target.value)} /></div>
+            <div className="space-y-2"><Label>{t("admin.groups.labels.name")}</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+            <div className="space-y-2"><Label>{t("admin.groups.labels.desc")}</Label><Input value={desc} onChange={(e) => setDesc(e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2"><Label>Claude multiplier</Label><Input value={claudeMult} onChange={(e) => setClaudeMult(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Codex multiplier</Label><Input value={codexMult} onChange={(e) => setCodexMult(e.target.value)} /></div>
+              <div className="space-y-2"><Label>{t("admin.groups.labels.claudeMult")}</Label><Input value={claudeMult} onChange={(e) => setClaudeMult(e.target.value)} /></div>
+              <div className="space-y-2"><Label>{t("admin.groups.labels.codexMult")}</Label><Input value={codexMult} onChange={(e) => setCodexMult(e.target.value)} /></div>
             </div>
-            <div className="space-y-2"><Label>Credential group (auth.Pool filter)</Label><Input value={credGroup} onChange={(e) => setCredGroup(e.target.value)} placeholder="empty = public" /></div>
+            <div className="space-y-2"><Label>{t("admin.groups.labels.credGroup")}</Label><Input value={credGroup} onChange={(e) => setCredGroup(e.target.value)} /></div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
             <Button onClick={async () => {
               await apiPost("/admin/groups", {
                 name, description: desc,
@@ -285,11 +285,11 @@ function CreateGroupButton({ onDone }: { onDone: () => void }) {
                 codex_multiplier: parseFloat(codexMult),
                 credential_group: credGroup,
               });
-              toast.success("Group created");
+              toast.success(t("admin.groups.created"));
               onDone();
               setOpen(false);
               setName(""); setDesc("");
-            }}>Create</Button>
+            }}>{t("common.create")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -298,6 +298,7 @@ function CreateGroupButton({ onDone }: { onDone: () => void }) {
 }
 
 function CredentialsTab() {
+  const { t } = useTranslation();
   const [creds, setCreds] = useState<any[]>([]);
   const [openKey, setOpenKey] = useState(false);
   const [openOAuth, setOpenOAuth] = useState<null | "anthropic" | "openai">(null);
@@ -330,7 +331,7 @@ function CredentialsTab() {
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
-              {p === "anthropic" ? "Claude (Anthropic)" : "Codex (OpenAI)"}
+              {p === "anthropic" ? t("admin.creds.claudeTab") : t("admin.creds.codexTab")}
               <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-mono">{count}</span>
             </button>
           );
@@ -341,29 +342,29 @@ function CredentialsTab() {
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <CardTitle>{providerTab === "anthropic" ? "Claude credentials" : "Codex credentials"}</CardTitle>
-              <CardDescription>OAuth + API-key credentials in the live pool.</CardDescription>
+              <CardTitle>{providerTab === "anthropic" ? t("admin.creds.claudeTitle") : t("admin.creds.codexTitle")}</CardTitle>
+              <CardDescription>{providerTab === "anthropic" ? t("admin.creds.claudeSub") : t("admin.creds.codexSub")}</CardDescription>
             </div>
             <div className="flex gap-2 flex-wrap justify-end">
-              <Button onClick={() => setOpenKey(true)}>+ Add API key</Button>
-              <Button variant="outline" onClick={() => setOpenOAuth("anthropic")}>+ OAuth (Claude)</Button>
-              <Button variant="outline" onClick={() => setOpenOAuth("openai")}>+ OAuth (Codex)</Button>
+              <Button onClick={() => setOpenKey(true)}>{t("admin.creds.addApiKey")}</Button>
+              <Button variant="outline" onClick={() => setOpenOAuth("anthropic")}>{t("admin.creds.addOauthClaude")}</Button>
+              <Button variant="outline" onClick={() => setOpenOAuth("openai")}>{t("admin.creds.addOauthCodex")}</Button>
             </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
           {visible.length === 0 ? (
-            <div className="p-12 text-center text-sm text-muted-foreground">No credentials loaded.</div>
+            <div className="p-12 text-center text-sm text-muted-foreground">{t("tokens.none")}</div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Label</TableHead>
-                  <TableHead>Kind</TableHead>
-                  <TableHead>Group</TableHead>
-                  <TableHead className="text-right">Active</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Health</TableHead>
+                  <TableHead>{t("admin.creds.cols.label")}</TableHead>
+                  <TableHead>{t("admin.creds.cols.kind")}</TableHead>
+                  <TableHead>{t("admin.creds.cols.group")}</TableHead>
+                  <TableHead className="text-right">{t("admin.creds.cols.active")}</TableHead>
+                  <TableHead>{t("admin.creds.cols.expires")}</TableHead>
+                  <TableHead>{t("admin.creds.cols.health")}</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
@@ -385,18 +386,17 @@ function CredentialsTab() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            title="Probe upstream Anthropic usage windows"
                             onClick={() => setUsageFor({ id: c.id, label: c.label })}
                           >
                             <Gauge className="size-3.5" />
                           </Button>
                         )}
                         <Button size="sm" variant="ghost" className="text-destructive" onClick={async () => {
-                          if (!confirm(`Remove credential "${c.label}"?`)) return;
+                          if (!confirm(t("admin.creds.confirmRemove", { name: c.label }))) return;
                           await apiDelete(`/admin/credentials/${encodeURIComponent(c.id)}`);
-                          toast.success("Removed");
+                          toast.success(t("admin.creds.removed"));
                           reload();
-                        }}>Remove</Button>
+                        }}>{t("admin.creds.remove")}</Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -635,6 +635,7 @@ function Expiry({ at }: { at?: string }) {
 }
 
 function AddAPIKeyDialog({ open, onOpenChange, onCreated }: any) {
+  const { t } = useTranslation();
   const [provider, setProvider] = useState("anthropic");
   const [key, setKey] = useState("");
   const [label, setLabel] = useState("");
@@ -644,35 +645,35 @@ function AddAPIKeyDialog({ open, onOpenChange, onCreated }: any) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader><DialogTitle>Add API key</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t("admin.creds.newApiTitle")}</DialogTitle></DialogHeader>
         <div className="grid gap-3 py-2">
           <div className="space-y-2">
-            <Label>Provider</Label>
+            <Label>{t("admin.creds.cols.kind")}</Label>
             <select className="h-10 w-full rounded-md border border-border bg-card px-3 text-sm" value={provider} onChange={(e) => setProvider(e.target.value)}>
               <option value="anthropic">Anthropic</option>
               <option value="openai">OpenAI</option>
             </select>
           </div>
-          <div className="space-y-2"><Label>API key</Label><Input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-..." className="font-mono" /></div>
-          <div className="space-y-2"><Label>Label</Label><Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="primary" /></div>
+          <div className="space-y-2"><Label>API key</Label><Input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={t("admin.creds.newApiPlaceholder")} className="font-mono" /></div>
+          <div className="space-y-2"><Label>{t("admin.creds.cols.label")}</Label><Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("admin.creds.newApiLabelPlaceholder")} /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2"><Label>Base URL (optional)</Label><Input value={base} onChange={(e) => setBase(e.target.value)} placeholder="https://api.anthropic.com" /></div>
-            <div className="space-y-2"><Label>Proxy URL (optional)</Label><Input value={proxy} onChange={(e) => setProxy(e.target.value)} /></div>
+            <div className="space-y-2"><Label>Base URL</Label><Input value={base} onChange={(e) => setBase(e.target.value)} placeholder={t("admin.creds.newApiBaseUrlPlaceholder")} /></div>
+            <div className="space-y-2"><Label>Proxy URL</Label><Input value={proxy} onChange={(e) => setProxy(e.target.value)} /></div>
           </div>
-          <div className="space-y-2"><Label>Group (optional)</Label><Input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="empty = public" /></div>
+          <div className="space-y-2"><Label>{t("admin.creds.cols.group")}</Label><Input value={group} onChange={(e) => setGroup(e.target.value)} /></div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
           <Button onClick={async () => {
-            if (!key) { toast.error("API key required"); return; }
+            if (!key) { toast.error(t("common.error")); return; }
             try {
               await apiPost("/admin/credentials/apikey", { provider, key, label, base_url: base, proxy_url: proxy, group });
-              toast.success("API key added");
+              toast.success(t("admin.creds.newApiCreated"));
               onCreated();
               onOpenChange(false);
               setKey(""); setLabel(""); setBase(""); setProxy(""); setGroup("");
             } catch (e: any) { toast.error(e.message); }
-          }}>Add</Button>
+          }}>{t("common.add")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -680,6 +681,7 @@ function AddAPIKeyDialog({ open, onOpenChange, onCreated }: any) {
 }
 
 function PaymentsTab() {
+  const { t } = useTranslation();
   const [orders, setOrders] = useState<any[]>([]);
   useEffect(() => {
     apiGet<{ orders: any[] }>("/admin/orders").then((r) => setOrders(r.orders || []));
@@ -687,19 +689,19 @@ function PaymentsTab() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>All payments ({orders.length})</CardTitle>
+        <CardTitle>{t("admin.payments.heading", { n: orders.length })}</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Order</TableHead>
-              <TableHead>User</TableHead>
-              <TableHead className="text-right">USD</TableHead>
-              <TableHead className="text-right">CNY</TableHead>
-              <TableHead className="text-right">Rate</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Created</TableHead>
+              <TableHead>{t("admin.payments.cols.order")}</TableHead>
+              <TableHead>{t("admin.payments.cols.user")}</TableHead>
+              <TableHead className="text-right">{t("admin.payments.cols.usd")}</TableHead>
+              <TableHead className="text-right">{t("admin.payments.cols.cny")}</TableHead>
+              <TableHead className="text-right">{t("admin.payments.cols.rate")}</TableHead>
+              <TableHead>{t("admin.payments.cols.status")}</TableHead>
+              <TableHead>{t("admin.payments.cols.created")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -710,7 +712,7 @@ function PaymentsTab() {
                 <TableCell className="font-mono tabular-nums text-right">{fmtUSD(o.USDCredit)}</TableCell>
                 <TableCell className="font-mono tabular-nums text-right">¥{o.CNYAmount?.toFixed(2)}</TableCell>
                 <TableCell className="font-mono tabular-nums text-right text-muted-foreground">{o.Rate?.toFixed(4)}</TableCell>
-                <TableCell><span className={`rounded border px-2 py-0.5 text-xs font-mono uppercase ${o.Status === "paid" ? "border-success/30 bg-success/15 text-success" : "border-warning/30 bg-warning/15 text-warning"}`}>{o.Status}</span></TableCell>
+                <TableCell><span className={`rounded border px-2 py-0.5 text-xs font-mono uppercase ${o.Status === "paid" ? "border-success/30 bg-success/15 text-success" : "border-warning/30 bg-warning/15 text-warning"}`}>{o.Status === "paid" ? t("common.paid") : o.Status === "pending" ? t("common.pending") : o.Status === "expired" ? t("common.expired") : o.Status}</span></TableCell>
                 <TableCell className="text-muted-foreground">{o.CreatedAt && new Date(o.CreatedAt).toLocaleString()}</TableCell>
               </TableRow>
             ))}

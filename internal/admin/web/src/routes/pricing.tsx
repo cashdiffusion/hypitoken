@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
+import { Trans, useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PublicHeader } from "@/components/layout/shell";
 import { api } from "@/lib/api";
@@ -73,17 +74,18 @@ const CODEX_APIKEY_MODELS = [
 type ModelRow = { name: string; display: string; input: number; output: number; cacheWrite: number | null; cacheRead: number | null };
 
 function ModelPriceTable({ models, hasCaching }: { models: ModelRow[]; hasCaching: boolean }) {
+  const { t } = useTranslation();
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase tracking-wider">
-            <th className="py-2 pr-4 font-medium">Model</th>
-            <th className="py-2 pr-4 font-medium text-right">Input</th>
-            <th className="py-2 pr-4 font-medium text-right">Output</th>
+            <th className="py-2 pr-4 font-medium">{t("pricing.columns.model")}</th>
+            <th className="py-2 pr-4 font-medium text-right">{t("pricing.columns.input")}</th>
+            <th className="py-2 pr-4 font-medium text-right">{t("pricing.columns.output")}</th>
             {hasCaching && <>
-              <th className="py-2 pr-4 font-medium text-right">Cache write</th>
-              <th className="py-2 pr-4 font-medium text-right">Cache read / cached input</th>
+              <th className="py-2 pr-4 font-medium text-right">{t("pricing.columns.cacheWrite")}</th>
+              <th className="py-2 pr-4 font-medium text-right">{t("pricing.columns.cacheRead")}</th>
             </>}
           </tr>
         </thead>
@@ -105,12 +107,13 @@ function ModelPriceTable({ models, hasCaching }: { models: ModelRow[]; hasCachin
           ))}
         </tbody>
       </table>
-      <p className="mt-2 text-xs text-muted-foreground">Per 1M tokens. Official published rates.</p>
+      <p className="mt-2 text-xs text-muted-foreground">{t("pricing.per1m")}</p>
     </div>
   );
 }
 
 export default function PricingPage({ embedded }: { embedded?: boolean }) {
+  const { t } = useTranslation();
   const [groups, setGroups] = useState<PricingGroup[]>([]);
 
   useEffect(() => {
@@ -120,19 +123,17 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
   const content = (
     <div className="space-y-12">
       <div>
-        <h1 className="font-display text-4xl font-semibold tracking-tight md:text-5xl">Pricing</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight md:text-5xl">{t("pricing.pageTitle")}</h1>
         <p className="mt-3 max-w-2xl text-muted-foreground">
-          Official Anthropic and OpenAI rates below. The actual charge to your wallet is{' '}
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">official × multiplier</code>{' '}
-          where the multiplier is set per access group (default Claude 0.30×, Codex 0.05×).
+          <Trans i18nKey="pricing.pageSub" components={{ code: <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs" /> }} />
         </p>
       </div>
 
       {/* Model price tables */}
       <div className="space-y-8">
         <div>
-          <h2 className="font-display text-2xl font-semibold tracking-tight">Claude models</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Anthropic pricing with prompt-cache support.</p>
+          <h2 className="font-display text-2xl font-semibold tracking-tight">{t("pricing.claudeTitle")}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t("pricing.claudeSub")}</p>
           <div className="mt-4 rounded-lg border border-border">
             <div className="p-4">
               <ModelPriceTable models={CLAUDE_MODELS} hasCaching={true} />
@@ -141,14 +142,12 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
         </div>
 
         <div>
-          <h2 className="font-display text-2xl font-semibold tracking-tight">Codex / OpenAI models</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Codex CLI models require a ChatGPT Plus/Pro/Team subscription (OAuth). OpenAI API key models use a standard API key.
-          </p>
+          <h2 className="font-display text-2xl font-semibold tracking-tight">{t("pricing.codexTitle")}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t("pricing.codexSub")}</p>
           <div className="mt-4 space-y-4">
             <div className="rounded-lg border border-border">
               <div className="border-b border-border px-4 py-2.5">
-                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Codex CLI — OAuth subscription</span>
+                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{t("pricing.codexOauthSection")}</span>
               </div>
               <div className="p-4">
                 <ModelPriceTable models={CODEX_OAUTH_MODELS} hasCaching={true} />
@@ -156,7 +155,7 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
             </div>
             <div className="rounded-lg border border-border">
               <div className="border-b border-border px-4 py-2.5">
-                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">OpenAI API key</span>
+                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{t("pricing.codexApiSection")}</span>
               </div>
               <div className="p-4">
                 <ModelPriceTable models={CODEX_APIKEY_MODELS} hasCaching={true} />
@@ -169,10 +168,8 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
       {/* Access groups */}
       {groups.length > 0 && (
         <div>
-          <h2 className="font-display text-2xl font-semibold tracking-tight">Access groups</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Each group defines per-provider multipliers applied on top of official rates.
-          </p>
+          <h2 className="font-display text-2xl font-semibold tracking-tight">{t("pricing.accessGroupsTitle")}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t("pricing.accessGroupsSub")}</p>
           <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {groups.map((g) => (
               <Card key={g.ID} className={g.IsDefault ? "border-primary/40 bg-primary/[0.04]" : ""}>
@@ -181,7 +178,7 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
                     <CardTitle className="font-display text-xl tracking-tight">{g.Name}</CardTitle>
                     {g.IsDefault && (
                       <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/15 px-2 py-0.5 text-xs font-mono uppercase tracking-wider text-primary">
-                        <Sparkles className="h-3 w-3" /> default
+                        <Sparkles className="h-3 w-3" /> {t("pricing.defaultBadge")}
                       </span>
                     )}
                   </div>
@@ -196,9 +193,7 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
                     <span className="text-sm text-muted-foreground">Codex</span>
                     <span className="font-mono text-sm font-semibold">{g.CodexMultiplier.toFixed(2)}×</span>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Final charge = official upstream cost × multiplier.
-                  </p>
+                  <p className="text-xs text-muted-foreground">{t("pricing.formulaCaption")}</p>
                 </CardContent>
               </Card>
             ))}
