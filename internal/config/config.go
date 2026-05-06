@@ -83,7 +83,14 @@ type Config struct {
 	AnthropicBaseURL string `yaml:"anthropic_base_url,omitempty"`
 
 	// OpenAI API base URL (override for testing; used for BYOK Codex API-key
-	// routing). Defaults to https://api.openai.com.
+	// routing). Defaults to https://api.openai.com/v1.
+	//
+	// The full upstream URL is `BaseURL + endpoint` where endpoint is
+	// /responses, /chat/completions, /models, etc — without a /v1/ prefix.
+	// If a third-party gateway (e.g. tcdmx) serves at the root without /v1/,
+	// configure the credential with BaseURL=https://gateway.example and
+	// it'll receive /responses directly. This makes BaseURL authoritative
+	// for whether /v1/ ends up in the upstream URL.
 	OpenAIBaseURL string `yaml:"openai_base_url,omitempty"`
 
 	// Codex OAuth-authenticated requests hit the ChatGPT backend, not the
@@ -163,7 +170,7 @@ func applyDefaults(c *Config, path string) {
 		c.AnthropicBaseURL = "https://api.anthropic.com"
 	}
 	if c.OpenAIBaseURL == "" {
-		c.OpenAIBaseURL = "https://api.openai.com"
+		c.OpenAIBaseURL = "https://api.openai.com/v1"
 	}
 	if c.ChatGPTBackendBaseURL == "" {
 		c.ChatGPTBackendBaseURL = "https://chatgpt.com/backend-api"
