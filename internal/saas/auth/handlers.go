@@ -73,14 +73,19 @@ func (h *Handler) register(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "email already registered"})
 		return
 	}
-	verified := false
-	if req.Code != "" {
-		if err := h.DB.ConsumeEmailCode(c.Request.Context(), req.Email, req.Code, db.PurposeVerify); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		verified = true
+	// Email verification is mandatory in production. Empty code → reject.
+	// The legacy "skip verification" path was a dev-only escape hatch and
+	// is now closed: an attacker would otherwise be able to spam-create
+	// unverified accounts without ever owning the inbox.
+	if strings.TrimSpace(req.Code) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "verification code required"})
+		return
 	}
+	if err := h.DB.ConsumeEmailCode(c.Request.Context(), req.Email, req.Code, db.PurposeVerify); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	verified := true
 	hash, err := HashPassword(req.Password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
