@@ -233,9 +233,10 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
           <>
             <DialogHeader>
               <DialogTitle>Top up wallet</DialogTitle>
-              <DialogDescription>Pay via Alipay at the live USD/CNY rate.</DialogDescription>
+              <DialogDescription>You'll pay in CNY via Alipay at the live USD/CNY rate. Wallet is credited in USD.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2">
+              <AlipayBadge />
               <div className="space-y-2">
                 <Label htmlFor="usd">Amount (USD)</Label>
                 <Input id="usd" type="number" min="1" max="1000" step="1" value={usd} onChange={(e) => setUsd(e.target.value)} className="font-mono text-2xl" />
@@ -268,21 +269,22 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle>Complete your payment</DialogTitle>
+              <DialogTitle>Pay with Alipay 支付宝</DialogTitle>
               <DialogDescription>
                 {order.pay_url
-                  ? "Click below to open the payment page, or scan the QR code."
-                  : "Open your payment app and scan the QR code."}
+                  ? "Open the Alipay app and scan the QR, or click the link to open the payment page."
+                  : "Open the Alipay app and scan the QR code."}
               </DialogDescription>
             </DialogHeader>
             <div className="flex flex-col items-center gap-4 py-4">
+              <AlipayBadge />
               {/* QR: prefer hosted img URL if upstream provided one (it's the
                   authoritative scannable QR image); otherwise render the
                   pay_url/qr_code as a generated QR — the redirect URL is
                   itself scannable on most payment apps. */}
               <div className="rounded-lg border border-border-strong bg-white p-4">
                 {order.img ? (
-                  <img src={order.img} alt="Pay QR" width={220} height={220} className="block" />
+                  <img src={order.img} alt="Alipay QR" width={220} height={220} className="block" />
                 ) : (
                   <QRCodeSVG value={order.pay_url || order.qr_code} size={220} level="M" />
                 )}
@@ -302,7 +304,7 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
                   rel="noreferrer noopener"
                   className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
                 >
-                  Open payment page →
+                  Open in Alipay →
                 </a>
               )}
               <div className="text-xs text-muted-foreground">{polling ? "Waiting for payment…" : "Payment timeout"}</div>
@@ -315,5 +317,32 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// AlipayBadge is the pill we show prominently in the top-up dialog so
+// users can see at a glance which payment rail will be used. The wordmark
+// uses Alipay's brand blue (#1677FF). The Chinese name "支付宝" is the
+// primary identifier for Chinese users; the English "Alipay" mirrors it
+// for international users. Logo is the dotted-square treatment from
+// Alipay's official brand assets, drawn inline as SVG so we don't ship a
+// separate image file.
+function AlipayBadge() {
+  return (
+    <div className="flex items-center gap-2.5 rounded-md border border-[#1677FF]/30 bg-[#1677FF]/[0.06] px-3 py-2">
+      {/* Alipay-blue rounded square with the 支 wordmark — close to the
+          official lock-up without redistributing the brand SVG. */}
+      <span
+        aria-hidden="true"
+        className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[#1677FF] font-display text-sm font-semibold text-white"
+        style={{ fontFamily: '"PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif' }}
+      >
+        支
+      </span>
+      <div className="flex min-w-0 flex-col leading-tight">
+        <span className="text-sm font-semibold text-foreground">Alipay 支付宝</span>
+        <span className="text-[11px] text-muted-foreground">The only payment method currently supported</span>
+      </div>
+    </div>
   );
 }
