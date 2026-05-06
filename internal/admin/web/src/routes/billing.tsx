@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
-import { Wallet, RefreshCw } from "lucide-react";
+import { Wallet, RefreshCw, Lock } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -154,12 +154,35 @@ function StatusPill({ status }: { status: string }) {
   return <span className={`inline-flex rounded border px-2 py-0.5 text-xs font-mono uppercase tracking-wider ${cls}`}>{status}</span>;
 }
 
-function TopUpDialog({ open, onOpenChange, rate, onPaid }: any) {
+function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
   const [usd, setUsd] = useState("10");
   const [method, setMethod] = useState<"alipay" | "wxpay">("alipay");
   const [order, setOrder] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [polling, setPolling] = useState(false);
+  // Live rate refresh while the dialog is open. Pre-create the user sees
+  // a current quote; once the order is created the rate is locked into
+  // order.rate and we display that instead.
+  const [liveRate, setLiveRate] = useState<ExchangeRate | null>(initialRate);
+  const [rateAge, setRateAge] = useState(0);
+  useEffect(() => {
+    if (!open || order) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await apiGet<ExchangeRate>("/billing/rate");
+        if (!cancelled) {
+          setLiveRate(r);
+          setRateAge(0);
+        }
+      } catch {}
+    };
+    tick();
+    const fetchT = setInterval(tick, 30_000);
+    const ageT = setInterval(() => setRateAge((a) => a + 1), 1000);
+    return () => { cancelled = true; clearInterval(fetchT); clearInterval(ageT); };
+  }, [open, order]);
+  const rate = liveRate;
 
   const create = async () => {
     setBusy(true);
@@ -229,7 +252,16 @@ function TopUpDialog({ open, onOpenChange, rate, onPaid }: any) {
               <div className="rounded-md border border-border-strong bg-muted/30 p-3 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">You pay (CNY)</span><span className="font-mono tabular-nums">¥{(parseFloat(usd || "0") * (rate?.cny_per_usd || 7.2)).toFixed(2)}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Wallet credit</span><span className="font-mono tabular-nums">${parseFloat(usd || "0").toFixed(2)}</span></div>
-                <div className="flex justify-between text-xs"><span className="text-muted-foreground">Rate</span><span className="font-mono text-muted-foreground">1 USD = ¥{rate?.cny_per_usd.toFixed(4)}</span></div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground inline-flex items-center gap-1.5">
+                    <span className="relative inline-flex h-1.5 w-1.5">
+                      <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75 animate-ping" />
+                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    </span>
+                    Live rate{rateAge > 1 ? ` · ${rateAge}s ago` : ""}
+                  </span>
+                  <span className="font-mono text-muted-foreground">1 USD = ¥{rate?.cny_per_usd.toFixed(4)}</span>
+                </div>
               </div>
             </div>
             <DialogFooter>
@@ -262,6 +294,10 @@ function TopUpDialog({ open, onOpenChange, rate, onPaid }: any) {
               <div className="text-center">
                 <div className="font-mono text-2xl font-semibold tabular-nums">¥{order.cny_amount.toFixed(2)}</div>
                 <div className="text-sm text-muted-foreground">≈ ${order.usd_credit} wallet credit</div>
+                <div className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground font-mono">
+                  <Lock className="h-3 w-3" />
+                  Rate locked · 1 USD = ¥{order.rate.toFixed(4)}
+                </div>
               </div>
               {order.pay_url && (
                 <a

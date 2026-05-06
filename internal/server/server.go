@@ -225,7 +225,10 @@ func (s *Server) buildClaudeEngine(adminH *admin.Handler, primary bool) *gin.Eng
 	engine.GET("/healthz", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok", "endpoint": "claude"}) })
 
 	v1 := engine.Group("/v1")
-	v1.Use(s.clientAuth())
+	// requireClaudeCodeClient runs BEFORE clientAuth so we don't even
+	// hash-compare an attacker's bearer token if their headers don't look
+	// like CC. Cheaper to reject and log fewer DB lookups.
+	v1.Use(requireClaudeCodeClient(), s.clientAuth())
 	{
 		v1.POST("/messages", s.handleMessages)
 		v1.POST("/messages/count_tokens", s.handleCountTokens)

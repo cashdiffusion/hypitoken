@@ -10,10 +10,16 @@ intro: One unified gateway fronts both Claude and Codex. Account → token → f
 
 | Tool | Base URL |
 | --- | --- |
-| Claude Code / Anthropic SDK | `https://api.novadiffusion.com` |
-| Codex CLI / OpenAI SDK | `https://api.novadiffusion.com/v1` |
+| Claude Code | `https://api.novadiffusion.com` |
+| Codex CLI | `https://api.novadiffusion.com/v1` |
 
 The same API token works for both. Caddy routes `/v1/chat/*`, `/v1/responses*`, and `/v1/models` to the Codex endpoint; everything else goes to Claude.
+
+> Only the official Claude Code and Codex CLI clients are supported.
+> Third-party SDKs and tools (Anthropic SDK, OpenAI SDK, LiteLLM, custom
+> chat clients, etc.) are blocked at the gateway by client-fingerprint
+> checks — requests without a valid Claude Code or Codex CLI signature
+> are rejected with `403 client not allowed`.
 
 ## Create an account
 
