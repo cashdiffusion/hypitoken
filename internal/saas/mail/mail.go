@@ -111,26 +111,35 @@ func (m *SMTPMailer) sendTLS(addr string, auth smtp.Auth, from string, to []stri
 	return w.Close()
 }
 
-// VerificationEmail builds an HTML body for the email verification code.
+// VerificationEmail builds the subject + HTML body for the email-verification
+// code that the user types during sign-up. Wraps the polished email shell
+// in templates.go so layout/branding stays consistent with the reset flow.
 func VerificationEmail(siteName, code string) (string, string) {
-	subject := fmt.Sprintf("[%s] Email verification code", siteName)
-	body := fmt.Sprintf(`<div style="font-family:system-ui;padding:24px;">
-<h2>%s — Email verification</h2>
-<p>Your verification code is:</p>
-<div style="font-size:32px;font-weight:700;letter-spacing:6px;padding:16px 24px;background:#f4f4f5;border-radius:8px;display:inline-block;">%s</div>
-<p style="color:#71717a;margin-top:16px;">The code expires in 10 minutes.</p>
-</div>`, siteName, code)
+	subject := fmt.Sprintf("Your %s verification code: %s", siteName, code)
+	body := renderShell(
+		siteName,
+		fmt.Sprintf("Your verification code is %s. It expires in 10 minutes.", code),
+		"Confirm your email address",
+		"Welcome aboard! To finish creating your account, enter the 6-digit code below in the verification screen.",
+		code,
+		"This code expires in 10 minutes. For your security, never share it with anyone.",
+		"Verify Email",
+	)
 	return subject, body
 }
 
-// ResetEmail builds an HTML body for the password reset code.
+// ResetEmail builds the subject + HTML body for the password-reset code that
+// the user types on the forgot-password screen.
 func ResetEmail(siteName, code string) (string, string) {
-	subject := fmt.Sprintf("[%s] Password reset code", siteName)
-	body := fmt.Sprintf(`<div style="font-family:system-ui;padding:24px;">
-<h2>%s — Password reset</h2>
-<p>Your password reset code is:</p>
-<div style="font-size:32px;font-weight:700;letter-spacing:6px;padding:16px 24px;background:#f4f4f5;border-radius:8px;display:inline-block;">%s</div>
-<p style="color:#71717a;margin-top:16px;">The code expires in 10 minutes.</p>
-</div>`, siteName, code)
+	subject := fmt.Sprintf("%s password reset — code: %s", siteName, code)
+	body := renderShell(
+		siteName,
+		fmt.Sprintf("Your password reset code is %s. It expires in 10 minutes.", code),
+		"Reset your password",
+		"We received a request to reset the password on your account. Enter the 6-digit code below to choose a new one.",
+		code,
+		"This code expires in 10 minutes. If you didn't request a reset, you can ignore this email — your password will stay the same.",
+		"Reset Password",
+	)
 	return subject, body
 }
