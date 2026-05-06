@@ -541,6 +541,8 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	// returns the dollar amount actually deducted. The same value gets
 	// written into the request log so the log row matches the wallet ledger.
 	var costUSD float64
+	var userID int64
+	var multiplier float64
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
 		officialCost := s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
 		costUSD = officialCost
@@ -550,6 +552,8 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 			} else {
 				costUSD = billed
+				userID = info.UserID
+				multiplier = s.saas.MultiplierFor(c.Request.Context(), info.GroupID, auth.NormalizeProvider(a.Provider))
 			}
 		}
 	}
@@ -587,6 +591,8 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		Stream:      stream,
 		Path:        path,
 		Attempts:    attempts,
+		UserID:      userID,
+		Multiplier:  multiplier,
 	})
 	return false, true
 }
@@ -699,6 +705,8 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	}
 
 	var costUSD float64
+	var userID int64
+	var multiplier float64
 	if resp.StatusCode < 400 {
 		s.usage.Record(a.ID, a.Label, counts)
 		if counts.Requests > 0 && clientToken != "" {
@@ -710,6 +718,8 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 					log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 				} else {
 					costUSD = billed
+					userID = info.UserID
+					multiplier = s.saas.MultiplierFor(c.Request.Context(), info.GroupID, auth.NormalizeProvider(a.Provider))
 				}
 			}
 		}
@@ -741,6 +751,8 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		Stream:      stream,
 		Path:        path,
 		Attempts:    attempts,
+		UserID:      userID,
+		Multiplier:  multiplier,
 	})
 	return false, true
 }
@@ -1077,6 +1089,12 @@ func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientTo
 	provider := auth.NormalizeProvider(a.Provider)
 	var total float64
 	info, hasSaaS := saasInfoFrom(c)
+	var subUserID int64
+	var subMultiplier float64
+	if hasSaaS && s.saas != nil {
+		subUserID = info.UserID
+		subMultiplier = s.saas.MultiplierFor(c.Request.Context(), info.GroupID, provider)
+	}
 	for subModel, sc := range sub.byModel {
 		// Sub-calls bump the auth's daily/hourly bucket and WeightedTotal so
 		// the credential bears the full opus load. Requests stays 0: the
@@ -1110,7 +1128,9 @@ func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientTo
 			// DurationMs/Stream/Attempts intentionally zero: this row is a
 			// sub-call summary, not an independent request — adding wall
 			// time would double-count it in admin's "total time" stats.
-			Path: path + "#advisor:" + subModel,
+			Path:       path + "#advisor:" + subModel,
+			UserID:     subUserID,
+			Multiplier: subMultiplier,
 		})
 	}
 	return total

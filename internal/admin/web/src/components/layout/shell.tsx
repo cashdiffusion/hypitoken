@@ -2,7 +2,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { LogOut, User as UserIcon, Wallet, KeyRound, LayoutDashboard, Activity, Shield, Home, BookOpen, ExternalLink, Tag, Terminal } from "lucide-react";
+import { LogOut, User as UserIcon, Wallet, KeyRound, LayoutDashboard, Activity, Shield, Home, BookOpen, ExternalLink, Tag, Terminal, Receipt } from "lucide-react";
 import { fmtUSD } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +10,7 @@ const NAV = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/app/tokens", label: "Tokens", icon: KeyRound },
   { to: "/app/billing", label: "Billing", icon: Wallet },
+  { to: "/app/logs", label: "Logs", icon: Receipt },
   { to: "/app/console", label: "Console", icon: Terminal },
 ];
 

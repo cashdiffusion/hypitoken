@@ -243,7 +243,7 @@ func main() {
 			return true, claims.Role == "admin"
 		}
 		for _, h := range s.GinEngines() {
-			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin)
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir)
 			if spaFS != nil {
 				saasadapter.MountSPA(h, spaFS)
 			}
