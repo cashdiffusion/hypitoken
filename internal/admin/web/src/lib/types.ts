@@ -55,6 +55,8 @@ export interface AlipayOrder {
   status: "pending" | "paid" | "expired" | "failed";
   trade_no: string;
   qr_code: string;
+  pay_url?: string;
+  img?: string;
   created_at: number;
   paid_at: number;
 }

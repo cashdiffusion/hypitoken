@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -21,20 +22,51 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 )
 
-// Gateway abstracts the Alipay client so dev/CI can swap in MockGateway
-// (auto-confirms after 2s).
+// Gateway abstracts a payment gateway (Alipay direct, Z-Pay aggregator,
+// MockGateway). Implementations differ in auth scheme, signing algorithm
+// and the shape of the payment URL handed back to the user — but every
+// gateway funnels through the same applyNotification path so credit-side
+// validation is uniform.
 type Gateway interface {
-	CreatePrecreate(ctx context.Context, outTradeNo, subject string, totalCNY float64) (qrCode string, err error)
-	// VerifyNotify checks the RSA signature and returns the parsed Alipay
+	// CreatePayment asks the gateway to create a new pending order. Returns
+	// any of {QRCode, PayURL, Img} the gateway provides — caller picks the
+	// best surface for its UI.
+	CreatePayment(ctx context.Context, p PayParams) (*PayResult, error)
+	// VerifyNotify checks the upstream signature and returns the parsed
 	// notify payload. Caller must additionally verify app_id, total_amount,
 	// and trade_status against the on-disk order before crediting.
 	VerifyNotify(req map[string][]string) (*Notification, error)
-	// QueryTrade calls alipay.trade.query for a known out_trade_no — used
-	// by the reconciliation endpoint to repair lost notifications.
+	// QueryTrade looks up a trade by out_trade_no — used by the
+	// reconciliation endpoint to repair lost notifications.
 	QueryTrade(ctx context.Context, outTradeNo string) (*Notification, error)
-	// AppID returns the merchant App ID this gateway is bound to. Used in
-	// notify validation.
+	// AppID returns the merchant identifier this gateway is bound to. Used
+	// in notify validation. For Alipay direct this is the AppID; for Z-Pay
+	// this is the PID.
 	AppID() string
+}
+
+// PayParams is the input to Gateway.CreatePayment. Gateways may ignore
+// fields they don't use.
+type PayParams struct {
+	OutTradeNo string
+	Subject    string
+	TotalCNY   float64
+	// Method is the user-selected payment rail ("alipay" | "wxpay"). For
+	// Alipay direct the gateway always serves Alipay; for Z-Pay this picks
+	// between Alipay and WeChat Pay rails through the aggregator.
+	Method string
+	// ClientIP is the end-user's public IP. Some aggregators (Z-Pay
+	// `mapi.php`) require this — Alipay direct ignores it.
+	ClientIP string
+}
+
+// PayResult is the union of payment surfaces a gateway might return.
+// Frontend prefers PayURL (browser redirect) when set, falling back to
+// rendering QRCode as a QR image, falling back to Img (a hosted QR PNG).
+type PayResult struct {
+	QRCode string `json:"qr_code,omitempty"`
+	PayURL string `json:"pay_url,omitempty"`
+	Img    string `json:"img,omitempty"`
 }
 
 // Notification is the verified subset of Alipay's async notify / sync query
@@ -94,9 +126,13 @@ func (h *Handler) UserRoutes(g *gin.RouterGroup) {
 	g.GET("/orders/:id", h.orderStatus)
 }
 
-// PublicRoutes mounts callbacks Alipay POSTs to (no auth — verified by signature).
+// PublicRoutes mounts gateway notification callbacks (no auth — verified
+// by per-gateway signature). Alipay direct delivers POST; Z-Pay delivers
+// GET. We mount both verbs against the same handler so either gateway
+// works without a config-driven route table.
 func (h *Handler) PublicRoutes(g *gin.RouterGroup) {
 	g.POST("/billing/notify", h.notify)
+	g.GET("/billing/notify", h.notify)
 }
 
 func (h *Handler) balance(c *gin.Context) {
@@ -152,7 +188,8 @@ func (h *Handler) orders(c *gin.Context) {
 }
 
 type topupReq struct {
-	USD float64 `json:"usd"` // wallet credit requested (real USD)
+	USD    float64 `json:"usd"`              // wallet credit requested (real USD)
+	Method string  `json:"method,omitempty"` // "alipay" (default) | "wxpay" — gateways may ignore
 }
 
 func (h *Handler) topup(c *gin.Context) {
@@ -199,15 +236,29 @@ func (h *Handler) topup(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	subject := fmt.Sprintf("%s wallet top-up: $%.2f", h.Site, req.USD)
-	qr, err := h.Gateway.CreatePrecreate(c.Request.Context(), out, subject, cny)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "alipay: " + err.Error()})
+	method := strings.ToLower(strings.TrimSpace(req.Method))
+	if method == "" {
+		method = "alipay"
+	}
+	if method != "alipay" && method != "wxpay" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "method must be alipay or wxpay"})
 		return
 	}
+	subject := fmt.Sprintf("%s wallet top-up: $%.2f", h.Site, req.USD)
+	pr, err := h.Gateway.CreatePayment(c.Request.Context(), PayParams{
+		OutTradeNo: out, Subject: subject, TotalCNY: cny,
+		Method: method, ClientIP: c.ClientIP(),
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "gateway: " + err.Error()})
+		return
+	}
+	// Pack the three URL surfaces into the existing qr_code TEXT column as
+	// JSON so we don't need a schema migration. Frontend parses on read.
+	stored, _ := json.Marshal(pr)
 	if err := h.DB.CreateOrder(c.Request.Context(), db.AlipayOrder{
 		OutTradeNo: out, UserID: u.ID, CNYAmount: cny, USDCredit: req.USD,
-		Rate: rate, QRCode: qr,
+		Rate: rate, QRCode: string(stored),
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -220,7 +271,10 @@ func (h *Handler) topup(c *gin.Context) {
 		"cny_amount":   cny,
 		"usd_credit":   req.USD,
 		"rate":         rate,
-		"qr_code":      qr,
+		"method":       method,
+		"qr_code":      pr.QRCode,
+		"pay_url":      pr.PayURL,
+		"img":          pr.Img,
 	})
 }
 
@@ -240,7 +294,10 @@ func (h *Handler) notify(c *gin.Context) {
 		c.String(http.StatusBadRequest, "fail")
 		return
 	}
-	n, err := h.Gateway.VerifyNotify(c.Request.PostForm)
+	// Read from r.Form, not r.PostForm: ParseForm populates Form from
+	// both query string AND POST body, so this handles Alipay's POST
+	// notify and Z-Pay's GET notify uniformly.
+	n, err := h.Gateway.VerifyNotify(c.Request.Form)
 	if err != nil {
 		log.Warnf("alipay notify: verify failed: %v", err)
 		c.String(http.StatusBadRequest, "fail")
@@ -355,6 +412,16 @@ func orderView(o *db.AlipayOrder) gin.H {
 	if !o.PaidAt.IsZero() {
 		paid = o.PaidAt.Unix()
 	}
+	// QRCode is stored as a JSON-encoded PayResult so we don't need a
+	// schema migration to add pay_url/img alongside it. Best-effort unpack
+	// — legacy rows are bare URLs and decode harmlessly to the empty
+	// struct, leaving qr_code as the legacy raw value.
+	var pr PayResult
+	if s := strings.TrimSpace(o.QRCode); strings.HasPrefix(s, "{") {
+		_ = json.Unmarshal([]byte(s), &pr)
+	} else {
+		pr.QRCode = s
+	}
 	return gin.H{
 		"out_trade_no": o.OutTradeNo,
 		"cny_amount":   o.CNYAmount,
@@ -362,7 +429,9 @@ func orderView(o *db.AlipayOrder) gin.H {
 		"rate":         o.Rate,
 		"status":       o.Status,
 		"trade_no":     o.TradeNo,
-		"qr_code":      o.QRCode,
+		"qr_code":      pr.QRCode,
+		"pay_url":      pr.PayURL,
+		"img":          pr.Img,
 		"created_at":   o.CreatedAt.Unix(),
 		"paid_at":      paid,
 	}
@@ -463,8 +532,8 @@ type MockGateway struct{}
 
 const MockAppID = "mock-app-id"
 
-func (g *MockGateway) CreatePrecreate(_ context.Context, out, subject string, _ float64) (string, error) {
-	return "https://example.com/mock-alipay-qr/" + out, nil
+func (g *MockGateway) CreatePayment(_ context.Context, p PayParams) (*PayResult, error) {
+	return &PayResult{QRCode: "https://example.com/mock-pay-qr/" + p.OutTradeNo}, nil
 }
 func (g *MockGateway) VerifyNotify(_ map[string][]string) (*Notification, error) {
 	return nil, errors.New("mock gateway does not receive notifications")
@@ -538,20 +607,20 @@ func NewAlipayGateway(p AlipayParams) (*AlipayGateway, error) {
 	return &AlipayGateway{Client: cli, NotifyURL: p.NotifyURL, appID: p.AppID}, nil
 }
 
-func (g *AlipayGateway) CreatePrecreate(ctx context.Context, out, subject string, totalCNY float64) (string, error) {
+func (g *AlipayGateway) CreatePayment(ctx context.Context, params PayParams) (*PayResult, error) {
 	p := alipay.TradePreCreate{}
 	p.NotifyURL = g.NotifyURL
-	p.OutTradeNo = out
-	p.Subject = subject
-	p.TotalAmount = fmt.Sprintf("%.2f", totalCNY)
+	p.OutTradeNo = params.OutTradeNo
+	p.Subject = params.Subject
+	p.TotalAmount = fmt.Sprintf("%.2f", params.TotalCNY)
 	resp, err := g.Client.TradePreCreate(ctx, p)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if !resp.IsSuccess() {
-		return "", fmt.Errorf("alipay: %s (code=%s)", resp.Msg, resp.Code)
+		return nil, fmt.Errorf("alipay: %s (code=%s)", resp.Msg, resp.Code)
 	}
-	return resp.QRCode, nil
+	return &PayResult{QRCode: resp.QRCode}, nil
 }
 
 func (g *AlipayGateway) VerifyNotify(form map[string][]string) (*Notification, error) {
