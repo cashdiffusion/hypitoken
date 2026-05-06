@@ -181,23 +181,11 @@ func main() {
 		rate := billing.NewRate(cfg.SaaS.ExchangeRateURL, cfg.SaaS.FallbackCNYPerUSD)
 		go rate.RunRefresher(refresherCtx, time.Hour)
 
-		var gateway billing.Gateway
-		if strings.TrimSpace(cfg.SaaS.Alipay.AppID) != "" {
-			gw, err := billing.NewAlipayGateway(billing.AlipayParams{
-				AppID:           cfg.SaaS.Alipay.AppID,
-				PrivateKey:      cfg.SaaS.Alipay.PrivateKey,
-				AlipayPublicKey: cfg.SaaS.Alipay.AlipayPublicKey,
-				IsProduction:    cfg.SaaS.Alipay.IsProduction,
-				NotifyURL:       cfg.SaaS.Alipay.NotifyURL,
-			})
-			if err != nil {
-				log.Fatalf("alipay gateway: %v", err)
-			}
-			gateway = gw
-		} else {
-			log.Warn("Alipay not configured (saas.alipay.app_id empty) — using mock gateway (orders auto-confirm after 2s)")
-			gateway = &billing.MockGateway{}
+		gateway, gwName, err := selectPaymentGateway(cfg.SaaS)
+		if err != nil {
+			log.Fatalf("payment gateway: %v", err)
 		}
+		log.Infof("payment gateway: %s", gwName)
 		billingH := billing.NewHandler(saasDB, rate, gateway, cfg.SaaS.SiteName)
 		// Background sweeper: marks pending alipay orders older than the
 		// TTL as expired so late notifications can't credit them.
@@ -334,3 +322,69 @@ func bootstrapAdmin(db *saasdb.DB, cfg saas.Config) {
 // default group. This hook exists so future expansions (per-provider rate
 // imports, etc.) have a place to land. Intentionally a no-op for now.
 func bootstrapPricingFromCatalog(_ saas.Config, _ *saasdb.DB) {}
+
+// selectPaymentGateway picks a billing.Gateway from the SaaS config. The
+// `payment_provider` field is authoritative; if empty we infer from
+// which credential block is populated. Returns the gateway plus a short
+// name for logging.
+func selectPaymentGateway(s saas.Config) (billing.Gateway, string, error) {
+	provider := strings.ToLower(strings.TrimSpace(s.PaymentProvider))
+	if provider == "" {
+		switch {
+		case strings.TrimSpace(s.ZPay.PID) != "":
+			provider = "zpay"
+		case strings.TrimSpace(s.Alipay.AppID) != "":
+			provider = "alipay"
+		default:
+			provider = "mock"
+		}
+	}
+	switch provider {
+	case "zpay":
+		key, err := loadKeyFile(s.ZPay.Key)
+		if err != nil {
+			return nil, "", fmt.Errorf("zpay key: %w", err)
+		}
+		gw, err := billing.NewZPayGateway(billing.ZPayParams{
+			BaseURL:   s.ZPay.BaseURL,
+			PID:       s.ZPay.PID,
+			Key:       key,
+			NotifyURL: s.ZPay.NotifyURL,
+			ReturnURL: s.ZPay.ReturnURL,
+		})
+		if err != nil {
+			return nil, "", err
+		}
+		return gw, "zpay (易支付 aggregator, pid=" + s.ZPay.PID + ")", nil
+	case "alipay":
+		gw, err := billing.NewAlipayGateway(billing.AlipayParams{
+			AppID:           s.Alipay.AppID,
+			PrivateKey:      s.Alipay.PrivateKey,
+			AlipayPublicKey: s.Alipay.AlipayPublicKey,
+			IsProduction:    s.Alipay.IsProduction,
+			NotifyURL:       s.Alipay.NotifyURL,
+		})
+		if err != nil {
+			return nil, "", err
+		}
+		return gw, "alipay (direct merchant)", nil
+	case "mock":
+		return &billing.MockGateway{}, "mock (auto-confirms after 2s — DO NOT use in production)", nil
+	}
+	return nil, "", fmt.Errorf("unknown payment_provider %q (want zpay|alipay|mock)", provider)
+}
+
+// loadKeyFile resolves either an inline secret or an "@/path" reference.
+// Mirrors billing.loadKey but exposed at the main package layer so we
+// can keep the file-loaded value out of the YAML committed to git.
+func loadKeyFile(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "@") {
+		data, err := os.ReadFile(s[1:])
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(data)), nil
+	}
+	return s, nil
+}

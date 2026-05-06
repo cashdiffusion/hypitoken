@@ -156,6 +156,7 @@ function StatusPill({ status }: { status: string }) {
 
 function TopUpDialog({ open, onOpenChange, rate, onPaid }: any) {
   const [usd, setUsd] = useState("10");
+  const [method, setMethod] = useState<"alipay" | "wxpay">("alipay");
   const [order, setOrder] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [polling, setPolling] = useState(false);
@@ -163,7 +164,7 @@ function TopUpDialog({ open, onOpenChange, rate, onPaid }: any) {
   const create = async () => {
     setBusy(true);
     try {
-      const r = await apiPost<any>("/billing/topup", { usd: parseFloat(usd) });
+      const r = await apiPost<any>("/billing/topup", { usd: parseFloat(usd), method });
       setOrder(r);
       setPolling(true);
       pollOrder(r.out_trade_no);
@@ -218,6 +219,13 @@ function TopUpDialog({ open, onOpenChange, rate, onPaid }: any) {
                   <Button key={p} type="button" variant="outline" size="sm" onClick={() => setUsd(String(p))}>${p}</Button>
                 ))}
               </div>
+              <div className="space-y-2">
+                <Label>Payment method</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button type="button" variant={method === "alipay" ? "default" : "outline"} size="sm" onClick={() => setMethod("alipay")}>Alipay 支付宝</Button>
+                  <Button type="button" variant={method === "wxpay" ? "default" : "outline"} size="sm" onClick={() => setMethod("wxpay")}>WeChat 微信</Button>
+                </div>
+              </div>
               <div className="rounded-md border border-border-strong bg-muted/30 p-3 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">You pay (CNY)</span><span className="font-mono tabular-nums">¥{(parseFloat(usd || "0") * (rate?.cny_per_usd || 7.2)).toFixed(2)}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Wallet credit</span><span className="font-mono tabular-nums">${parseFloat(usd || "0").toFixed(2)}</span></div>
@@ -232,17 +240,39 @@ function TopUpDialog({ open, onOpenChange, rate, onPaid }: any) {
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle>Scan to pay</DialogTitle>
-              <DialogDescription>Open Alipay → Scan. Order auto-confirms after payment.</DialogDescription>
+              <DialogTitle>Complete your payment</DialogTitle>
+              <DialogDescription>
+                {order.pay_url
+                  ? "Click below to open the payment page, or scan the QR code."
+                  : "Open your payment app and scan the QR code."}
+              </DialogDescription>
             </DialogHeader>
             <div className="flex flex-col items-center gap-4 py-4">
+              {/* QR: prefer hosted img URL if upstream provided one (it's the
+                  authoritative scannable QR image); otherwise render the
+                  pay_url/qr_code as a generated QR — the redirect URL is
+                  itself scannable on most payment apps. */}
               <div className="rounded-lg border border-border-strong bg-white p-4">
-                <QRCodeSVG value={order.qr_code} size={220} level="M" />
+                {order.img ? (
+                  <img src={order.img} alt="Pay QR" width={220} height={220} className="block" />
+                ) : (
+                  <QRCodeSVG value={order.pay_url || order.qr_code} size={220} level="M" />
+                )}
               </div>
               <div className="text-center">
                 <div className="font-mono text-2xl font-semibold tabular-nums">¥{order.cny_amount.toFixed(2)}</div>
                 <div className="text-sm text-muted-foreground">≈ ${order.usd_credit} wallet credit</div>
               </div>
+              {order.pay_url && (
+                <a
+                  href={order.pay_url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
+                >
+                  Open payment page →
+                </a>
+              )}
               <div className="text-xs text-muted-foreground">{polling ? "Waiting for payment…" : "Payment timeout"}</div>
               <code className="text-xs text-muted-foreground">{order.out_trade_no}</code>
             </div>

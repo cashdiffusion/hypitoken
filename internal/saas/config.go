@@ -49,9 +49,18 @@ type Config struct {
 	// (in dev) prints verification codes inline.
 	SMTP SMTPConfig `yaml:"smtp"`
 
-	// Alipay gateway. If AppID is empty, the mock gateway is used: orders
-	// auto-confirm 2 seconds after creation. Useful for local dev.
+	// Payment gateway selector. One of "alipay" (direct merchant), "zpay"
+	// (易支付 aggregator), or "mock" (auto-confirms after 2s — dev only).
+	// Empty defaults to whichever block is configured: zpay if zpay.pid
+	// set, alipay if alipay.app_id set, else mock.
+	PaymentProvider string `yaml:"payment_provider,omitempty"`
+
+	// Alipay direct-merchant gateway. Requires real merchant onboarding.
 	Alipay AlipayConfig `yaml:"alipay"`
+
+	// Z-Pay 易支付 aggregator gateway — works for individual operators
+	// without a business license.
+	ZPay ZPayConfig `yaml:"zpay"`
 
 	// Exchange rate source. Empty = built-in fawazahmed0 currency-api.
 	ExchangeRateURL string  `yaml:"exchange_rate_url"`
@@ -68,6 +77,17 @@ type SMTPConfig struct {
 	Password string `yaml:"password"`
 	From     string `yaml:"from"`
 	UseTLS   bool   `yaml:"use_tls"`
+}
+
+// ZPayConfig configures the Z-Pay aggregator gateway. Key is sensitive
+// — prefer the @path/to/file form so the secret stays out of the YAML
+// committed to git.
+type ZPayConfig struct {
+	BaseURL   string `yaml:"base_url,omitempty"` // default https://zpayz.cn
+	PID       string `yaml:"pid"`                // 商户ID
+	Key       string `yaml:"key"`                // 商户密钥, or @/path/to/file
+	NotifyURL string `yaml:"notify_url"`         // public webhook
+	ReturnURL string `yaml:"return_url,omitempty"`
 }
 
 type AlipayConfig struct {
