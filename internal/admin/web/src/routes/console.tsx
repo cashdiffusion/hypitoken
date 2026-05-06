@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Navigate } from "react-router-dom";
-import { Activity, RefreshCw } from "lucide-react";
+import { Navigate, Link } from "react-router-dom";
+import { Activity, RefreshCw, Info } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/legacy/lib/api";
@@ -153,6 +153,18 @@ export default function ConsolePage() {
               </span>{" "}
               min · live charts refresh every 10 seconds.
             </p>
+            <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/[0.05] px-3 py-2 max-w-2xl">
+              <Info className="h-4 w-4 shrink-0 text-primary mt-0.5" />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                <span className="text-foreground font-medium">Platform-wide stats.</span>{" "}
+                Every metric here aggregates across the whole fleet — credentials, models,
+                requests, spend. It is <em>not</em> your personal usage. For your own
+                billing detail, see{" "}
+                <Link to="/app/billing" className="underline underline-offset-2 text-foreground hover:text-primary">Billing</Link>{" "}
+                or{" "}
+                <Link to="/app/logs" className="underline underline-offset-2 text-foreground hover:text-primary">Logs</Link>.
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-2 lg:justify-end">

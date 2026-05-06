@@ -127,6 +127,13 @@ export interface DashboardBoardProps {
   busy?: boolean;
   /** When true, label Top clients with a "pseudonyms" hint/tooltip. */
   clientsAnonymized?: boolean;
+  /**
+   * Fleet-wide sum of what users actually paid us in USD (post per-group
+   * multiplier). When provided, the "Saved" tile compares no-cache @
+   * Anthropic-official-rate against this number rather than the upstream
+   * cost — i.e. shows the savings from caching AND our discount combined.
+   */
+  userPaidUSD?: number | null;
 }
 
 // ----- component -----
@@ -139,6 +146,7 @@ export function DashboardBoard({
   hourly,
   busy = false,
   clientsAnonymized = false,
+  userPaidUSD = null,
 }: DashboardBoardProps) {
   const lookupPrice = (model: string): PricingEntry | null => {
     if (!pricing) return null;
@@ -162,8 +170,22 @@ export function DashboardBoard({
     const cacheCreate = s.cache_create_tokens || 0;
     const denom = input + cacheRead + cacheCreate;
     const hitRate = denom > 0 ? cacheRead / denom : 0;
-    const actualCost = s.cost_usd || 0;
+    // What users actually paid us — the request_log emits cost_usd
+    // POST-multiplier (see internal/server/proxy.go forward()), which is
+    // the same value wallet_tx records on Charge(). Use this as the truth
+    // for "users paid us"; the userPaidUSD prop from /wallet-totals is
+    // only a sanity-check fallback.
+    const usersPaid = s.cost_usd || 0;
+    // Compute two reference points at OFFICIAL Anthropic rates from the
+    // catalog (no multiplier, no SaaS discount):
+    //   noCacheCost          — pretend caching never happened (input + cache
+    //                          slots all priced as fresh input)
+    //   officialWithCache    — real token mix priced with cache discount
+    //                          (input_per_1m for input, cache_read_per_1m
+    //                          for cache reads, cache_create_per_1m for
+    //                          cache writes, output_per_1m for output)
     let noCacheCost = 0;
+    let officialWithCache = 0;
     if (pricing) {
       for (const [name, a] of Object.entries(lifetimeData.by_model)) {
         const p = lookupPrice(name);
@@ -174,16 +196,32 @@ export function DashboardBoard({
         const aout = a.output_tokens || 0;
         noCacheCost += ((ain + acr + acw) * p.input_per_1m) / 1e6;
         noCacheCost += (aout * p.output_per_1m) / 1e6;
+        officialWithCache += (ain * p.input_per_1m) / 1e6;
+        officialWithCache += (acr * (p.cache_read_per_1m || p.input_per_1m * 0.1)) / 1e6;
+        officialWithCache += (acw * (p.cache_create_per_1m || p.input_per_1m * 1.25)) / 1e6;
+        officialWithCache += (aout * p.output_per_1m) / 1e6;
       }
     }
     const output = s.output_tokens || 0;
     const totalTokens = input + output + cacheRead + cacheCreate;
-    const tokensPerDollar = actualCost > 0 ? totalTokens / actualCost : 0;
+    // tokensPerDollar uses what the user actually paid — that's the
+    // honest "tokens per buck" from the user's perspective.
+    const tokensPerDollar = usersPaid > 0 ? totalTokens / usersPaid : 0;
+    // Saved by us = official no-cache − user actually paid (covers BOTH
+    // the caching benefit AND the multiplier discount).
+    const savedByUs = Math.max(0, noCacheCost - usersPaid);
+    // Cross-check: server-side wallet_tx aggregate. Should match usersPaid
+    // for SaaS-only fleets; deviation hints at admin-token traffic that
+    // bypassed the wallet ledger.
+    const userPaidCrossCheck = typeof userPaidUSD === "number" && userPaidUSD > 0
+      ? userPaidUSD : null;
     return {
       hitRate,
-      actualCost,
+      usersPaid,
       noCacheCost,
-      savings: Math.max(0, noCacheCost - actualCost),
+      officialWithCache,
+      userPaidCrossCheck,
+      savedByUs,
       input,
       output,
       cacheRead,
@@ -361,10 +399,10 @@ export function DashboardBoard({
             }
           />
           <CacheCard
-            label="Saved by caching"
+            label="Saved by us"
             value={
               cacheStats && cacheStats.hasPricing
-                ? "$" + cacheStats.savings.toFixed(2)
+                ? "$" + cacheStats.savedByUs.toFixed(2)
                 : cacheStats && !cacheStats.hasPricing
                   ? "pricing unavailable"
                   : busy
@@ -373,9 +411,12 @@ export function DashboardBoard({
             }
             foot={
               cacheStats && cacheStats.hasPricing ? (
-                <span className="mono tabular">
-                  no-cache ${cacheStats.noCacheCost.toFixed(2)} − actual $
-                  {cacheStats.actualCost.toFixed(2)}
+                <span className="mono tabular text-[10px] leading-relaxed block">
+                  no-cache @ official ${cacheStats.noCacheCost.toFixed(2)}
+                  <br />
+                  with-cache @ official ${cacheStats.officialWithCache.toFixed(2)}
+                  <br />
+                  actual ${cacheStats.usersPaid.toFixed(2)}
                 </span>
               ) : null
             }
@@ -394,7 +435,7 @@ export function DashboardBoard({
             foot={
               cacheStats && cacheStats.tokensPerDollar > 0 ? (
                 <span className="mono tabular">
-                  {fmtInt(cacheStats.totalTokens)} tok / ${cacheStats.actualCost.toFixed(2)}
+                  {fmtInt(cacheStats.totalTokens)} tok / ${cacheStats.usersPaid.toFixed(2)}
                 </span>
               ) : null
             }

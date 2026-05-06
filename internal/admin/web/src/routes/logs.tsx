@@ -2,7 +2,15 @@ import { useEffect, useState } from "react";
 import { Receipt, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+interface PriceCard {
+  input_per_1m: number;
+  output_per_1m: number;
+  cache_read_per_1m: number;
+  cache_create_per_1m: number;
+}
 
 // Per-request entry returned by /api/v2/me/requests. Shape matches
 // internal/requestlog.Record verbatim — fields not relevant to billing
@@ -46,6 +54,7 @@ interface QueryResult {
   by_model: Record<string, Aggregate>;
   entries: RequestEntry[];
   scanned: number;
+  pricing?: Record<string, PriceCard>;
 }
 
 const PAGE = 50;
@@ -105,6 +114,7 @@ export default function LogsPage() {
 
   const entries = data?.entries || [];
   const sum = data?.summary;
+  const pricing = data?.pricing || {};
 
   return (
     <div className="space-y-6">
@@ -196,7 +206,7 @@ export default function LogsPage() {
                     {e.multiplier ? e.multiplier.toFixed(2) + "×" : "—"}
                   </td>
                   <td className="px-3 py-2 font-mono tabular-nums text-right font-semibold">
-                    {fmtUSD(e.cost_usd)}
+                    <ChargedCell entry={e} priceCard={pricing[e.model]} />
                   </td>
                   <td className={cn("px-3 py-2 font-mono tabular-nums text-right", statusClass(e.status))}>
                     {e.status}
@@ -264,6 +274,149 @@ function SumTile({ label, value, accent }: { label: string; value: string; accen
       >
         {value}
       </div>
+    </div>
+  );
+}
+
+// ChargedCell renders the per-row charged amount with a hover popup that
+// breaks down the calculation: each token bucket priced at the official
+// catalog rate, summed to the official cost, multiplied by the group
+// coefficient. Lets users reconcile every dollar against a transparent
+// formula rather than a black-box number. Falls back to a plain number
+// when pricing for the row's model isn't in the response (rare — only if
+// the catalog lookup hit the global default and the model name isn't a
+// known prefix).
+function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: PriceCard }) {
+  if (!priceCard) {
+    return <span>{fmtUSD(entry.cost_usd)}</span>;
+  }
+  const inUSD  = (entry.input_tokens        * priceCard.input_per_1m)        / 1e6;
+  const outUSD = (entry.output_tokens       * priceCard.output_per_1m)       / 1e6;
+  const crUSD  = (entry.cache_read_tokens   * priceCard.cache_read_per_1m)   / 1e6;
+  const cwUSD  = (entry.cache_create_tokens * priceCard.cache_create_per_1m) / 1e6;
+  const officialUSD = inUSD + outUSD + crUSD + cwUSD;
+  const mult = entry.multiplier && entry.multiplier > 0 ? entry.multiplier : 1;
+  const computed = officialUSD * mult;
+  // Sanity-check: server-side cost_usd should match our recompute. Drift
+  // hints at a stale pricing card; surface it visually so it doesn't go
+  // unnoticed.
+  const drift = Math.abs(computed - entry.cost_usd) > 0.0005;
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              "underline decoration-dotted decoration-border-strong underline-offset-4 cursor-help",
+              drift && "text-amber-500",
+            )}
+          >
+            {fmtUSD(entry.cost_usd)}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="left"
+          align="start"
+          sideOffset={8}
+          className="max-w-md w-[22rem] p-0 bg-popover text-popover-foreground border border-border-strong shadow-2xl rounded-lg overflow-hidden"
+        >
+          {/* Header */}
+          <div className="bg-muted/50 px-4 py-2.5 border-b border-border">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+              How this charge was calculated
+            </div>
+            <div className="font-mono text-xs text-foreground mt-0.5 truncate">{entry.model}</div>
+          </div>
+
+          {/* Formula breakdown */}
+          <div className="px-4 py-3 space-y-2 text-xs font-mono">
+            <FormulaRow
+              label="Input"
+              tokens={entry.input_tokens}
+              ratePer1M={priceCard.input_per_1m}
+              subtotal={inUSD}
+            />
+            <FormulaRow
+              label="Output"
+              tokens={entry.output_tokens}
+              ratePer1M={priceCard.output_per_1m}
+              subtotal={outUSD}
+            />
+            <FormulaRow
+              label="Cache read"
+              tokens={entry.cache_read_tokens}
+              ratePer1M={priceCard.cache_read_per_1m}
+              subtotal={crUSD}
+              dim
+            />
+            <FormulaRow
+              label="Cache write"
+              tokens={entry.cache_create_tokens}
+              ratePer1M={priceCard.cache_create_per_1m}
+              subtotal={cwUSD}
+              dim
+            />
+
+            {/* Official subtotal */}
+            <div className="pt-2 mt-2 border-t border-dashed border-border flex items-baseline justify-between">
+              <span className="text-muted-foreground text-[10px] uppercase tracking-wider">
+                Official @ catalog
+              </span>
+              <span className="tabular-nums">${officialUSD.toFixed(6)}</span>
+            </div>
+
+            {/* Multiplier */}
+            <div className="flex items-baseline justify-between">
+              <span className="text-muted-foreground text-[10px] uppercase tracking-wider">
+                × Group multiplier
+              </span>
+              <span className="tabular-nums">{mult.toFixed(2)}×</span>
+            </div>
+
+            {/* Final */}
+            <div className="pt-2 mt-2 border-t border-border flex items-baseline justify-between bg-primary/[0.06] -mx-4 px-4 py-2 -mb-3">
+              <span className="text-foreground font-semibold text-[11px] uppercase tracking-wider">
+                You paid
+              </span>
+              <span className="tabular-nums text-foreground font-semibold text-sm">
+                {fmtUSD(entry.cost_usd)}
+              </span>
+            </div>
+
+            {drift && (
+              <div className="text-amber-500 text-[10px] pt-2">
+                ⚠ recomputed ${computed.toFixed(6)} ≠ stored {fmtUSD(entry.cost_usd)} — pricing drift
+              </div>
+            )}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function FormulaRow({
+  label,
+  tokens,
+  ratePer1M,
+  subtotal,
+  dim,
+}: {
+  label: string;
+  tokens: number;
+  ratePer1M: number;
+  subtotal: number;
+  dim?: boolean;
+}) {
+  return (
+    <div className={cn("flex items-baseline justify-between gap-3", dim && "opacity-70")}>
+      <span className="text-muted-foreground text-[10px] uppercase tracking-wider min-w-[5rem]">{label}</span>
+      <span className="text-[11px] text-foreground tabular-nums whitespace-nowrap">
+        {fmtTokens(tokens)} × ${ratePer1M.toFixed(2)}/M
+      </span>
+      <span className="tabular-nums text-foreground min-w-[5.5rem] text-right">${subtotal.toFixed(6)}</span>
     </div>
   );
 }

@@ -42,6 +42,25 @@ func (h *Handler) Routes(g *gin.RouterGroup) {
 	g.POST("/health/refresh", h.refreshHealth)
 }
 
+// WalletTotalsHandler is a stand-alone handler exposing the fleet-wide
+// wallet rollup. Mounted on the user-authed group (not RequireAdmin)
+// because the operator console is visible to any signed-in user — the
+// rollup is an aggregate sum, no per-user identity exposed.
+func (h *Handler) WalletTotalsHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		t, err := h.DB.FleetTotals(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"user_paid_usd": t.UserPaidUSD,
+			"topups_usd":    t.TopupsUSD,
+			"charge_count":  t.ChargeCount,
+		})
+	}
+}
+
 func (h *Handler) listUsers(c *gin.Context) {
 	q := c.Query("q")
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))

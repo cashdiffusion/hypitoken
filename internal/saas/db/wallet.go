@@ -95,6 +95,33 @@ func (db *DB) ListWalletTx(ctx context.Context, userID int64, limit int) ([]*Wal
 	return out, rows.Err()
 }
 
+// FleetWalletTotals is the aggregate summary used by the operator console
+// to compare fleet-wide upstream cost against what users actually paid us
+// (the latter reflects per-group multipliers and is the truer
+// "we-saved-them-money" number).
+type FleetWalletTotals struct {
+	UserPaidUSD   float64 // sum of -amount_usd, kind='charge', all users
+	TopupsUSD     float64 // sum of  amount_usd, kind='topup',  all users
+	ChargeCount   int64
+}
+
+// FleetTotals aggregates wallet movement across every SaaS user. Cheap
+// table scan — wallet_tx has at most one row per request, indexed on
+// user_id but we scan unfiltered here.
+func (db *DB) FleetTotals(ctx context.Context) (*FleetWalletTotals, error) {
+	row := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(SUM(CASE WHEN kind='charge' THEN -amount_usd ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN kind='topup'  THEN  amount_usd ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN kind='charge' THEN 1 ELSE 0 END), 0)
+		FROM wallet_tx`)
+	var t FleetWalletTotals
+	if err := row.Scan(&t.UserPaidUSD, &t.TopupsUSD, &t.ChargeCount); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
 // SumChargeSince returns total absolute USD charged from this user's wallet
 // since `since`. Useful for daily/monthly usage caps on tokens.
 func (db *DB) SumChargeSince(ctx context.Context, userID int64, since time.Time) (float64, error) {
