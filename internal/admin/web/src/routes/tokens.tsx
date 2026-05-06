@@ -44,10 +44,7 @@ export default function TokensPage() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Token</TableHead>
-                  <TableHead className="text-right">Daily cap</TableHead>
-                  <TableHead className="text-right">Monthly cap</TableHead>
-                  <TableHead className="text-right">Concurrency</TableHead>
-                  <TableHead className="text-right">RPM</TableHead>
+                  <TableHead className="text-right">Spending cap</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
@@ -66,10 +63,7 @@ export default function TokensPage() {
                         <CopyBtn text={t.token} />
                       </div>
                     </TableCell>
-                    <TableCell className="font-mono tabular-nums text-right">{t.daily_usd_cap > 0 ? fmtUSD(t.daily_usd_cap) : "—"}</TableCell>
-                    <TableCell className="font-mono tabular-nums text-right">{t.monthly_usd_cap > 0 ? fmtUSD(t.monthly_usd_cap) : "—"}</TableCell>
-                    <TableCell className="font-mono tabular-nums text-right">{t.max_concurrent || "—"}</TableCell>
-                    <TableCell className="font-mono tabular-nums text-right">{t.rpm || "—"}</TableCell>
+                    <TableCell className="font-mono tabular-nums text-right">{t.monthly_usd_cap > 0 ? fmtUSD(t.monthly_usd_cap) : "unlimited"}</TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
                         <Button size="icon" variant="ghost" className="h-8 w-8" title="Rotate" onClick={async () => {
@@ -117,24 +111,22 @@ function CopyBtn({ text }: { text: string }) {
 
 function CreateTokenDialog({ open, onOpenChange, onCreated }: any) {
   const [name, setName] = useState("");
-  const [daily, setDaily] = useState("");
-  const [monthly, setMonthly] = useState("");
-  const [conc, setConc] = useState("");
-  const [rpm, setRpm] = useState("");
+  // Single user-facing knob: spending cap (USD). Maps to monthly_usd_cap
+  // server-side. Concurrency, RPM and daily-cap stay at zero (use server
+  // defaults / admin-managed) — the operator panel can tighten them
+  // per-token if needed.
+  const [cap, setCap] = useState("");
 
   const submit = async () => {
     try {
       await apiPost("/tokens", {
         name,
-        daily_usd_cap: parseFloat(daily) || 0,
-        monthly_usd_cap: parseFloat(monthly) || 0,
-        max_concurrent: parseInt(conc) || 0,
-        rpm: parseInt(rpm) || 0,
+        monthly_usd_cap: parseFloat(cap) || 0,
       });
       toast.success("Token created");
       onCreated();
       onOpenChange(false);
-      setName(""); setDaily(""); setMonthly(""); setConc(""); setRpm("");
+      setName(""); setCap("");
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -152,25 +144,13 @@ function CreateTokenDialog({ open, onOpenChange, onCreated }: any) {
             <Label htmlFor="name">Name</Label>
             <Input id="name" placeholder="my-app-prod" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="daily">Daily cap (USD)</Label>
-              <Input id="daily" type="number" step="0.01" placeholder="0 = unlimited" value={daily} onChange={(e) => setDaily(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="monthly">Monthly cap (USD)</Label>
-              <Input id="monthly" type="number" step="0.01" placeholder="0 = unlimited" value={monthly} onChange={(e) => setMonthly(e.target.value)} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="conc">Max concurrent</Label>
-              <Input id="conc" type="number" placeholder="0 = default" value={conc} onChange={(e) => setConc(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="rpm">RPM cap</Label>
-              <Input id="rpm" type="number" placeholder="0 = default" value={rpm} onChange={(e) => setRpm(e.target.value)} />
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="cap">Spending cap (USD)</Label>
+            <Input id="cap" type="number" step="0.01" placeholder="0 = unlimited" value={cap} onChange={(e) => setCap(e.target.value)} />
+            <p className="text-xs text-muted-foreground">
+              Caps the total this token can spend per calendar month. Leave at 0 for no cap.
+              Concurrency and RPM use server defaults — contact admin if you need bespoke limits.
+            </p>
           </div>
         </div>
         <DialogFooter>
