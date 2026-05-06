@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/CPA-Claude/internal/admin"
@@ -225,6 +226,22 @@ func main() {
 			spaFS = f
 		}
 		legacyAdmin := s.LegacyAdmin()
+		// SSO bridge: a logged-in SaaS user can hit /mgmt-console/api/*
+		// with their JWT instead of the legacy operator token. GETs are
+		// allowed for any authenticated user (so the Overview / charts /
+		// Pricing tabs work for everyone signed in); mutations require
+		// role=admin and are still gated by the legacy handler.
+		admin.SSOAuth = func(c *gin.Context) (bool, bool) {
+			tok := strings.TrimSpace(c.GetHeader("Authorization"))
+			if !strings.HasPrefix(strings.ToLower(tok), "bearer ") {
+				return false, false
+			}
+			claims, err := issuer.Parse(strings.TrimSpace(tok[len("bearer "):]))
+			if err != nil {
+				return false, false
+			}
+			return true, claims.Role == "admin"
+		}
 		for _, h := range s.GinEngines() {
 			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin)
 			if spaFS != nil {

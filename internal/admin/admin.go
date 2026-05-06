@@ -225,8 +225,27 @@ func guessMime(name string) string {
 	}
 }
 
+// SSOAuth is an optional hook that lets the SaaS layer turn a SaaS JWT
+// into a legacy /mgmt-console authorization. main.go wires it up after the
+// SaaS issuer is constructed; nil = SSO disabled (legacy token only).
+//
+// Returns (allowed, isAdmin):
+//   - allowed=true means the caller is a logged-in SaaS user. The legacy
+//     admin gate accepts the request.
+//   - isAdmin reflects the user's SaaS role. For non-admins, mutation
+//     endpoints (POST/PATCH/DELETE) are still blocked so a regular user
+//     can read fleet stats but can't, say, delete an upstream credential.
+//
+// The hook is consulted only when the bearer token doesn't match the
+// configured AdminToken — so legacy clients with the operator password
+// keep working unchanged.
+var SSOAuth func(c *gin.Context) (allowed bool, isAdmin bool)
+
 // adminAuth verifies the X-Admin-Token header (or Bearer token) against
-// config.AdminToken using constant-time compare.
+// config.AdminToken using constant-time compare. If neither matches and
+// SSOAuth is registered, it falls back to SaaS JWT verification — that
+// path lets a logged-in SaaS user reach the legacy console without ever
+// learning the operator password.
 func (h *Handler) adminAuth() gin.HandlerFunc {
 	want := []byte(strings.TrimSpace(h.cfg.AdminToken))
 	return func(c *gin.Context) {
@@ -237,11 +256,27 @@ func (h *Handler) adminAuth() gin.HandlerFunc {
 				got = strings.TrimSpace(v[len("bearer "):])
 			}
 		}
-		if got == "" || subtle.ConstantTimeCompare([]byte(got), want) != 1 {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid admin token"})
+		// Path 1: legacy operator token. Constant-time compare so a token
+		// that happens to look like a SaaS JWT can't time-leak the secret.
+		if got != "" && subtle.ConstantTimeCompare([]byte(got), want) == 1 {
+			c.Next()
 			return
 		}
-		c.Next()
+		// Path 2: SSO via SaaS JWT. Read-only endpoints are open to any
+		// authenticated user (including non-admin SaaS users) — that's
+		// the whole point: Overview/charts visible to anyone signed in.
+		// Mutations require role=admin.
+		if SSOAuth != nil {
+			if allowed, isAdmin := SSOAuth(c); allowed {
+				if isAdmin || c.Request.Method == http.MethodGet {
+					c.Next()
+					return
+				}
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "operator role required"})
+				return
+			}
+		}
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid admin token"})
 	}
 }
 
