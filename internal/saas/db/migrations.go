@@ -113,6 +113,19 @@ CREATE TABLE model_health (
     UNIQUE(auth_id, model)
 );
 `,
+	// 2: health probe history — keeps last 90 results per (auth_id, model)
+	`
+CREATE TABLE model_health_history (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    auth_id    TEXT NOT NULL,
+    provider   TEXT NOT NULL,
+    model      TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    checked_at INTEGER NOT NULL
+);
+CREATE INDEX idx_mhh ON model_health_history(auth_id, model, checked_at DESC);
+`,
 }
 
 func (db *DB) migrate() error {

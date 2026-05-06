@@ -4,6 +4,12 @@ import { PublicHeader } from "@/components/layout/shell";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+interface HistoryPoint {
+  status: string;
+  latency_ms: number;
+  checked_at: number;
+}
+
 interface HealthCheck {
   id: number;
   display_name: string;
@@ -12,6 +18,7 @@ interface HealthCheck {
   latency_ms: number;
   error: string;
   checked_at: number;  // unix seconds
+  history: HistoryPoint[];
 }
 
 interface Props {
@@ -37,12 +44,10 @@ export default function StatusPage({ embedded }: Props) {
 
   useEffect(() => {
     reload();
-    // Auto-refresh every 2 minutes — backend drives actual probes every 10 min
     const id = setInterval(reload, 120_000);
     return () => clearInterval(id);
   }, []);
 
-  // Group by provider
   const claudeChecks = checks.filter((c) => c.provider === "anthropic");
   const codexChecks = checks.filter((c) => c.provider === "openai");
 
@@ -50,7 +55,6 @@ export default function StatusPage({ embedded }: Props) {
 
   const content = (
     <div className="space-y-8">
-      {/* Big status banner */}
       <OverallBanner overall={overall} asOf={asOf} />
 
       {loading && checks.length === 0 ? (
@@ -65,14 +69,14 @@ export default function StatusPage({ embedded }: Props) {
           {claudeChecks.length > 0 && (
             <ProviderSection
               name="Claude API"
-              description="Anthropic — claude-haiku probe, applied to all Claude models"
+              description="Anthropic — claude-haiku probe, covers all Claude models"
               checks={claudeChecks}
             />
           )}
           {codexChecks.length > 0 && (
             <ProviderSection
               name="Codex API"
-              description="OpenAI — gpt-4o-mini probe"
+              description="OpenAI — gpt-5.3-codex probe"
               checks={codexChecks}
             />
           )}
@@ -80,7 +84,7 @@ export default function StatusPage({ embedded }: Props) {
       )}
 
       <p className="text-center text-xs text-muted-foreground">
-        Health probes run every 10 minutes · next refresh in ~{Math.round(120 - (Date.now() / 1000 - asOf) % 120)}s
+        Health probes run every 10 minutes · auto-refresh in ~{Math.max(0, Math.round(120 - (Date.now() / 1000 - asOf) % 120))}s
       </p>
     </div>
   );
@@ -105,7 +109,7 @@ export default function StatusPage({ embedded }: Props) {
   );
 }
 
-// ─── Overall status banner (status.claude.com style) ─────────────────────────
+// ─── Overall status banner ────────────────────────────────────────────────────
 
 type Overall = "operational" | "degraded" | "outage" | "unknown";
 
@@ -153,7 +157,6 @@ function OverallBanner({ overall, asOf }: { overall: Overall; asOf: number }) {
 
   return (
     <div className={cn("rounded-2xl border-2 p-6 md:p-8", bg)}>
-      {/* Accent bar */}
       <div className={cn("mb-5 h-1.5 w-16 rounded-full", bar)} />
       <div className="flex items-start gap-4">
         <Icon className={cn("mt-0.5 h-9 w-9 shrink-0", text)} />
@@ -174,7 +177,6 @@ function ProviderSection({ name, description, checks }: { name: string; descript
 
   return (
     <div>
-      {/* Section header */}
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="font-display text-xl font-semibold">{name}</h2>
@@ -183,7 +185,6 @@ function ProviderSection({ name, description, checks }: { name: string; descript
         <StatusPill allOk={allOk} anyOk={anyOk} />
       </div>
 
-      {/* Credential rows */}
       <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
         {checks.map((c) => (
           <CredRow key={c.id} check={c} />
@@ -201,47 +202,126 @@ function StatusPill({ allOk, anyOk }: { allOk: boolean; anyOk: boolean }) {
   return <span className="rounded-full border border-red-300 bg-red-50 dark:bg-red-950/40 dark:border-red-800 px-3 py-1 text-xs font-mono uppercase tracking-wider text-red-700 dark:text-red-400">Down</span>;
 }
 
+// ─── Credential row with history grid ────────────────────────────────────────
+
+// Number of squares to display in the history bar.
+const GRID_SLOTS = 60;
+
 function CredRow({ check }: { check: HealthCheck }) {
   const ok = check.status === "ok";
   const age = check.checked_at ? Math.round((Date.now() / 1000 - check.checked_at) / 60) : null;
 
   return (
-    <div className="flex items-center justify-between bg-card px-4 py-3 text-sm">
-      <div className="flex items-center gap-3">
-        {/* Status indicator */}
-        <span className={cn(
-          "inline-block h-2.5 w-2.5 shrink-0 rounded-full",
-          ok
-            ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,.5)]"
-            : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,.5)]"
-        )} />
-        <span className="font-mono text-sm font-medium">{check.display_name}</span>
-        {!ok && check.error && (
-          <span className="hidden max-w-xs truncate text-xs text-muted-foreground sm:block" title={check.error}>
-            {check.error.slice(0, 80)}{check.error.length > 80 ? "…" : ""}
+    <div className="bg-card px-4 py-3 text-sm">
+      {/* Top row: name + current status */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className={cn(
+            "inline-block h-2.5 w-2.5 shrink-0 rounded-full",
+            ok
+              ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,.5)]"
+              : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,.5)]"
+          )} />
+          <span className="font-mono text-sm font-medium">{check.display_name}</span>
+          {!ok && check.error && (
+            <span className="hidden max-w-xs truncate text-xs text-muted-foreground sm:block" title={check.error}>
+              {check.error.slice(0, 80)}{check.error.length > 80 ? "…" : ""}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          {check.latency_ms > 0 && (
+            <span className={cn("font-mono tabular-nums", check.latency_ms > 5000 ? "text-amber-500" : "")}>
+              {check.latency_ms}ms
+            </span>
+          )}
+          {age !== null && (
+            <span title={new Date(check.checked_at * 1000).toLocaleString()}>
+              {age === 0 ? "just now" : `${age}m ago`}
+            </span>
+          )}
+          <span className={cn(
+            "rounded px-1.5 py-0.5 font-mono text-xs uppercase",
+            ok ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"
+               : "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400"
+          )}>
+            {ok ? "ok" : "fail"}
           </span>
-        )}
+        </div>
       </div>
-      <div className="flex items-center gap-5 text-xs text-muted-foreground">
-        {check.latency_ms > 0 && (
-          <span className={cn("font-mono tabular-nums", check.latency_ms > 5000 ? "text-amber-500" : "")}>
-            {check.latency_ms}ms
+
+      {/* History grid */}
+      <HistoryGrid history={check.history} />
+    </div>
+  );
+}
+
+function HistoryGrid({ history }: { history: HistoryPoint[] }) {
+  // Pad left with empty slots if fewer than GRID_SLOTS records.
+  const padded: (HistoryPoint | null)[] = [
+    ...Array(Math.max(0, GRID_SLOTS - history.length)).fill(null),
+    ...history.slice(-GRID_SLOTS),
+  ];
+
+  const uptimePct = history.length === 0
+    ? null
+    : Math.round((history.filter(h => h.status === "ok").length / history.length) * 100);
+
+  return (
+    <div className="mt-2.5">
+      <div className="flex items-center gap-1">
+        {/* Label: older end */}
+        <span className="shrink-0 text-[10px] text-muted-foreground/60 w-10 text-right pr-1">older</span>
+
+        {/* Squares */}
+        <div className="flex flex-1 gap-px">
+          {padded.map((pt, i) => (
+            <HistorySquare key={i} point={pt} />
+          ))}
+        </div>
+
+        {/* Label: now */}
+        <span className="shrink-0 text-[10px] text-muted-foreground/60 w-8 pl-1">now</span>
+
+        {/* Uptime pct */}
+        {uptimePct !== null && (
+          <span className={cn(
+            "shrink-0 text-[10px] font-mono tabular-nums w-10 text-right",
+            uptimePct === 100 ? "text-emerald-600 dark:text-emerald-400"
+              : uptimePct >= 90 ? "text-amber-600 dark:text-amber-400"
+              : "text-red-600 dark:text-red-400"
+          )}>
+            {uptimePct}%
           </span>
         )}
-        {age !== null && (
-          <span title={new Date(check.checked_at * 1000).toLocaleString()}>
-            {age === 0 ? "just now" : `${age}m ago`}
-          </span>
-        )}
-        <span className={cn(
-          "rounded px-1.5 py-0.5 font-mono text-xs uppercase",
-          ok ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"
-             : "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400"
-        )}>
-          {ok ? "ok" : "fail"}
-        </span>
       </div>
     </div>
+  );
+}
+
+function HistorySquare({ point }: { point: HistoryPoint | null }) {
+  if (!point) {
+    return (
+      <div className="h-5 flex-1 rounded-sm bg-muted/40" />
+    );
+  }
+
+  const ok = point.status === "ok";
+  const ts = new Date(point.checked_at * 1000).toLocaleString();
+  const title = ok
+    ? `${ts} — ok (${point.latency_ms}ms)`
+    : `${ts} — fail`;
+
+  return (
+    <div
+      title={title}
+      className={cn(
+        "h-5 flex-1 rounded-sm cursor-default transition-opacity hover:opacity-80",
+        ok
+          ? "bg-emerald-500 dark:bg-emerald-600"
+          : "bg-red-500 dark:bg-red-600"
+      )}
+    />
   );
 }
 

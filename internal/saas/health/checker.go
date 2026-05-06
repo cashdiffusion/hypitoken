@@ -38,8 +38,8 @@ func newUUID() string {
 // One successful probe means the credential works for all Claude models.
 const anthropicProbeModel = "claude-haiku-4-5-20251001"
 
-// codexProbeModel is the cheapest OpenAI model we probe.
-const codexProbeModel = "gpt-4o-mini"
+// codexProbeModel is the Codex model we probe.
+const codexProbeModel = "gpt-5.3-codex"
 
 type Checker struct {
 	DB       *db.DB
@@ -118,6 +118,9 @@ func (c *Checker) checkOne(ctx context.Context, a *auth.Auth, provider, model st
 	}
 	if err := c.DB.UpsertModelHealth(ctx, rec); err != nil {
 		log.Warnf("health: upsert %s/%s: %v", a.ID, model, err)
+	}
+	if err := c.DB.AppendModelHealthHistory(ctx, rec); err != nil {
+		log.Warnf("health: history %s/%s: %v", a.ID, model, err)
 	}
 	log.Infof("health probe %s/%s %s → %s (%dms) %s", a.ID, model, provider, st, latency, errMsg)
 }

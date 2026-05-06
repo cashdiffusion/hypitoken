@@ -288,13 +288,21 @@ func (h *Handler) listHealth(c *gin.Context) {
 		}
 		return fmt.Sprintf("%s-%s-%03d", prov, kind, counters[key])
 	}
+	store := h.DB
 	out := make([]gin.H, 0, len(hs))
-	for _, h := range hs {
-		name := displayName(h.AuthID, h.Provider, h.Model)
+	for _, rec := range hs {
+		name := displayName(rec.AuthID, rec.Provider, rec.Model)
+		hist, _ := store.ListModelHealthHistory(c.Request.Context(), rec.AuthID, rec.Model, 90)
+		histSlice := make([]gin.H, 0, len(hist))
+		for _, r := range hist {
+			histSlice = append(histSlice, gin.H{
+				"status": r.Status, "latency_ms": r.LatencyMs, "checked_at": r.CheckedAt.Unix(),
+			})
+		}
 		out = append(out, gin.H{
-			"id": h.ID, "display_name": name, "provider": h.Provider,
-			"status": h.Status, "latency_ms": h.LatencyMs, "error": h.Error,
-			"checked_at": h.CheckedAt.Unix(),
+			"id": rec.ID, "display_name": name, "provider": rec.Provider,
+			"status": rec.Status, "latency_ms": rec.LatencyMs, "error": rec.Error,
+			"checked_at": rec.CheckedAt.Unix(), "history": histSlice,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"checks": out, "as_of": time.Now().Unix()})
