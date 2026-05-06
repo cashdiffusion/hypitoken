@@ -104,7 +104,10 @@ type Handler struct {
 func NewHandler(store *db.DB, rate *Rate, gw Gateway, site string) *Handler {
 	return &Handler{
 		DB: store, Rate: rate, Gateway: gw, Site: site,
-		OrderTTL:          30 * time.Minute,
+		// 15 min: Alipay QR codes themselves invalidate around 10-15 min,
+		// so a stricter TTL avoids a "scan the QR you forgot about an hour
+		// ago" surprise where the order is still pending but the QR is dead.
+		OrderTTL:          15 * time.Minute,
 		MaxPendingPerUser: 5,
 		createdAt:         make(map[int64][]time.Time),
 	}

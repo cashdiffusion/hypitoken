@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import { Wallet, RefreshCw, Lock } from "lucide-react";
@@ -74,12 +75,16 @@ export default function BillingPage() {
       <Card>
         <CardHeader>
           <CardTitle>Top-up orders</CardTitle>
-          <CardDescription>Recent Alipay orders.</CardDescription>
+          <CardDescription>Pending and recently paid Alipay orders. Expired orders are hidden.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-          {orders.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">No orders yet.</div>
-          ) : (
+          {(() => {
+            // expired/failed orders are noise once they're past their TTL —
+            // hide them so the user only sees what's actionable (still
+            // payable) or recent receipts.
+            const visible = orders.filter((o) => o.status === "pending" || o.status === "paid");
+            if (visible.length === 0) return <div className="p-8 text-center text-sm text-muted-foreground">No active orders.</div>;
+            return (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -92,7 +97,7 @@ export default function BillingPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {orders.map((o) => (
+                {visible.map((o) => (
                   <TableRow key={o.out_trade_no}>
                     <TableCell className="font-mono text-xs">{o.out_trade_no.slice(0, 16)}…</TableCell>
                     <TableCell className="font-mono tabular-nums text-right">{fmtUSD(o.usd_credit)}</TableCell>
@@ -104,19 +109,28 @@ export default function BillingPage() {
                 ))}
               </TableBody>
             </Table>
-          )}
+            );
+          })()}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Transaction history</CardTitle>
-          <CardDescription>All wallet movements.</CardDescription>
+          <CardTitle>Wallet history</CardTitle>
+          <CardDescription>
+            Top-ups, refunds and admin adjustments only.{" "}
+            Per-request charges are listed under <Link to="/app/logs" className="underline underline-offset-2 text-foreground hover:text-primary">Logs</Link> with token-level precision.
+          </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-          {tx.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">No transactions.</div>
-          ) : (
+          {(() => {
+            // Charge events (one row per API request) live in the Logs
+            // page where they belong with full token / pricing detail.
+            // Here we want the wallet-level financial picture only:
+            // top-ups, refunds, and admin adjustments.
+            const visible = tx.filter((t) => t.kind !== "charge");
+            if (visible.length === 0) return <div className="p-8 text-center text-sm text-muted-foreground">No wallet activity yet.</div>;
+            return (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -127,7 +141,7 @@ export default function BillingPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tx.map((t) => (
+                {visible.slice(0, 50).map((t) => (
                   <TableRow key={t.id}>
                     <TableCell className="capitalize font-medium">{t.kind}</TableCell>
                     <TableCell className={`font-mono tabular-nums text-right ${t.amount_usd >= 0 ? "text-success" : ""}`}>{t.amount_usd >= 0 ? "+" : ""}{fmtUSD(t.amount_usd)}</TableCell>
@@ -137,7 +151,8 @@ export default function BillingPage() {
                 ))}
               </TableBody>
             </Table>
-          )}
+            );
+          })()}
         </CardContent>
       </Card>
 
