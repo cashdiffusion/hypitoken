@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Plus, RefreshCw, Trash2, Copy, Check, Eye, EyeOff } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +13,7 @@ import { copyToClipboard, fmtUSD } from "@/lib/utils";
 import type { UserToken } from "@/lib/types";
 
 export default function TokensPage() {
+  const { t: tt } = useTranslation();
   const [tokens, setTokens] = useState<UserToken[]>([]);
   const [open, setOpen] = useState(false);
   const [reveal, setReveal] = useState<Record<number, boolean>>({});
@@ -28,23 +30,23 @@ export default function TokensPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-3xl font-semibold tracking-tight">API tokens</h1>
-          <p className="text-muted-foreground">One token per app — keep them separate, set caps per-token.</p>
+          <h1 className="font-display text-3xl font-semibold tracking-tight">{tt("tokens.title")}</h1>
+          <p className="text-muted-foreground">{tt("tokens.sub")}</p>
         </div>
-        <Button onClick={() => setOpen(true)} className="gap-2"><Plus className="h-4 w-4" /> New token</Button>
+        <Button onClick={() => setOpen(true)} className="gap-2"><Plus className="h-4 w-4" /> {tt("tokens.newToken")}</Button>
       </div>
 
       <Card>
         <CardContent className="p-0">
           {tokens.length === 0 ? (
-            <div className="p-12 text-center text-sm text-muted-foreground">No tokens yet.</div>
+            <div className="p-12 text-center text-sm text-muted-foreground">{tt("tokens.none")}</div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
+                  <TableHead>{tt("common.name")}</TableHead>
                   <TableHead>Token</TableHead>
-                  <TableHead className="text-right">Spending cap</TableHead>
+                  <TableHead className="text-right">{tt("tokens.spendingCap")}</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
@@ -63,20 +65,20 @@ export default function TokensPage() {
                         <CopyBtn text={t.token} />
                       </div>
                     </TableCell>
-                    <TableCell className="font-mono tabular-nums text-right">{t.monthly_usd_cap > 0 ? fmtUSD(t.monthly_usd_cap) : "unlimited"}</TableCell>
+                    <TableCell className="font-mono tabular-nums text-right">{t.monthly_usd_cap > 0 ? fmtUSD(t.monthly_usd_cap) : tt("common.unlimited")}</TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
-                        <Button size="icon" variant="ghost" className="h-8 w-8" title="Rotate" onClick={async () => {
+                        <Button size="icon" variant="ghost" className="h-8 w-8" title={tt("tokens.rotate")} onClick={async () => {
                           await apiPost(`/tokens/${t.id}/rotate`);
-                          toast.success("Token rotated");
+                          toast.success(tt("tokens.rotated"));
                           refresh();
                         }}>
                           <RefreshCw className="h-3.5 w-3.5" />
                         </Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={async () => {
-                          if (!confirm("Delete this token?")) return;
+                          if (!confirm(tt("tokens.confirmDelete"))) return;
                           await apiDelete(`/tokens/${t.id}`);
-                          toast.success("Deleted");
+                          toast.success(tt("tokens.deleted"));
                           refresh();
                         }}>
                           <Trash2 className="h-3.5 w-3.5" />
@@ -110,11 +112,8 @@ function CopyBtn({ text }: { text: string }) {
 }
 
 function CreateTokenDialog({ open, onOpenChange, onCreated }: any) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
-  // Single user-facing knob: spending cap (USD). Maps to monthly_usd_cap
-  // server-side. Concurrency, RPM and daily-cap stay at zero (use server
-  // defaults / admin-managed) — the operator panel can tighten them
-  // per-token if needed.
   const [cap, setCap] = useState("");
 
   const submit = async () => {
@@ -123,7 +122,7 @@ function CreateTokenDialog({ open, onOpenChange, onCreated }: any) {
         name,
         monthly_usd_cap: parseFloat(cap) || 0,
       });
-      toast.success("Token created");
+      toast.success(t("tokens.dialog.created"));
       onCreated();
       onOpenChange(false);
       setName(""); setCap("");
@@ -136,26 +135,23 @@ function CreateTokenDialog({ open, onOpenChange, onCreated }: any) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>New API token</DialogTitle>
-          <DialogDescription>You'll see the full token once on the next screen.</DialogDescription>
+          <DialogTitle>{t("tokens.dialog.title")}</DialogTitle>
+          <DialogDescription>{t("tokens.dialog.sub")}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
-            <Input id="name" placeholder="my-app-prod" value={name} onChange={(e) => setName(e.target.value)} />
+            <Label htmlFor="name">{t("common.name")}</Label>
+            <Input id="name" placeholder={t("tokens.dialog.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="cap">Spending cap (USD)</Label>
-            <Input id="cap" type="number" step="0.01" placeholder="0 = unlimited" value={cap} onChange={(e) => setCap(e.target.value)} />
-            <p className="text-xs text-muted-foreground">
-              Caps the total this token can spend per calendar month. Leave at 0 for no cap.
-              Concurrency and RPM use server defaults — contact admin if you need bespoke limits.
-            </p>
+            <Label htmlFor="cap">{t("tokens.dialog.capLabel")}</Label>
+            <Input id="cap" type="number" step="0.01" placeholder={t("tokens.dialog.capPlaceholder")} value={cap} onChange={(e) => setCap(e.target.value)} />
+            <p className="text-xs text-muted-foreground">{t("tokens.dialog.capHint")}</p>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit}>Create</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+          <Button onClick={submit}>{t("common.create")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

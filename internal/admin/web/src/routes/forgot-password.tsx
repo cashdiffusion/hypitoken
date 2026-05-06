@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,7 @@ import { AuthLayout } from "./login";
 export default function ForgotPasswordPage() {
   const { user } = useAuth();
   const nav = useNavigate();
+  const { t } = useTranslation();
   const [step, setStep] = useState<"start" | "reset">("start");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -27,10 +29,10 @@ export default function ForgotPasswordPage() {
     setBusy(true);
     try {
       await apiPost("/auth/send-code", { email, purpose: "reset" });
-      toast.success("If that email exists, a code is on its way.");
+      toast.success(t("auth.forgot.codeSent"));
       setStep("reset");
     } catch (e: any) {
-      toast.error(e.message || "Could not send code");
+      toast.error(e.message || t("auth.register.codeSendFailed"));
     } finally {
       setBusy(false);
     }
@@ -41,10 +43,10 @@ export default function ForgotPasswordPage() {
     setBusy(true);
     try {
       await apiPost("/auth/reset-password", { email, code, new_password: newPassword });
-      toast.success("Password updated. Sign in with your new password.");
+      toast.success(t("auth.forgot.reset"));
       nav("/login");
     } catch (e: any) {
-      toast.error(e.message || "Reset failed");
+      toast.error(e.message || t("common.error"));
     } finally {
       setBusy(false);
     }
@@ -52,10 +54,10 @@ export default function ForgotPasswordPage() {
 
   if (step === "reset") {
     return (
-      <AuthLayout title="Set a new password" sub={`Enter the 6-digit code we sent to ${email}.`}>
+      <AuthLayout title={t("auth.forgot.step2Title")} sub={t("auth.forgot.step2Sub", { email })}>
         <form onSubmit={resetPassword} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="code">Code</Label>
+            <Label htmlFor="code">{t("auth.register.codeLabel")}</Label>
             <Input
               id="code"
               inputMode="numeric"
@@ -69,7 +71,7 @@ export default function ForgotPasswordPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="new-password">New password</Label>
+            <Label htmlFor="new-password">{t("auth.forgot.newPasswordLabel")}</Label>
             <Input
               id="new-password"
               type="password"
@@ -79,10 +81,10 @@ export default function ForgotPasswordPage() {
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
             />
-            <p className="text-xs text-muted-foreground">Min 8 characters.</p>
+            <p className="text-xs text-muted-foreground">{t("auth.forgot.newPasswordHint")}</p>
           </div>
           <Button type="submit" className="w-full" disabled={busy}>
-            {busy ? "Resetting…" : "Reset password"}
+            {busy ? t("auth.forgot.resetting") : t("auth.forgot.submit")}
           </Button>
           <Button
             type="button"
@@ -91,7 +93,7 @@ export default function ForgotPasswordPage() {
             disabled={busy}
             onClick={() => setStep("start")}
           >
-            Use a different email
+            {t("common.back")}
           </Button>
         </form>
       </AuthLayout>
@@ -99,13 +101,10 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <AuthLayout
-      title="Forgot password?"
-      sub="Enter your account email and we'll send you a code to reset it."
-    >
+    <AuthLayout title={t("auth.forgot.title")} sub={t("auth.forgot.sub")}>
       <form onSubmit={sendCode} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="email">{t("common.email")}</Label>
           <Input
             id="email"
             type="email"
@@ -117,12 +116,11 @@ export default function ForgotPasswordPage() {
           />
         </div>
         <Button type="submit" className="w-full" disabled={busy}>
-          {busy ? "Sending code…" : "Send reset code"}
+          {busy ? t("auth.forgot.sending") : t("auth.forgot.sendCode")}
         </Button>
         <div className="text-center text-sm text-muted-foreground">
-          Remembered it?{" "}
           <Link to="/login" className="text-primary underline-offset-4 hover:underline">
-            Sign in
+            {t("auth.forgot.backToLogin")}
           </Link>
         </div>
       </form>

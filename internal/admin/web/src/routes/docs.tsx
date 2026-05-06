@@ -4,18 +4,23 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Check, ChevronRight, Copy, Hash, BookOpen } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { PublicHeader } from "@/components/layout/shell";
 import { cn, copyToClipboard } from "@/lib/utils";
-import { DOCS, DOC_GROUPS, findDoc, slugify, type DocSection } from "@/lib/docs";
+import { docsFor, slugify, type DocSection } from "@/lib/docs";
 import "highlight.js/styles/github-dark.css";
 
 export default function DocsLayout() {
   const params = useParams();
-  const slug = (params.slug as string) || (DOCS[0]?.slug ?? "quick-start");
-  const section = findDoc(slug) || DOCS[0]!;
-  const idx = DOCS.findIndex((d) => d.slug === section.slug);
-  const prev = DOCS[idx - 1];
-  const next = DOCS[idx + 1];
+  const { i18n } = useTranslation();
+  const lang = i18n.resolvedLanguage || i18n.language;
+  const docs = useMemo(() => docsFor(lang), [lang]);
+  const groups = useMemo(() => Array.from(new Set(docs.map((d) => d.group))), [docs]);
+  const slug = (params.slug as string) || (docs[0]?.slug ?? "quick-start");
+  const section = docs.find((d) => d.slug === slug) || docs[0]!;
+  const idx = docs.findIndex((d) => d.slug === section.slug);
+  const prev = docs[idx - 1];
+  const next = docs[idx + 1];
 
   // Extract h2/h3 from the markdown body for the right-hand TOC.
   const headings = useMemo(() => collectHeadings(section.body), [section.slug]);
@@ -47,11 +52,11 @@ export default function DocsLayout() {
           {/* Sidebar */}
           <aside className="hidden md:block">
             <nav className="sticky top-20 space-y-6">
-              {DOC_GROUPS.map((g) => (
+              {groups.map((g) => (
                 <div key={g}>
                   <div className="mb-2 px-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">{g}</div>
                   <ul className="space-y-0.5">
-                    {DOCS.filter((d) => d.group === g).map((d) => (
+                    {docs.filter((d) => d.group === g).map((d) => (
                       <li key={d.slug}>
                         <NavLink
                           to={`/docs/${d.slug}`}
@@ -274,11 +279,13 @@ function CodeBlockShell({ children }: { children: any }) {
 export function DocsIndex() {
   const nav = useNavigate();
   const loc = useLocation();
+  const { i18n } = useTranslation();
   useEffect(() => {
     if (loc.pathname === "/docs" || loc.pathname === "/docs/") {
-      nav(`/docs/${DOCS[0]?.slug ?? "quick-start"}`, { replace: true });
+      const docs = docsFor(i18n.resolvedLanguage || i18n.language);
+      nav(`/docs/${docs[0]?.slug ?? "quick-start"}`, { replace: true });
     }
-  }, [loc.pathname]);
+  }, [loc.pathname, i18n.resolvedLanguage, i18n.language, nav]);
   return null;
 }
 

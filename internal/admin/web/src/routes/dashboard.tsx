@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, Wallet, KeyRound, Activity } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
@@ -10,6 +11,7 @@ import type { WalletTx, UserToken } from "@/lib/types";
 
 export default function DashboardPage() {
   const { user, group } = useAuth();
+  const { t } = useTranslation();
   const [tx, setTx] = useState<WalletTx[]>([]);
   const [tokens, setTokens] = useState<UserToken[]>([]);
 
@@ -19,41 +21,40 @@ export default function DashboardPage() {
   }, []);
 
   const charged = tx.filter((t) => t.kind === "charge").reduce((s, t) => s + Math.abs(t.amount_usd), 0);
-  const topped = tx.filter((t) => t.kind === "topup").reduce((s, t) => s + t.amount_usd, 0);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-3xl font-semibold tracking-tight">Welcome back</h1>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">{t("dashboard.welcome")}</h1>
         <p className="text-muted-foreground">{user?.email}</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard
           icon={Wallet}
-          label="Wallet balance"
+          label={t("dashboard.walletBalance")}
           value={fmtUSD(user?.balance_usd)}
           accent
-          cta={{ to: "/app/billing", label: "Top up" }}
+          cta={{ to: "/app/billing", label: t("dashboard.topUp") }}
         />
         <StatCard
           icon={Activity}
-          label="Total spent"
+          label={t("dashboard.totalSpent")}
           value={fmtUSD(charged)}
-          sub={`${tx.filter((t) => t.kind === "charge").length} requests billed`}
+          sub={t("dashboard.requestsBilled", { n: tx.filter((t) => t.kind === "charge").length })}
         />
         <StatCard
           icon={KeyRound}
-          label="API tokens"
+          label={t("dashboard.apiTokens")}
           value={String(tokens.length)}
-          cta={{ to: "/app/tokens", label: "Manage" }}
-          sub={`${tokens.filter((t) => !t.disabled).length} active`}
+          cta={{ to: "/app/tokens", label: t("dashboard.manage") }}
+          sub={t("dashboard.nActive", { n: tokens.filter((t) => !t.disabled).length })}
         />
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Pricing tier</CardTitle>
+          <CardTitle>{t("dashboard.pricingTier")}</CardTitle>
           <CardDescription>{group?.Name ?? "default"} — {group?.Description}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -61,12 +62,12 @@ export default function DashboardPage() {
             <div className="rounded-lg border border-border-strong bg-card p-4">
               <div className="text-xs uppercase tracking-wider text-muted-foreground">Claude</div>
               <div className="mt-2 font-mono text-2xl font-semibold tabular-nums">{group?.ClaudeMultiplier?.toFixed(2)}×</div>
-              <div className="mt-1 text-xs text-muted-foreground">final = upstream USD × multiplier</div>
+              <div className="mt-1 text-xs text-muted-foreground">{t("dashboard.multiplierExplanation")}</div>
             </div>
             <div className="rounded-lg border border-border-strong bg-card p-4">
               <div className="text-xs uppercase tracking-wider text-muted-foreground">Codex</div>
               <div className="mt-2 font-mono text-2xl font-semibold tabular-nums">{group?.CodexMultiplier?.toFixed(2)}×</div>
-              <div className="mt-1 text-xs text-muted-foreground">final = upstream USD × multiplier</div>
+              <div className="mt-1 text-xs text-muted-foreground">{t("dashboard.multiplierExplanation")}</div>
             </div>
           </div>
         </CardContent>
@@ -74,13 +75,13 @@ export default function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Recent activity</CardTitle>
-          <CardDescription>Last {Math.min(tx.length, 10)} transactions</CardDescription>
+          <CardTitle>{t("dashboard.recentActivity")}</CardTitle>
+          <CardDescription>{t("dashboard.lastNTransactions", { n: Math.min(tx.length, 10) })}</CardDescription>
         </CardHeader>
         <CardContent>
           {tx.length === 0 ? (
             <div className="rounded-md border border-dashed border-border-strong p-8 text-center text-sm text-muted-foreground">
-              No transactions yet. <Link to="/app/billing" className="text-primary underline-offset-4 hover:underline">Top up your wallet</Link> to get started.
+              {t("dashboard.noTxYet")}{" "}<Link to="/app/billing" className="text-primary underline-offset-4 hover:underline">{t("dashboard.topUpYourWallet")}</Link>{t("dashboard.toGetStarted")}
             </div>
           ) : (
             <div className="divide-y divide-border">

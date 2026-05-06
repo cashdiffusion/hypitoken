@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Navigate, Link } from "react-router-dom";
 import { Activity, RefreshCw, Info } from "lucide-react";
+import { useTranslation, Trans } from "react-i18next";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/legacy/lib/api";
@@ -64,6 +65,7 @@ function MetricCell({
 }
 
 export default function ConsolePage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [data, setData] = useState<Summary | null>(null);
   const [err, setErr] = useState("");
@@ -138,44 +140,41 @@ export default function ConsolePage() {
             <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-75 animate-ping" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
           </span>
-          <span>Operator console · Overview</span>
+          <span>{t("console.eyebrow")}</span>
         </div>
 
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5">
           <div className="space-y-2.5 max-w-3xl">
             <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl leading-[0.95] tracking-tight">
-              <Activity className="inline-block h-7 w-7 align-[-3px] text-primary" /> Fleet overview
+              <Activity className="inline-block h-7 w-7 align-[-3px] text-primary" /> {t("console.title")}
             </h1>
             <p className="text-sm lg:text-base text-muted-foreground max-w-2xl">
-              Active rotation window{" "}
-              <span className="mono tabular text-foreground">
-                {data ? data.active_window_minutes : "···"}
-              </span>{" "}
-              min · live charts refresh every 10 seconds.
+              {t("console.activeWindow", { min: data ? data.active_window_minutes : "···" })}
             </p>
             <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/[0.05] px-3 py-2 max-w-2xl">
               <Info className="h-4 w-4 shrink-0 text-primary mt-0.5" />
               <p className="text-xs text-muted-foreground leading-relaxed">
-                <span className="text-foreground font-medium">Platform-wide stats.</span>{" "}
-                Every metric here aggregates across the whole fleet — credentials, models,
-                requests, spend. It is <em>not</em> your personal usage. For your own
-                billing detail, see{" "}
-                <Link to="/app/billing" className="underline underline-offset-2 text-foreground hover:text-primary">Billing</Link>{" "}
-                or{" "}
-                <Link to="/app/logs" className="underline underline-offset-2 text-foreground hover:text-primary">Logs</Link>.
+                <span className="text-foreground font-medium">{t("console.bannerStrong")}</span>{" "}
+                <Trans
+                  i18nKey="console.banner"
+                  components={{
+                    billing: <Link to="/app/billing" className="underline underline-offset-2 text-foreground hover:text-primary" />,
+                    logs: <Link to="/app/logs" className="underline underline-offset-2 text-foreground hover:text-primary" />,
+                  }}
+                />
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 lg:justify-end">
-            <Button variant="outline" onClick={manualRefresh} className="gap-2" aria-label="Refresh">
+            <Button variant="outline" onClick={manualRefresh} className="gap-2" aria-label={t("common.refresh")}>
               <RefreshCw
                 className={cn("h-4 w-4 transition-transform", refreshing && "animate-spin")}
               />
-              <span className="hidden sm:inline">Refresh</span>
+              <span className="hidden sm:inline">{t("common.refresh")}</span>
             </Button>
             <span className="eyebrow tabular opacity-60 hidden md:inline">
-              last · {fmtDate(new Date(lastTick).toISOString())}
+              {t("console.last", { when: fmtDate(new Date(lastTick).toISOString()) })}
             </span>
           </div>
         </div>
@@ -193,16 +192,16 @@ export default function ConsolePage() {
           using the same border/bg vocabulary as the SaaS dashboard. */}
       <section className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         <MetricCell
-          label="Credentials"
+          label={t("console.metrics.credentials")}
           value={`${healthyCreds}`}
           unit={`/ ${totalCreds}`}
-          hint="healthy"
+          hint={t("console.metrics.health")}
           accent
         />
-        <MetricCell label="OAuth" value={fmtInt(oauths.length)} />
-        <MetricCell label="API keys" value={fmtInt(apikeys.length)} />
-        <MetricCell label="Σ in (24h)" value={fmtInt(totals.in24)} unit="tok" />
-        <MetricCell label="Σ out" value={fmtInt(totals.out)} unit="tok" />
+        <MetricCell label={t("console.metrics.oauth")} value={fmtInt(oauths.length)} />
+        <MetricCell label={t("console.metrics.apiKeys")} value={fmtInt(apikeys.length)} />
+        <MetricCell label={t("console.metrics.sumIn24h")} value={fmtInt(totals.in24)} unit={t("console.metrics.tok")} />
+        <MetricCell label={t("console.metrics.sumOut")} value={fmtInt(totals.out)} unit={t("console.metrics.tok")} />
       </section>
 
       {/* The original Overview panel — charts + fleet health visualisation. */}
