@@ -97,6 +97,13 @@ func (c *Checker) RunOnce(ctx context.Context) {
 		default:
 			continue
 		}
+		// Drop any stale rows left over from a previous probe-model choice.
+		// Without this, switching from e.g. gpt-4o-mini to gpt-5.3-codex
+		// leaves the old (auth_id, "gpt-4o-mini") row behind and the status
+		// page double-counts the credential.
+		if err := c.DB.PruneModelHealthOtherModels(ctx, a.ID, []string{model}); err != nil {
+			log.Warnf("health: prune stale rows for %s: %v", a.ID, err)
+		}
 		c.checkOne(ctx, a, provider, model)
 	}
 }
