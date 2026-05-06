@@ -252,6 +252,8 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	}
 
 	var costUSD float64
+	var userID int64
+	var multiplier float64
 	if resp.StatusCode < 400 {
 		s.usage.Record(a.ID, a.Label, counts)
 		if counts.Requests > 0 && clientToken != "" {
@@ -266,6 +268,8 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 					log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 				} else {
 					costUSD = billed
+					userID = info.UserID
+					multiplier = s.saas.MultiplierFor(c.Request.Context(), info.GroupID, auth.ProviderOpenAI)
 				}
 			}
 			s.usage.RecordClient(clientToken, clientName, counts, costUSD)
@@ -283,6 +287,8 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		Output:      counts.OutputTokens,
 		CacheRead:   counts.CacheReadTokens,
 		CacheCreate: counts.CacheCreateTokens,
+		UserID:      userID,
+		Multiplier:  multiplier,
 		CostUSD:     costUSD,
 		Status:      resp.StatusCode,
 		DurationMs:  time.Since(start).Milliseconds(),

@@ -3,12 +3,14 @@ package adapter
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/wjsoj/CPA-Claude/internal/auth"
 	legacyadmin "github.com/wjsoj/CPA-Claude/internal/admin"
+	"github.com/wjsoj/CPA-Claude/internal/requestlog"
 	"github.com/wjsoj/CPA-Claude/internal/saas/admin"
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
@@ -21,7 +23,7 @@ import (
 // /api/v2/admin/credentials/* is exposed. legacyH may be nil — when set, the
 // /api/v2/admin/* group also exposes request-log queries + Anthropic OAuth
 // quota probe (handlers reused from the legacy /mgmt-console panel).
-func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler) {
+func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string) {
 	v2 := engine.Group("/api/v2")
 
 	// Public.
@@ -54,6 +56,46 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	})
 	tokensH.Routes(authed.Group("/tokens"))
 	billingH.UserRoutes(authed.Group("/billing"))
+
+	// Per-user request log. Same shape as /admin/api/requests but filtered
+	// to records emitted while the requester was the authenticated user —
+	// powers the /app/logs page where customers reconcile every charge
+	// against the catalog rate. Read-only, no mutation surface.
+	authed.GET("/me/requests", func(c *gin.Context) {
+		u := saasauth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+			return
+		}
+		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+		offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+		if limit <= 0 || limit > 200 {
+			limit = 50
+		}
+		f := requestlog.Filter{
+			Dir:    logDir,
+			UserID: u.ID,
+			Limit:  limit,
+			Offset: offset,
+		}
+		// Optional secondary filters — useful for users wanting to drill
+		// down to a single token or model.
+		if mtok := c.Query("model"); mtok != "" {
+			f.Model = mtok
+		}
+		if prov := c.Query("provider"); prov != "" {
+			f.Provider = prov
+		}
+		if ct := c.Query("client_token"); ct != "" {
+			f.ClientToken = ct
+		}
+		res, err := requestlog.Query(f)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, res)
+	})
 
 	// Public groups (read-only, used on landing/pricing pages).
 	v2.GET("/groups", func(c *gin.Context) {

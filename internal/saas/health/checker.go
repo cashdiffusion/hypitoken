@@ -38,8 +38,12 @@ func newUUID() string {
 // One successful probe means the credential works for all Claude models.
 const anthropicProbeModel = "claude-haiku-4-5-20251001"
 
-// codexProbeModel is the Codex model we probe.
-const codexProbeModel = "gpt-5.3-codex"
+// codexProbeModel is the Codex model we probe. Empirically gpt-5.5 is the
+// only model in the GPT-5 family that's reliably accessible across the
+// upstream gateways we use, so we probe it instead of gpt-5.3-codex.
+// Switching here also clears stale model_health rows on next cycle via
+// PruneModelHealthOtherModels.
+const codexProbeModel = "gpt-5.5"
 
 type Checker struct {
 	DB       *db.DB

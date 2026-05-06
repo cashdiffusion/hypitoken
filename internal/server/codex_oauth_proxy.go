@@ -517,6 +517,8 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 
 	s.usage.Record(a.ID, a.Label, counts)
 	var costUSD float64
+	var userID int64
+	var multiplier float64
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
 		official := s.pricing.Cost(auth.ProviderOpenAI, model, counts)
 		costUSD = official
@@ -528,6 +530,8 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 			} else {
 				costUSD = billed
+				userID = info.UserID
+				multiplier = s.saas.MultiplierFor(c.Request.Context(), info.GroupID, auth.ProviderOpenAI)
 			}
 		}
 		s.usage.RecordClient(clientToken, clientName, counts, costUSD)
@@ -544,6 +548,8 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		Output:      counts.OutputTokens,
 		CacheRead:   counts.CacheReadTokens,
 		CostUSD:     costUSD,
+		UserID:      userID,
+		Multiplier:  multiplier,
 		Status:      resp.StatusCode,
 		DurationMs:  time.Since(start).Milliseconds(),
 		Stream:      stream,

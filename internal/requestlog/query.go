@@ -48,6 +48,10 @@ type Filter struct {
 	Status      int       // 0 = any; otherwise exact match
 	Limit       int       // page size for Entries (0 = 50)
 	Offset      int       // number of newest-first records to skip before Limit
+	// UserID limits results to records emitted by a specific SaaS user.
+	// Used by the public-facing /app/logs page so a customer sees only
+	// their own bill. Zero = no constraint (operator query).
+	UserID int64
 }
 
 // Result is the Query return value.
@@ -285,6 +289,9 @@ func scanFile(path string, f Filter, res *Result) error {
 }
 
 func matches(r Record, f Filter) bool {
+	if f.UserID != 0 && r.UserID != f.UserID {
+		return false
+	}
 	if f.ClientToken != "" {
 		if r.ClientToken != f.ClientToken {
 			return false

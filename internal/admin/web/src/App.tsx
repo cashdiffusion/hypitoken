@@ -11,6 +11,7 @@ import DashboardPage from "@/routes/dashboard";
 import TokensPage from "@/routes/tokens";
 import BillingPage from "@/routes/billing";
 import ConsolePage from "@/routes/console";
+import LogsPage from "@/routes/logs";
 import PricingPage from "@/routes/pricing";
 import StatusPage from "@/routes/status";
 import AdminPage from "@/routes/admin";
@@ -43,6 +44,7 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="tokens" element={<TokensPage />} />
             <Route path="billing" element={<BillingPage />} />
+            <Route path="logs" element={<LogsPage />} />
             <Route path="console" element={<ConsolePage />} />
             <Route
               path="admin/*"

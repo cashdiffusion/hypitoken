@@ -36,6 +36,13 @@ type Record struct {
 	Path        string    `json:"path,omitempty"`
 	Attempts    int       `json:"attempts,omitempty"` // credential attempts before terminal
 	Error       string    `json:"error,omitempty"`
+	// SaaS billing detail. UserID lets the /app/logs page filter to
+	// just this account's requests; Multiplier records the per-(group ×
+	// provider) coefficient that scaled the official cost into CostUSD,
+	// so the user can verify each bill line against the catalog rate.
+	// Zero/empty on requests that didn't go through the SaaS layer.
+	UserID     int64   `json:"user_id,omitempty"`
+	Multiplier float64 `json:"multiplier,omitempty"`
 }
 
 type Writer struct {

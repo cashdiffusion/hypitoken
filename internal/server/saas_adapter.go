@@ -27,6 +27,12 @@ type SaaSAdapter interface {
 	// the actual wallet USD that was charged.
 	Charge(ctx context.Context, info SaaSTokenInfo, provider, model string, counts usage.Counts, officialCostUSD float64) (chargedUSD float64, err error)
 
+	// MultiplierFor returns the (group × provider) coefficient used to
+	// scale official costs into wallet charges. Surfaced so the request
+	// log can record the exact multiplier on each row, letting the user
+	// reconcile every bill line against the catalog rate.
+	MultiplierFor(ctx context.Context, groupID int64, provider string) float64
+
 	// CredentialGroup returns the upstream credential group the user's
 	// pricing group is tied to (forwarded to auth.Pool.Acquire). Empty
 	// string = public group.
