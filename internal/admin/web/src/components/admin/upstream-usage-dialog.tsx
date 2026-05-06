@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Gauge, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { apiPost } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -79,6 +80,7 @@ interface Props {
 }
 
 export function UpstreamUsageDialog({ authId, authLabel, onClose }: Props) {
+  const { t } = useTranslation();
   const [data, setData] = useState<UpstreamResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -118,19 +120,19 @@ export function UpstreamUsageDialog({ authId, authLabel, onClose }: Props) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Gauge className="size-4" />
-            Anthropic upstream — {authLabel}
+            {t("legacy.upstreamUsage.title", { label: authLabel })}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <div className="flex items-center justify-between text-sm text-muted-foreground">
             <div>
               {profile?.email_address || profile?.email || "—"}
-              {tier ? <span className="ml-2 font-mono text-xs">tier: {tier}</span> : null}
-              {profile?.has_claude_max ? <span className="ml-2 font-mono text-xs uppercase text-success">max</span> : null}
-              {profile?.has_claude_pro ? <span className="ml-2 font-mono text-xs uppercase text-success">pro</span> : null}
+              {tier ? <span className="ml-2 font-mono text-xs">{t("legacy.upstreamUsage.tierLabel", { tier })}</span> : null}
+              {profile?.has_claude_max ? <span className="ml-2 font-mono text-xs uppercase text-success">{t("legacy.upstreamUsage.maxBadge")}</span> : null}
+              {profile?.has_claude_pro ? <span className="ml-2 font-mono text-xs uppercase text-success">{t("legacy.upstreamUsage.proBadge")}</span> : null}
             </div>
             <Button size="sm" variant="ghost" disabled={busy} onClick={run}>
-              <RefreshCw className={cn("size-3", busy && "animate-spin")} /> Refresh
+              <RefreshCw className={cn("size-3", busy && "animate-spin")} /> {t("legacy.upstreamUsage.probe")}
             </Button>
           </div>
 
@@ -138,7 +140,7 @@ export function UpstreamUsageDialog({ authId, authLabel, onClose }: Props) {
 
           {data?.usage?.status && data.usage.status >= 400 ? (
             <div className="rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-              HTTP {data.usage.status}: {data.usage.error || "upstream error"}
+              {t("legacy.upstreamUsage.httpError", { status: data.usage.status, message: data.usage.error || t("legacy.upstreamUsage.upstreamError") })}
             </div>
           ) : null}
 
@@ -154,7 +156,7 @@ export function UpstreamUsageDialog({ authId, authLabel, onClose }: Props) {
                       <span className="font-medium">{label}</span>
                       <span className="font-mono text-muted-foreground">
                         {pct != null ? `${pct}%` : "—"}
-                        {w.resets_at ? ` · resets in ${fmtCountdown(w.resets_at)}` : ""}
+                        {w.resets_at ? t("legacy.upstreamUsage.resetsIn", { when: fmtCountdown(w.resets_at) }) : ""}
                       </span>
                     </div>
                     <div className="h-2 rounded-full bg-muted">
@@ -167,7 +169,7 @@ export function UpstreamUsageDialog({ authId, authLabel, onClose }: Props) {
           )}
 
           {!data && !err && busy && (
-            <div className="text-center py-6 text-sm text-muted-foreground">Querying upstream…</div>
+            <div className="text-center py-6 text-sm text-muted-foreground">{t("legacy.upstreamUsage.querying")}</div>
           )}
         </div>
       </DialogContent>
