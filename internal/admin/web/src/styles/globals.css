@@ -120,6 +120,12 @@
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
     font-feature-settings: "ss01", "cv11";
+
+    /* Always reserve scrollbar gutter so a route swap that swings between
+       "fits in viewport" and "needs to scroll" doesn't reflow the centered
+       max-w-7xl shell — and with it the sidebar's left edge — by ~15px.
+       Visible only when actually needed; baseline width is constant. */
+    scrollbar-gutter: stable;
   }
 
   html.dark {
