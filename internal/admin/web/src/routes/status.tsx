@@ -65,7 +65,10 @@ export default function StatusPage({ embedded }: Props) {
       ) : checks.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-8">
+          <p className="text-right text-xs text-muted-foreground">
+            Uptime over the past {SLOT_COUNT} probes · refreshed every 10 min
+          </p>
           {claudeChecks.length > 0 && (
             <ProviderSection
               name="Claude API"
@@ -122,48 +125,22 @@ function computeOverall(checks: HealthCheck[]): Overall {
 }
 
 function OverallBanner({ overall, asOf }: { overall: Overall; asOf: number }) {
+  // Solid colored block — matches status.claude.com's "All Systems Operational" header.
   const cfg = {
-    operational: {
-      icon: CheckCircle2,
-      label: "All systems operational",
-      bar: "bg-emerald-500",
-      bg: "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800",
-      text: "text-emerald-700 dark:text-emerald-400",
-    },
-    degraded: {
-      icon: AlertTriangle,
-      label: "Partial degradation",
-      bar: "bg-amber-400",
-      bg: "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800",
-      text: "text-amber-700 dark:text-amber-400",
-    },
-    outage: {
-      icon: XCircle,
-      label: "Major outage",
-      bar: "bg-red-500",
-      bg: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800",
-      text: "text-red-700 dark:text-red-400",
-    },
-    unknown: {
-      icon: Clock,
-      label: "Awaiting first probe",
-      bar: "bg-zinc-400",
-      bg: "bg-zinc-50 dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700",
-      text: "text-zinc-600 dark:text-zinc-400",
-    },
+    operational: { icon: CheckCircle2, label: "All Systems Operational", bg: "bg-[#76ad2a]" },
+    degraded:    { icon: AlertTriangle, label: "Partial Service Degradation", bg: "bg-[#eaa82a]" },
+    outage:      { icon: XCircle,       label: "Major Service Outage",        bg: "bg-[#e04343]" },
+    unknown:     { icon: Clock,         label: "Awaiting First Probe",        bg: "bg-zinc-500" },
   } as const;
-  const { icon: Icon, label, bar, bg, text } = cfg[overall];
+  const { icon: Icon, label, bg } = cfg[overall];
   const since = asOf ? new Date(asOf * 1000).toLocaleString() : "—";
 
   return (
-    <div className={cn("rounded-2xl border-2 p-6 md:p-8", bg)}>
-      <div className={cn("mb-5 h-1.5 w-16 rounded-full", bar)} />
-      <div className="flex items-start gap-4">
-        <Icon className={cn("mt-0.5 h-9 w-9 shrink-0", text)} />
-        <div>
-          <div className={cn("font-display text-2xl font-semibold md:text-3xl", text)}>{label}</div>
-          <div className="mt-1 text-sm text-muted-foreground">Updated {since}</div>
-        </div>
+    <div className={cn("rounded-md px-5 py-4 text-white shadow-sm", bg)}>
+      <div className="flex items-center gap-3">
+        <Icon className="h-5 w-5 shrink-0" />
+        <span className="text-base font-medium md:text-lg">{label}</span>
+        <span className="ml-auto hidden text-xs text-white/80 sm:block">Updated {since}</span>
       </div>
     </div>
   );
@@ -202,126 +179,115 @@ function StatusPill({ allOk, anyOk }: { allOk: boolean; anyOk: boolean }) {
   return <span className="rounded-full border border-red-300 bg-red-50 dark:bg-red-950/40 dark:border-red-800 px-3 py-1 text-xs font-mono uppercase tracking-wider text-red-700 dark:text-red-400">Down</span>;
 }
 
-// ─── Credential row with history grid ────────────────────────────────────────
+// ─── Credential row with status.claude.com-style uptime bars ─────────────────
 
-// Number of squares to display in the history bar.
-const GRID_SLOTS = 60;
+// Match status.claude.com: 90 slots, bar width 3, gap 2 → viewBox width 448 (90*5 - 2).
+const SLOT_COUNT = 90;
+const BAR_W = 3;
+const BAR_GAP = 2;
+const BAR_H = 34;
+const VB_W = SLOT_COUNT * (BAR_W + BAR_GAP) - BAR_GAP; // 448
+
+// Color palette lifted directly from status.claude.com SVG.
+const FILL_OK = "#76ad2a";    // operational green
+const FILL_FAIL = "#e04343";  // outage red
+const FILL_NONE = "#B0AEA5";  // no data gray
 
 function CredRow({ check }: { check: HealthCheck }) {
   const ok = check.status === "ok";
   const age = check.checked_at ? Math.round((Date.now() / 1000 - check.checked_at) / 60) : null;
 
   return (
-    <div className="bg-card px-4 py-3 text-sm">
+    <div className="bg-card px-5 py-4">
       {/* Top row: name + current status */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className={cn(
-            "inline-block h-2.5 w-2.5 shrink-0 rounded-full",
-            ok
-              ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,.5)]"
-              : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,.5)]"
-          )} />
-          <span className="font-mono text-sm font-medium">{check.display_name}</span>
+          <span className="font-mono text-sm font-medium text-foreground">{check.display_name}</span>
           {!ok && check.error && (
             <span className="hidden max-w-xs truncate text-xs text-muted-foreground sm:block" title={check.error}>
               {check.error.slice(0, 80)}{check.error.length > 80 ? "…" : ""}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          {check.latency_ms > 0 && (
-            <span className={cn("font-mono tabular-nums", check.latency_ms > 5000 ? "text-amber-500" : "")}>
+        <div className="flex items-center gap-4 text-xs">
+          {ok && check.latency_ms > 0 && (
+            <span className={cn(
+              "font-mono tabular-nums text-muted-foreground",
+              check.latency_ms > 5000 ? "text-amber-500" : ""
+            )}>
               {check.latency_ms}ms
             </span>
           )}
           {age !== null && (
-            <span title={new Date(check.checked_at * 1000).toLocaleString()}>
+            <span className="text-muted-foreground" title={new Date(check.checked_at * 1000).toLocaleString()}>
               {age === 0 ? "just now" : `${age}m ago`}
             </span>
           )}
           <span className={cn(
-            "rounded px-1.5 py-0.5 font-mono text-xs uppercase",
-            ok ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"
-               : "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400"
+            "font-medium",
+            ok ? "text-emerald-700 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
           )}>
-            {ok ? "ok" : "fail"}
+            {ok ? "Operational" : "Down"}
           </span>
         </div>
       </div>
 
-      {/* History grid */}
-      <HistoryGrid history={check.history} />
+      {/* Uptime bar */}
+      <UptimeBar history={check.history} />
     </div>
   );
 }
 
-function HistoryGrid({ history }: { history: HistoryPoint[] }) {
-  // Pad left with empty slots if fewer than GRID_SLOTS records.
+function UptimeBar({ history }: { history: HistoryPoint[] }) {
+  // Pad on the left: oldest data on the left, newest on the right.
   const padded: (HistoryPoint | null)[] = [
-    ...Array(Math.max(0, GRID_SLOTS - history.length)).fill(null),
-    ...history.slice(-GRID_SLOTS),
+    ...Array(Math.max(0, SLOT_COUNT - history.length)).fill(null),
+    ...history.slice(-SLOT_COUNT),
   ];
 
   const uptimePct = history.length === 0
     ? null
-    : Math.round((history.filter(h => h.status === "ok").length / history.length) * 100);
+    : ((history.filter(h => h.status === "ok").length / history.length) * 100);
 
   return (
-    <div className="mt-2.5">
-      <div className="flex items-center gap-1">
-        {/* Label: older end */}
-        <span className="shrink-0 text-[10px] text-muted-foreground/60 w-10 text-right pr-1">older</span>
+    <div className="mt-3">
+      {/* SVG bar — preserveAspectRatio=none lets the 448-wide viewBox stretch
+          to the container's full width while keeping bars as crisp rects. */}
+      <svg
+        className="block h-[34px] w-full"
+        preserveAspectRatio="none"
+        viewBox={`0 0 ${VB_W} ${BAR_H}`}
+        height={BAR_H}
+      >
+        {padded.map((pt, i) => {
+          const x = i * (BAR_W + BAR_GAP);
+          const fill = pt == null ? FILL_NONE : pt.status === "ok" ? FILL_OK : FILL_FAIL;
+          let title = "No data";
+          if (pt) {
+            const ts = new Date(pt.checked_at * 1000).toLocaleString();
+            title = pt.status === "ok"
+              ? `${ts} — operational (${pt.latency_ms}ms)`
+              : `${ts} — failed`;
+          }
+          return (
+            <rect key={i} x={x} y={0} width={BAR_W} height={BAR_H} fill={fill}>
+              <title>{title}</title>
+            </rect>
+          );
+        })}
+      </svg>
 
-        {/* Squares */}
-        <div className="flex flex-1 gap-px">
-          {padded.map((pt, i) => (
-            <HistorySquare key={i} point={pt} />
-          ))}
-        </div>
-
-        {/* Label: now */}
-        <span className="shrink-0 text-[10px] text-muted-foreground/60 w-8 pl-1">now</span>
-
-        {/* Uptime pct */}
-        {uptimePct !== null && (
-          <span className={cn(
-            "shrink-0 text-[10px] font-mono tabular-nums w-10 text-right",
-            uptimePct === 100 ? "text-emerald-600 dark:text-emerald-400"
-              : uptimePct >= 90 ? "text-amber-600 dark:text-amber-400"
-              : "text-red-600 dark:text-red-400"
-          )}>
-            {uptimePct}%
-          </span>
-        )}
+      {/* Bottom row: "older — X% uptime — newer" with flanking rules */}
+      <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground">
+        <span className="shrink-0">older</span>
+        <span className="h-px flex-1 bg-border" />
+        <span className="shrink-0 font-mono tabular-nums">
+          {uptimePct === null ? "awaiting data" : `${uptimePct.toFixed(2)} % uptime`}
+        </span>
+        <span className="h-px flex-1 bg-border" />
+        <span className="shrink-0">now</span>
       </div>
     </div>
-  );
-}
-
-function HistorySquare({ point }: { point: HistoryPoint | null }) {
-  if (!point) {
-    return (
-      <div className="h-5 flex-1 rounded-sm bg-muted/40" />
-    );
-  }
-
-  const ok = point.status === "ok";
-  const ts = new Date(point.checked_at * 1000).toLocaleString();
-  const title = ok
-    ? `${ts} — ok (${point.latency_ms}ms)`
-    : `${ts} — fail`;
-
-  return (
-    <div
-      title={title}
-      className={cn(
-        "h-5 flex-1 rounded-sm cursor-default transition-opacity hover:opacity-80",
-        ok
-          ? "bg-emerald-500 dark:bg-emerald-600"
-          : "bg-red-500 dark:bg-red-600"
-      )}
-    />
   );
 }
 
