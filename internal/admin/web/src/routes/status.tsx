@@ -32,7 +32,10 @@ export default function StatusPage({ embedded }: Props) {
 
   const reload = async () => {
     try {
-      const r = await api<{ checks: HealthCheck[]; as_of: number }>("/admin/health");
+      // Public endpoint — no auth required so visitors landing on /status
+      // can see upstream health without signing in. Mirror of /admin/health
+      // minus the operator-only error strings + refresh trigger.
+      const r = await api<{ checks: HealthCheck[]; as_of: number }>("/health");
       setChecks(r.checks || []);
       setAsOf(r.as_of || 0);
     } catch {

@@ -10,6 +10,7 @@ import ForgotPasswordPage from "@/routes/forgot-password";
 import DashboardPage from "@/routes/dashboard";
 import TokensPage from "@/routes/tokens";
 import BillingPage from "@/routes/billing";
+import ConsolePage from "@/routes/console";
 import PricingPage from "@/routes/pricing";
 import StatusPage from "@/routes/status";
 import AdminPage from "@/routes/admin";
@@ -42,6 +43,7 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="tokens" element={<TokensPage />} />
             <Route path="billing" element={<BillingPage />} />
+            <Route path="console" element={<ConsolePage />} />
             <Route
               path="admin/*"
               element={
