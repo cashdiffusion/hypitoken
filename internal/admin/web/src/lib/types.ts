@@ -15,8 +15,8 @@ export interface PricingGroup {
   ID: number;
   Name: string;
   Description: string;
-  CodexRMBPerUSD: number;
-  ClaudeRMBPerUSD: number;
+  // Billing: final_charge_USD = official_USD × multiplier.
+  // Defaults: claude=0.3, codex=0.05.
   CodexMultiplier: number;
   ClaudeMultiplier: number;
   CredentialGroup: string;

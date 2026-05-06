@@ -126,6 +126,24 @@ CREATE TABLE model_health_history (
 );
 CREATE INDEX idx_mhh ON model_health_history(auth_id, model, checked_at DESC);
 `,
+	// 3: switch billing model from divisor (rmb_per_usd) to multiplier-only.
+	//
+	//   final_charge_USD = official_USD * multiplier
+	//
+	// Bumps the default group from 1.0/1.0 to 0.3/0.05 (claude/codex) so a
+	// freshly-installed instance is already aligned with the operator-set
+	// defaults. Only touches the seed row; admin-customized values stay put.
+	// The legacy *_rmb_per_usd columns are left in the schema (SQLite
+	// column-drop is a table rebuild) but are no longer read or written.
+	`
+UPDATE pricing_groups
+SET    claude_multiplier = 0.3,
+       codex_multiplier  = 0.05,
+       updated_at        = strftime('%s','now')
+WHERE  is_default = 1
+  AND  claude_multiplier = 1.0
+  AND  codex_multiplier  = 1.0;
+`,
 }
 
 func (db *DB) migrate() error {

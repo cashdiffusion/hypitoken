@@ -154,11 +154,12 @@ func (h *Handler) listGroups(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"groups": gs})
 }
 
+// groupReq is the JSON shape for creating/updating a pricing group.
+// Billing semantics: final_charge_USD = official_USD × multiplier.
+// Defaults (when nothing is sent): claude=0.3, codex=0.05.
 type groupReq struct {
 	Name             string  `json:"name"`
 	Description      string  `json:"description"`
-	CodexRMBPerUSD   float64 `json:"codex_rmb_per_usd"`
-	ClaudeRMBPerUSD  float64 `json:"claude_rmb_per_usd"`
 	CodexMultiplier  float64 `json:"codex_multiplier"`
 	ClaudeMultiplier float64 `json:"claude_multiplier"`
 	CredentialGroup  string  `json:"credential_group"`
@@ -166,10 +167,11 @@ type groupReq struct {
 
 func (r groupReq) toParams() db.GroupParams {
 	return db.GroupParams{
-		Name: r.Name, Description: r.Description,
-		CodexRMBPerUSD: r.CodexRMBPerUSD, ClaudeRMBPerUSD: r.ClaudeRMBPerUSD,
-		CodexMultiplier: r.CodexMultiplier, ClaudeMultiplier: r.ClaudeMultiplier,
-		CredentialGroup: r.CredentialGroup,
+		Name:             r.Name,
+		Description:      r.Description,
+		CodexMultiplier:  r.CodexMultiplier,
+		ClaudeMultiplier: r.ClaudeMultiplier,
+		CredentialGroup:  r.CredentialGroup,
 	}
 }
 

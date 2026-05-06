@@ -59,14 +59,14 @@ export default function DashboardPage() {
         <CardContent>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-lg border border-border-strong bg-card p-4">
-              <div className="text-xs uppercase tracking-wider text-muted-foreground">Codex</div>
-              <div className="mt-2 font-mono text-2xl font-semibold tabular-nums">¥{group?.CodexRMBPerUSD?.toFixed(2)} = $1</div>
-              <div className="mt-1 text-xs text-muted-foreground">× {group?.CodexMultiplier?.toFixed(2)} multiplier</div>
+              <div className="text-xs uppercase tracking-wider text-muted-foreground">Claude</div>
+              <div className="mt-2 font-mono text-2xl font-semibold tabular-nums">{group?.ClaudeMultiplier?.toFixed(2)}×</div>
+              <div className="mt-1 text-xs text-muted-foreground">final = upstream USD × multiplier</div>
             </div>
             <div className="rounded-lg border border-border-strong bg-card p-4">
-              <div className="text-xs uppercase tracking-wider text-muted-foreground">Claude</div>
-              <div className="mt-2 font-mono text-2xl font-semibold tabular-nums">¥{group?.ClaudeRMBPerUSD?.toFixed(2)} = $1</div>
-              <div className="mt-1 text-xs text-muted-foreground">× {group?.ClaudeMultiplier?.toFixed(2)} multiplier</div>
+              <div className="text-xs uppercase tracking-wider text-muted-foreground">Codex</div>
+              <div className="mt-2 font-mono text-2xl font-semibold tabular-nums">{group?.CodexMultiplier?.toFixed(2)}×</div>
+              <div className="mt-1 text-xs text-muted-foreground">final = upstream USD × multiplier</div>
             </div>
           </div>
         </CardContent>

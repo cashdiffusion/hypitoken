@@ -119,8 +119,6 @@ func parseFile(path string, data []byte) (*Auth, error) {
 	orgUUID, _ := raw["organization_uuid"].(string)
 	orgType, _ := raw["organization_type"].(string)
 	orgRateLimitTier, _ := raw["organization_rate_limit_tier"].(string)
-	billingRateClaude, _ := raw["billing_rate"].(float64)
-
 	a := &Auth{
 		ID:                        filepath.Base(path),
 		Kind:                      KindOAuth,
@@ -139,7 +137,6 @@ func parseFile(path string, data []byte) (*Auth, error) {
 		OrganizationUUID:          orgUUID,
 		OrganizationType:          orgType,
 		OrganizationRateLimitTier: orgRateLimitTier,
-		BillingRate:               billingRateClaude,
 	}
 	return a, nil
 }
@@ -191,7 +188,6 @@ func parseAPIKeyFile(path string, raw map[string]any, provider string) (*Auth, e
 	baseURL, _ := raw["base_url"].(string)
 	group, _ := raw["group"].(string)
 	modelMap := parseModelMap(raw["model_map"])
-	billingRate, _ := raw["billing_rate"].(float64)
 	return &Auth{
 		ID:          filepath.Base(path),
 		Kind:        KindAPIKey,
@@ -204,7 +200,6 @@ func parseAPIKeyFile(path string, raw map[string]any, provider string) (*Auth, e
 		Disabled:    disabled,
 		Group:       NormalizeGroup(group),
 		ModelMap:    modelMap,
-		BillingRate: billingRate,
 	}, nil
 }
 
@@ -233,7 +228,6 @@ func parseCodexOAuthFile(path string, raw map[string]any, provider string) (*Aut
 	idToken, _ := raw["id_token"].(string)
 	accountID, _ := raw["account_id"].(string)
 	planType, _ := raw["plan_type"].(string)
-	billingRateCodex, _ := raw["billing_rate"].(float64)
 	maxConc := 0
 	if v, ok := raw["max_concurrent"].(float64); ok {
 		maxConc = int(v)
@@ -266,7 +260,6 @@ func parseCodexOAuthFile(path string, raw map[string]any, provider string) (*Aut
 		FilePath:      path,
 		Disabled:      disabled,
 		Group:         NormalizeGroup(group),
-		BillingRate:   billingRateCodex,
 	}, nil
 }
 
@@ -431,11 +424,9 @@ func saveAuth(a *Auth) error {
 	} else {
 		delete(raw, "group")
 	}
-	if a.BillingRate > 0 {
-		raw["billing_rate"] = a.BillingRate
-	} else {
-		delete(raw, "billing_rate")
-	}
+	// Drop legacy per-credential billing_rate from any old credential file
+	// — billing now lives entirely on the pricing-group multiplier.
+	delete(raw, "billing_rate")
 	a.mu.RUnlock()
 	out, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {

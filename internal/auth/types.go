@@ -93,11 +93,6 @@ type Auth struct {
 	// public acting as a fallback when the group's credentials are exhausted.
 	Group string
 
-	// BillingRate is the provider-level scaling factor applied to this
-	// credential's official cost. Formula: bill = official / BillingRate.
-	// 0 means "use the provider default from SaaS config".
-	BillingRate float64
-
 	// ModelMap (API-key only) maps client-facing model names to upstream
 	// model names. When non-nil and non-empty:
 	//   - this credential will only be picked for requests whose model
@@ -212,7 +207,6 @@ func (a *Auth) Snapshot() AuthInfo {
 		ModelMap:          mm,
 		CodexRateLimits:   rl,
 		CodexRateLimitsAt: a.CodexRateLimitsAt,
-		BillingRate:       a.BillingRate,
 	}
 }
 
@@ -234,7 +228,6 @@ type AuthInfo struct {
 	ModelMap          map[string]string
 	CodexRateLimits   map[string]string
 	CodexRateLimitsAt time.Time
-	BillingRate       float64
 }
 
 // IsQuotaExceeded reports true if Anthropic has signalled this auth is out of
@@ -579,28 +572,6 @@ func (a *Auth) ResolveUpstreamModel(clientModel string) (upstream string, ok boo
 		return clientModel, true
 	}
 	return mapped, true
-}
-
-// GetBillingRate returns the billing rate for this credential. If unset (0),
-// returns def (the provider-level default from SaaS config).
-func (a *Auth) GetBillingRate(def float64) float64 {
-	a.mu.RLock()
-	r := a.BillingRate
-	a.mu.RUnlock()
-	if r <= 0 {
-		return def
-	}
-	return r
-}
-
-// SetBillingRate updates the per-credential billing rate.
-func (a *Auth) SetBillingRate(r float64) {
-	if r < 0 {
-		r = 0
-	}
-	a.mu.Lock()
-	a.BillingRate = r
-	a.mu.Unlock()
 }
 
 // AcceptsModel reports whether this credential is eligible to serve a request

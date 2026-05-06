@@ -518,7 +518,18 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	s.usage.Record(a.ID, a.Label, counts)
 	var costUSD float64
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
-		costUSD = s.pricing.Cost(auth.ProviderOpenAI, model, counts)
+		official := s.pricing.Cost(auth.ProviderOpenAI, model, counts)
+		costUSD = official
+		// Same single-funnel as Anthropic: hand the official cost to the
+		// SaaS adapter, get back the billed amount, log/charge with it.
+		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
+			billed, err := s.saas.Charge(c.Request.Context(), info, auth.ProviderOpenAI, model, counts, official)
+			if err != nil {
+				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
+			} else {
+				costUSD = billed
+			}
+		}
 		s.usage.RecordClient(clientToken, clientName, counts, costUSD)
 	}
 	s.emitLog(requestlog.Record{
