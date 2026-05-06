@@ -260,7 +260,7 @@ export default {
     activeWindow: "凭证活跃轮换窗口 {{min}} 分钟 · 实时图表每 10 秒刷新。",
     bannerStrong: "全平台聚合数据。",
     banner:
-      "本页所有指标横跨全平台 — 凭证、模型、请求、消费,均为聚合数,<em>不是</em>您个人的使用情况。要查看个人账单,请前往 <billing>账单</billing> 或 <logs>日志</logs>。",
+      "本页所有指标横跨全平台 — 凭证、模型、请求、消费,均为聚合数,不是您个人的使用情况。要查看个人账单,请前往 <billing>账单</billing> 或 <logs>日志</logs>。",
     last: "最近 · {{when}}",
     metrics: {
       credentials: "凭证",

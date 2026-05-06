@@ -262,7 +262,7 @@ export default {
     activeWindow: "Active rotation window {{min}} min · live charts refresh every 10 seconds.",
     bannerStrong: "Platform-wide stats.",
     banner:
-      "Every metric here aggregates across the whole fleet — credentials, models, requests, spend. It is <em>not</em> your personal usage. For your own billing detail, see <billing>Billing</billing> or <logs>Logs</logs>.",
+      "Every metric here aggregates across the whole fleet — credentials, models, requests, spend. It is not your personal usage. For your own billing detail, see <billing>Billing</billing> or <logs>Logs</logs>.",
     last: "last · {{when}}",
     metrics: {
       credentials: "Credentials",
