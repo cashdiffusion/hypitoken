@@ -25,6 +25,7 @@ export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
   const [reqData, setReqData] = useState<RequestsResp | null>(null);
   const [lifetimeData, setLifetimeData] = useState<RequestsResp | null>(null);
   const [hourly, setHourly] = useState<HourBucket[] | null>(null);
+  const [userPaid, setUserPaid] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -35,14 +36,19 @@ export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
       fromD.setDate(today.getDate() - (DAYS - 1));
       const from = `${fromD.getFullYear()}-${pad(fromD.getMonth() + 1)}-${pad(fromD.getDate())}`;
       const to = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-      const [d, all, hr] = await Promise.all([
+      const [d, all, hr, walletTotals] = await Promise.all([
         api<RequestsResp>(`/admin/api/requests?limit=1&from=${from}&to=${to}`),
         api<RequestsResp>(`/admin/api/requests?limit=1`),
         api<HourlyResp>(`/admin/api/requests/hourly?hours=24`),
+        // Fleet wallet totals — sum across all SaaS users of charges
+        // post-multiplier. Powers the "Saved by us" card. SaaS-only
+        // endpoint; tolerate failure on non-SaaS deploys.
+        api<{ user_paid_usd: number }>(`/api/v2/admin/wallet-totals`).catch(() => null),
       ]);
       setReqData(d);
       setLifetimeData(all);
       setHourly(hr.buckets || []);
+      setUserPaid(walletTotals ? walletTotals.user_paid_usd : null);
     } catch {
       // ignore
     } finally {
@@ -81,6 +87,7 @@ export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
       lifetimeData={slim(lifetimeData)}
       hourly={hourly}
       busy={busy}
+      userPaidUSD={userPaid}
     />
   );
 }

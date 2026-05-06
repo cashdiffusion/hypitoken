@@ -10,6 +10,7 @@ import (
 
 	"github.com/wjsoj/CPA-Claude/internal/auth"
 	legacyadmin "github.com/wjsoj/CPA-Claude/internal/admin"
+	"github.com/wjsoj/CPA-Claude/internal/pricing"
 	"github.com/wjsoj/CPA-Claude/internal/requestlog"
 	"github.com/wjsoj/CPA-Claude/internal/saas/admin"
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
@@ -23,7 +24,7 @@ import (
 // /api/v2/admin/credentials/* is exposed. legacyH may be nil — when set, the
 // /api/v2/admin/* group also exposes request-log queries + Anthropic OAuth
 // quota probe (handlers reused from the legacy /mgmt-console panel).
-func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string) {
+func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog) {
 	v2 := engine.Group("/api/v2")
 
 	// Public.
@@ -94,7 +95,43 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, res)
+		// Attach the price card for every distinct model that appears so
+		// the frontend can render a per-row "how was this charged"
+		// breakdown without a follow-up RPC.
+		prices := map[string]gin.H{}
+		seen := map[string]struct{}{}
+		add := func(model string) {
+			if model == "" {
+				return
+			}
+			if _, ok := seen[model]; ok {
+				return
+			}
+			seen[model] = struct{}{}
+			p := catalog.Lookup(auth.ProviderAnthropic, model)
+			// auth.ProviderAnthropic is the wrong assumption for codex-side
+			// rows; lookup() falls back to provider-default → global default
+			// so we still get a usable card for unknown models.
+			prices[model] = gin.H{
+				"input_per_1m":        p.InputPer1M,
+				"output_per_1m":       p.OutputPer1M,
+				"cache_read_per_1m":   p.CacheReadPer1M,
+				"cache_create_per_1m": p.CacheCreatePer1M,
+			}
+		}
+		for _, e := range res.Entries {
+			add(e.Model)
+		}
+		for m := range res.ByModel {
+			add(m)
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"summary":  res.Summary,
+			"by_model": res.ByModel,
+			"entries":  res.Entries,
+			"scanned":  res.Scanned,
+			"pricing":  prices,
+		})
 	})
 
 	// Public groups (read-only, used on landing/pricing pages).
@@ -166,6 +203,11 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 		}
 		c.JSON(http.StatusOK, gin.H{"checks": out, "as_of": time.Now().Unix()})
 	})
+
+	// Fleet-wide wallet aggregate is exposed to any signed-in user — it
+	// powers the "Saved by us" tile on the operator console which itself
+	// is open to all users (per the SSO design). No PII, just sums.
+	authed.GET("/admin/wallet-totals", adminH.WalletTotalsHandler())
 
 	// Admin (operator-only).
 	adminG := authed.Group("/admin")
