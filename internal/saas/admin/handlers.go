@@ -40,6 +40,79 @@ func (h *Handler) Routes(g *gin.RouterGroup) {
 	// model health
 	g.GET("/health", h.listHealth)
 	g.POST("/health/refresh", h.refreshHealth)
+
+	// admin business dashboard rollup (users + revenue + payments + chart)
+	g.GET("/dashboard", h.dashboard)
+}
+
+func (h *Handler) dashboard(c *gin.Context) {
+	snap, err := h.DB.AdminDashboard(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	users := gin.H{
+		"total":     snap.UsersTotal,
+		"verified":  snap.UsersVerified,
+		"new_30d":   snap.UsersNew30d,
+		"disabled":  snap.UsersDisabled,
+	}
+	revenue := gin.H{
+		"topups_lifetime":  snap.TopupsLifetime,
+		"topups_30d":       snap.Topups30d,
+		"topups_7d":        snap.Topups7d,
+		"charges_lifetime": snap.ChargesLifetime,
+		"charges_30d":      snap.Charges30d,
+		"charges_7d":       snap.Charges7d,
+	}
+	balance := gin.H{
+		"outstanding":          snap.BalanceOutstanding,
+		"orders_pending":       snap.OrdersPending,
+		"orders_paid_lifetime": snap.OrdersPaidLifetime,
+	}
+	daily := make([]gin.H, 0, len(snap.DailyRevenue14d))
+	for _, d := range snap.DailyRevenue14d {
+		daily = append(daily, gin.H{"day": d.Day, "amount": d.Amount})
+	}
+	top := make([]gin.H, 0, len(snap.TopSpenders))
+	for _, u := range snap.TopSpenders {
+		top = append(top, gin.H{"user_id": u.UserID, "email": u.Email, "spent": u.Spent})
+	}
+	rec := make([]gin.H, 0, len(snap.RecentTopups))
+	for _, o := range snap.RecentTopups {
+		var paid int64
+		if !o.PaidAt.IsZero() {
+			paid = o.PaidAt.Unix()
+		}
+		rec = append(rec, gin.H{
+			"out_trade_no": o.OutTradeNo,
+			"user_id":      o.UserID,
+			"user_email":   o.UserEmail,
+			"cny_amount":   o.CNYAmount,
+			"usd_credit":   o.USDCredit,
+			"paid_at":      paid,
+		})
+	}
+	signups := make([]gin.H, 0, len(snap.RecentSignups))
+	for _, u := range snap.RecentSignups {
+		signups = append(signups, gin.H{
+			"id":         u.ID,
+			"email":      u.Email,
+			"role":       u.Role,
+			"verified":   u.Verified,
+			"disabled":   u.Disabled,
+			"created_at": u.CreatedAt.Unix(),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"users":          users,
+		"revenue":        revenue,
+		"balance":        balance,
+		"daily_revenue":  daily,
+		"top_spenders":   top,
+		"recent_topups":  rec,
+		"recent_signups": signups,
+	})
 }
 
 // WalletTotalsHandler is a stand-alone handler exposing the fleet-wide

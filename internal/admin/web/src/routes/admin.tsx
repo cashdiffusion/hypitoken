@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { NavLink, Routes, Route } from "react-router-dom";
-import { Users, Tag, KeyRound, ShoppingCart, LayoutDashboard, ScrollText, Gauge } from "lucide-react";
+import { Users, Tag, KeyRound, ShoppingCart, LayoutDashboard, ScrollText, Gauge, Sparkles } from "lucide-react";
 import { OverviewPanel } from "@/components/admin/overview-panel";
+import { AdminDashboard } from "@/components/admin/admin-dashboard";
 import { RequestsExplorer } from "@/components/admin/requests-explorer";
 import { UpstreamUsageDialog } from "@/components/admin/upstream-usage-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,7 +19,8 @@ import { cn } from "@/lib/utils";
 import type { PricingGroup } from "@/lib/types";
 
 const TABS = [
-  { to: "overview", label: "Overview", icon: LayoutDashboard },
+  { to: "dashboard", label: "Dashboard", icon: Sparkles },
+  { to: "fleet", label: "Fleet", icon: LayoutDashboard },
   { to: "users", label: "Users", icon: Users },
   { to: "groups", label: "Pricing groups", icon: Tag },
   { to: "credentials", label: "Credentials", icon: KeyRound },
@@ -55,7 +57,10 @@ export default function AdminPage() {
       </div>
 
       <Routes>
-        <Route index element={<OverviewPanel refreshTick={0} />} />
+        <Route index element={<AdminDashboard />} />
+        <Route path="dashboard" element={<AdminDashboard />} />
+        <Route path="fleet" element={<OverviewPanel refreshTick={0} />} />
+        {/* legacy alias — earlier deeplinks pointed at /overview */}
         <Route path="overview" element={<OverviewPanel refreshTick={0} />} />
         <Route path="users" element={<UsersTab />} />
         <Route path="groups" element={<GroupsTab />} />
