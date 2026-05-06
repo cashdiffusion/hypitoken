@@ -238,12 +238,65 @@ func (c *Checker) probeAnthropic(ctx context.Context, cli *http.Client, a *auth.
 	return "ok", ""
 }
 
-// probeOpenAI sends a minimal chat completion request to the Codex endpoint.
+// probeOpenAI sends a minimal /v1/responses request — same shape real Codex
+// CLI uses — with the cheapest possible billing footprint for a gpt-5 model:
+//   - max_output_tokens: 1   (the gpt-5 family ignores max_tokens; this is
+//     the correct param name on the responses endpoint).
+//   - reasoning.effort: "minimal"  (default is medium, which silently spends
+//     ~200+ hidden reasoning tokens per request even for trivial prompts).
+//   - stream: false           (no need for SSE on a one-token probe).
+//   - store: false            (don't persist on OpenAI-side).
+// Verified against the request shapes documented in
+// internal/server/codex_oauth_proxy.go — same endpoint real Codex CLI hits.
 func (c *Checker) probeOpenAI(ctx context.Context, cli *http.Client, a *auth.Auth, model string) (string, string) {
 	body := map[string]any{
-		"model":      model,
-		"max_tokens": 1,
-		"messages":   []any{map[string]any{"role": "user", "content": "ping"}},
+		"model":              model,
+		"input":              "ping",
+		"max_output_tokens":  16, // 1 is rejected by some gateways; 16 is still ~$0.0001
+		"reasoning":          map[string]any{"effort": "minimal"},
+		"stream":             false,
+		"store":              false,
+	}
+	buf, _ := json.Marshal(body)
+
+	snap := a.Snapshot()
+	base := strings.TrimRight(snap.BaseURL, "/")
+	if base == "" {
+		base = "https://api.openai.com"
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/responses", bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.AccessToken)
+
+	resp, err := cli.Do(req)
+	if err != nil {
+		// Some 3rd-party apikey gateways (tcdmx etc.) only implement
+		// /v1/chat/completions, not /v1/responses. Fall back so we don't
+		// flag those as unhealthy when they really are working.
+		return c.probeOpenAIChatFallback(ctx, cli, a, model)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 400 {
+		return "ok", ""
+	}
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	// 404 / "not implemented" → fall back to chat/completions.
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		return c.probeOpenAIChatFallback(ctx, cli, a, model)
+	}
+	return "fail", fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+}
+
+// probeOpenAIChatFallback is used when /v1/responses isn't available on the
+// upstream — most cheap apikey gateways only ship /v1/chat/completions.
+// max_completion_tokens (not max_tokens) is the correct cap for gpt-5 family.
+func (c *Checker) probeOpenAIChatFallback(ctx context.Context, cli *http.Client, a *auth.Auth, model string) (string, string) {
+	body := map[string]any{
+		"model":                 model,
+		"messages":              []any{map[string]any{"role": "user", "content": "ping"}},
+		"max_completion_tokens": 16,
+		"reasoning_effort":      "minimal",
+		"stream":                false,
 	}
 	buf, _ := json.Marshal(body)
 
