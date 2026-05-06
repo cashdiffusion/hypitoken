@@ -16,6 +16,14 @@ const CLAUDE_MODELS = [
     cacheRead: 0.5,
   },
   {
+    name: "claude-opus-4-6",
+    display: "Claude Opus 4.6",
+    input: 5.0,
+    output: 25.0,
+    cacheWrite: 6.25,
+    cacheRead: 0.5,
+  },
+  {
     name: "claude-sonnet-4-6",
     display: "Claude Sonnet 4.6",
     input: 3.0,
@@ -180,13 +188,25 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
                   {g.Description && <p className="text-xs text-muted-foreground">{g.Description}</p>}
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  <div className="flex items-center justify-between rounded-md border border-border bg-card p-3">
-                    <span className="text-sm text-muted-foreground">Claude multiplier</span>
-                    <span className="font-mono text-sm font-semibold">{g.ClaudeMultiplier.toFixed(2)}×</span>
+                  {/* Claude line */}
+                  <div className="rounded-md border border-border bg-card p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Claude</span>
+                      <span className="font-mono text-sm font-semibold">{g.ClaudeMultiplier.toFixed(2)}×</span>
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      ¥1 = ${(1 / (g.ClaudeRMBPerUSD || 1)).toFixed(2)} of upstream usage
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between rounded-md border border-border bg-card p-3">
-                    <span className="text-sm text-muted-foreground">Codex multiplier</span>
-                    <span className="font-mono text-sm font-semibold">{g.CodexMultiplier.toFixed(2)}×</span>
+                  {/* Codex line */}
+                  <div className="rounded-md border border-border bg-card p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Codex</span>
+                      <span className="font-mono text-sm font-semibold">{g.CodexMultiplier.toFixed(2)}×</span>
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      ¥1 = ${(1 / (g.CodexRMBPerUSD || 1)).toFixed(2)} of upstream usage
+                    </div>
                   </div>
                 </CardContent>
               </Card>
