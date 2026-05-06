@@ -42,14 +42,12 @@ const CLAUDE_MODELS = [
 ];
 
 // Codex CLI OAuth models — covered by ChatGPT Plus/Pro/Team subscription.
-// Source: internal/auth/codex_models.go (CodexModelCatalog, Pro tier).
 const CODEX_OAUTH_MODELS = [
-  { name: "gpt-5.3-codex",       display: "GPT-5.3 Codex",       input: 1.75, output: 14.0,  cacheWrite: null, cacheRead: 0.175 },
-  { name: "gpt-5.3-codex-spark", display: "GPT-5.3 Codex Spark", input: 1.75, output: 14.0,  cacheWrite: null, cacheRead: 0.175 },
-  { name: "gpt-5.5",             display: "GPT-5.5",             input: 5.0,  output: 30.0,  cacheWrite: null, cacheRead: 0.5 },
-  { name: "gpt-5.4",             display: "GPT-5.4",             input: 2.5,  output: 15.0,  cacheWrite: null, cacheRead: 0.25 },
-  { name: "gpt-5.4-mini",        display: "GPT-5.4 mini",        input: 0.75, output: 4.5,   cacheWrite: null, cacheRead: 0.075 },
-  { name: "gpt-5.2",             display: "GPT-5.2",             input: 1.5,  output: 6.0,   cacheWrite: null, cacheRead: null },
+  { name: "gpt-5.5",         display: "GPT-5.5",       input: 5.0,  output: 30.0, cacheWrite: null, cacheRead: 0.5 },
+  { name: "gpt-5.4",         display: "GPT-5.4",       input: 2.5,  output: 15.0, cacheWrite: null, cacheRead: 0.25 },
+  { name: "gpt-5.4-mini",    display: "GPT-5.4 mini",  input: 0.75, output: 4.5,  cacheWrite: null, cacheRead: 0.075 },
+  { name: "gpt-5.3-codex",   display: "GPT-5.3 Codex", input: 1.75, output: 14.0, cacheWrite: null, cacheRead: 0.175 },
+  { name: "gpt-5.2",         display: "GPT-5.2",       input: 1.5,  output: 6.0,  cacheWrite: null, cacheRead: null },
 ];
 
 // OpenAI API-key models — full lineup accessible with a standard API key.
