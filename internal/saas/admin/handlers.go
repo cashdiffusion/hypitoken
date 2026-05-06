@@ -3,6 +3,7 @@
 package admin
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -257,10 +258,41 @@ func (h *Handler) listHealth(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// Build sequential display names per provider+kind.
+	// Counters keyed by "<provider>-<kind>" (e.g. "anthropic-oauth", "openai-apikey").
+	counters := map[string]int{}
+	displayName := func(authID, provider, model string) string {
+		// Infer kind from auth_id prefix heuristic — API key files start with
+		// "apikey-" or contain "_api_key"; OAuth files contain "oauth" or start with
+		// "sk-ant-oat" after redaction. We use the model probe as a proxy:
+		// if the auth_id looks like a filename with "apikey" it's apikey, else oauth.
+		kind := "oauth"
+		lower := authID
+		if len(lower) > 7 && lower[:7] == "apikey-" {
+			kind = "api"
+		} else if len(lower) > 10 && lower[:10] == "openai_api" {
+			kind = "api"
+		} else if len(lower) > 7 && lower[:7] == "openai-" {
+			kind = "api"
+		}
+		// Shorten provider name for display.
+		prov := "claude"
+		if provider == "openai" {
+			prov = "codex"
+		}
+		key := prov + "-" + kind + "-" + authID // stable key per credential
+		if _, seen := counters[key]; !seen {
+			grpKey := prov + "-" + kind
+			counters[grpKey]++
+			counters[key] = counters[grpKey]
+		}
+		return fmt.Sprintf("%s-%s-%03d", prov, kind, counters[key])
+	}
 	out := make([]gin.H, 0, len(hs))
 	for _, h := range hs {
+		name := displayName(h.AuthID, h.Provider, h.Model)
 		out = append(out, gin.H{
-			"id": h.ID, "auth_id": h.AuthID, "provider": h.Provider, "model": h.Model,
+			"id": h.ID, "display_name": name, "provider": h.Provider,
 			"status": h.Status, "latency_ms": h.LatencyMs, "error": h.Error,
 			"checked_at": h.CheckedAt.Unix(),
 		})

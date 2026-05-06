@@ -117,7 +117,7 @@ func (c *Config) ApplyDefaults(configDir string) {
 		c.DefaultCodexBillingRate = 3.0
 	}
 	if c.HealthCheckInterval == 0 {
-		c.HealthCheckInterval = 30 * time.Minute
+		c.HealthCheckInterval = 10 * time.Minute
 	}
 	if c.SMTP.Port == 0 {
 		c.SMTP.Port = 587
