@@ -3,6 +3,7 @@ import { Toaster } from "sonner";
 import { AuthProvider } from "@/hooks/use-auth";
 import { RequireAdmin, RequireAuth } from "@/components/require-auth";
 import { AppShell } from "@/components/layout/shell";
+import { TitleWatcher } from "@/components/title-watcher";
 import HomePage from "@/routes/home";
 import LoginPage from "@/routes/login";
 import RegisterPage from "@/routes/register";
@@ -21,6 +22,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <TitleWatcher />
         <Routes>
           {/* public */}
           <Route path="/" element={<HomePage />} />

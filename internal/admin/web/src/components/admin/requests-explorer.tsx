@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,6 +55,7 @@ const localDate = (d: Date) =>
 const cost = (v: number | undefined | null) => "$" + (v || 0).toFixed(4);
 
 export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
+  const { t } = useTranslation();
   const today = localDate(new Date());
   const sevenAgo = localDate(new Date(Date.now() - 7 * 86400000));
   const [from, setFrom] = useState(sevenAgo);
@@ -125,29 +127,29 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
   return (
     <section>
       <div className="flex items-baseline justify-between mb-4">
-        <h2 className="text-2xl font-semibold tracking-tight">Requests</h2>
+        <h2 className="text-2xl font-semibold tracking-tight">{t("legacy.requestsExplorer.title")}</h2>
         <span className="text-sm text-muted-foreground">
-          {data ? `${fmtInt(data.scanned)} lines scanned · ${fmtInt(data.summary.count)} match` : ""}
+          {data ? t("legacy.requestsExplorer.scanned", { scanned: fmtInt(data.scanned), count: fmtInt(data.summary.count) }) : ""}
         </span>
       </div>
       <Card className="overflow-hidden">
         <div className="p-4 grid grid-cols-1 md:grid-cols-6 gap-3 items-end border-b">
           <div className="space-y-1">
-            <Label className="text-muted-foreground">From</Label>
+            <Label className="text-muted-foreground">{t("legacy.requestsExplorer.from")}</Label>
             <Input type="date" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
           </div>
           <div className="space-y-1">
-            <Label className="text-muted-foreground">To</Label>
+            <Label className="text-muted-foreground">{t("legacy.requestsExplorer.to")}</Label>
             <Input type="date" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
           </div>
           <div className="space-y-1">
-            <Label className="text-muted-foreground">Client</Label>
+            <Label className="text-muted-foreground">{t("legacy.requestsExplorer.client")}</Label>
             <Select value={client || "__any"} onValueChange={(v) => setClient(v === "__any" ? "" : v)}>
               <SelectTrigger>
-                <SelectValue placeholder="(any)" />
+                <SelectValue placeholder={t("legacy.requestsExplorer.any")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__any">(any)</SelectItem>
+                <SelectItem value="__any">{t("legacy.requestsExplorer.any")}</SelectItem>
                 {clientsList.map((c) => (
                   <SelectItem key={c} value={c}>
                     {c}
@@ -157,13 +159,13 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
             </Select>
           </div>
           <div className="space-y-1">
-            <Label className="text-muted-foreground">Model</Label>
+            <Label className="text-muted-foreground">{t("legacy.requestsExplorer.model")}</Label>
             <Select value={model || "__any"} onValueChange={(v) => setModel(v === "__any" ? "" : v)}>
               <SelectTrigger>
-                <SelectValue placeholder="(any)" />
+                <SelectValue placeholder={t("legacy.requestsExplorer.any")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__any">(any)</SelectItem>
+                <SelectItem value="__any">{t("legacy.requestsExplorer.any")}</SelectItem>
                 {modelsList.map((m) => (
                   <SelectItem key={m} value={m}>
                     {m}
@@ -173,7 +175,7 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
             </Select>
           </div>
           <div className="space-y-1">
-            <Label className="text-muted-foreground">Page size</Label>
+            <Label className="text-muted-foreground">{t("legacy.requestsExplorer.pageSize")}</Label>
             <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
               <SelectTrigger className="font-mono text-sm">
                 <SelectValue />
@@ -188,7 +190,7 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
             </Select>
           </div>
           <Button disabled={busy} onClick={onQuery}>
-            {busy ? "…" : "Query"}
+            {busy ? t("legacy.requestsExplorer.busy") : t("legacy.requestsExplorer.query")}
           </Button>
         </div>
 
@@ -197,11 +199,11 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
         {data && (
           <div className="p-4 grid grid-cols-2 md:grid-cols-5 gap-3 bg-muted/30 border-b">
             {[
-              ["Requests", fmtInt(data.summary.count)],
-              ["Total $", cost(data.summary.cost_usd)],
-              ["Input", fmtInt(data.summary.input_tokens)],
-              ["Output", fmtInt(data.summary.output_tokens)],
-              ["Errors", fmtInt(data.summary.errors)],
+              [t("legacy.requestsExplorer.tilesRequests"), fmtInt(data.summary.count)],
+              [t("legacy.requestsExplorer.tilesTotal"), cost(data.summary.cost_usd)],
+              [t("legacy.requestsExplorer.tilesInput"), fmtInt(data.summary.input_tokens)],
+              [t("legacy.requestsExplorer.tilesOutput"), fmtInt(data.summary.output_tokens)],
+              [t("legacy.requestsExplorer.tilesErrors"), fmtInt(data.summary.errors)],
             ].map(([k, v]) => (
               <div key={k} className="bg-background rounded-lg border px-3 py-2">
                 <div className="text-xs text-muted-foreground">{k}</div>
@@ -213,7 +215,7 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
 
         {data && sortedByDay.length > 0 && (
           <div className="p-4 border-b">
-            <div className="text-base font-medium mb-2">Daily cost</div>
+            <div className="text-base font-medium mb-2">{t("legacy.requestsExplorer.dailyCost")}</div>
             <div className="flex items-end gap-[3px] h-16">
               {sortedByDay.map(([day, a]) => {
                 const pct = Math.round((a.cost_usd / maxDayCost) * 100);
@@ -238,7 +240,7 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
         {data && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 border-b">
             <div>
-              <div className="text-base font-medium mb-2">By client</div>
+              <div className="text-base font-medium mb-2">{t("legacy.requestsExplorer.byClient")}</div>
               {sortedByClient.length === 0 ? (
                 <div className="text-sm text-muted-foreground">—</div>
               ) : (
@@ -247,7 +249,7 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
                     {sortedByClient.map(([k, a]) => (
                       <tr key={k} className="border-b">
                         <td className="py-1.5 pr-3 font-medium">
-                          {k || <span className="text-muted-foreground">(unnamed)</span>}
+                          {k || <span className="text-muted-foreground">{t("legacy.requestsExplorer.unnamed")}</span>}
                         </td>
                         <td className="py-1.5 font-mono text-right">{cost(a.cost_usd)}</td>
                         <td className="py-1.5 font-mono text-right text-muted-foreground w-20">
@@ -260,7 +262,7 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
               )}
             </div>
             <div>
-              <div className="text-base font-medium mb-2">By model</div>
+              <div className="text-base font-medium mb-2">{t("legacy.requestsExplorer.byModel")}</div>
               {sortedByModel.length === 0 ? (
                 <div className="text-sm text-muted-foreground">—</div>
               ) : (
@@ -285,7 +287,7 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
         {data && (
           <div className="p-4">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-base font-medium">Recent matching entries</div>
+              <div className="text-base font-medium">{t("legacy.requestsExplorer.recent")}</div>
               {(() => {
                 const total = data.summary?.count || 0;
                 const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -303,7 +305,7 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
                       disabled={busy || clampedPage <= 1}
                       onClick={() => run(clampedPage - 1)}
                     >
-                      Prev
+                      {t("legacy.requestsExplorer.prev")}
                     </Button>
                     <span className="font-mono">
                       {clampedPage} / {totalPages}
@@ -314,34 +316,30 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
                       disabled={busy || clampedPage >= totalPages}
                       onClick={() => run(clampedPage + 1)}
                     >
-                      Next
+                      {t("legacy.requestsExplorer.next")}
                     </Button>
                   </div>
                 );
               })()}
             </div>
             {!data.entries || data.entries.length === 0 ? (
-              <div className="text-sm text-muted-foreground py-6 text-center">No entries on this page.</div>
+              <div className="text-sm text-muted-foreground py-6 text-center">{t("legacy.requestsExplorer.none")}</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="text-left text-xs uppercase text-muted-foreground border-b">
                     <tr>
-                      <th className="py-2 pr-2">Time (UTC)</th>
-                      <th className="py-2 pr-2">Client</th>
-                      <th className="py-2 pr-2">Model</th>
-                      <th className="py-2 pr-2">Auth</th>
-                      <th className="py-2 pr-2 text-right">In</th>
-                      <th className="py-2 pr-2 text-right">Out</th>
-                      <th className="py-2 pr-2 text-right" title="Cache read tokens">
-                        Cache R
-                      </th>
-                      <th className="py-2 pr-2 text-right" title="Cache write / creation tokens">
-                        Cache W
-                      </th>
-                      <th className="py-2 pr-2 text-right">Cost</th>
-                      <th className="py-2 pr-2 text-right">Status</th>
-                      <th className="py-2 pr-2 text-right">Dur</th>
+                      <th className="py-2 pr-2">{t("legacy.requestsExplorer.cols.time")}</th>
+                      <th className="py-2 pr-2">{t("legacy.requestsExplorer.cols.client")}</th>
+                      <th className="py-2 pr-2">{t("legacy.requestsExplorer.cols.model")}</th>
+                      <th className="py-2 pr-2">{t("legacy.requestsExplorer.cols.auth")}</th>
+                      <th className="py-2 pr-2 text-right">{t("legacy.requestsExplorer.cols.input")}</th>
+                      <th className="py-2 pr-2 text-right">{t("legacy.requestsExplorer.cols.output")}</th>
+                      <th className="py-2 pr-2 text-right">{t("legacy.requestsExplorer.cols.cacheR")}</th>
+                      <th className="py-2 pr-2 text-right">{t("legacy.requestsExplorer.cols.cacheW")}</th>
+                      <th className="py-2 pr-2 text-right">{t("legacy.requestsExplorer.cols.cost")}</th>
+                      <th className="py-2 pr-2 text-right">{t("legacy.requestsExplorer.cols.status")}</th>
+                      <th className="py-2 pr-2 text-right">{t("legacy.requestsExplorer.cols.duration")}</th>
                     </tr>
                   </thead>
                   <tbody>

@@ -34,37 +34,46 @@ import { cn, fmtInt } from "@/legacy/lib/utils";
 const DAYS = 14;
 
 // ----- shared chart configs -----
+//
+// Recharts pulls `label` directly from these configs to render legend
+// items + tooltip names. To keep them language-aware we build the
+// configs inside the component with the live t() instead of hoisting
+// them as module constants. The colour themes stay constant.
 
-const tokenConfig: ChartConfig = {
-  input: { label: "Input", theme: { light: "oklch(0.5 0.13 215)", dark: "oklch(0.8 0.16 145)" } },
-  output: { label: "Output", theme: { light: "oklch(0.62 0.15 150)", dark: "oklch(0.72 0.14 215)" } },
-  cacheR: { label: "Cache read", theme: { light: "oklch(0.68 0.15 70)", dark: "oklch(0.82 0.16 72)" } },
-  cacheW: { label: "Cache write", theme: { light: "oklch(0.55 0.18 25)", dark: "oklch(0.68 0.2 25)" } },
-};
-const costConfig: ChartConfig = {
-  cost_usd: { label: "Cost (USD)", theme: { light: "oklch(0.38 0.09 215)", dark: "oklch(0.82 0.16 145)" } },
-};
-const reqConfig: ChartConfig = {
-  requests: { label: "Requests", theme: { light: "oklch(0.48 0.1 215)", dark: "oklch(0.72 0.14 215)" } },
-};
-const hourlyConfig: ChartConfig = {
-  input: { label: "Input", theme: { light: "oklch(0.58 0.17 285)", dark: "oklch(0.75 0.17 285)" } },
-  output: { label: "Output", theme: { light: "oklch(0.62 0.19 330)", dark: "oklch(0.78 0.17 330)" } },
-  cacheR: { label: "Cache read", theme: { light: "oklch(0.72 0.16 55)", dark: "oklch(0.84 0.16 62)" } },
-  cacheW: { label: "Cache write", theme: { light: "oklch(0.6 0.2 15)", dark: "oklch(0.72 0.2 15)" } },
-};
-const weekConfig: ChartConfig = {
-  cost_usd: { label: "Cost (USD)", theme: { light: "oklch(0.45 0.13 260)", dark: "oklch(0.78 0.16 260)" } },
-};
-const monthConfig: ChartConfig = {
-  cost_usd: { label: "Cost (USD)", theme: { light: "oklch(0.5 0.12 175)", dark: "oklch(0.8 0.15 175)" } },
-};
-const healthConfig: ChartConfig = {
-  healthy: { label: "Healthy", theme: { light: "oklch(0.58 0.12 150)", dark: "oklch(0.78 0.16 145)" } },
-  quota: { label: "Quota", theme: { light: "oklch(0.68 0.15 70)", dark: "oklch(0.82 0.16 72)" } },
-  unhealthy: { label: "Unhealthy", theme: { light: "oklch(0.52 0.18 25)", dark: "oklch(0.68 0.2 25)" } },
-  disabled: { label: "Disabled", theme: { light: "oklch(0.7 0.01 85)", dark: "oklch(0.5 0.01 260)" } },
-};
+type ConfigBuilder = (t: (k: string) => string) => Record<string, ChartConfig>;
+
+const buildConfigs: ConfigBuilder = (t) => ({
+  tokenConfig: {
+    input: { label: t("legacy.chartLegendInput"), theme: { light: "oklch(0.5 0.13 215)", dark: "oklch(0.8 0.16 145)" } },
+    output: { label: t("legacy.chartLegendOutput"), theme: { light: "oklch(0.62 0.15 150)", dark: "oklch(0.72 0.14 215)" } },
+    cacheR: { label: t("legacy.chartLegendCacheR"), theme: { light: "oklch(0.68 0.15 70)", dark: "oklch(0.82 0.16 72)" } },
+    cacheW: { label: t("legacy.chartLegendCacheW"), theme: { light: "oklch(0.55 0.18 25)", dark: "oklch(0.68 0.2 25)" } },
+  },
+  costConfig: {
+    cost_usd: { label: t("legacy.chartLegendCost"), theme: { light: "oklch(0.38 0.09 215)", dark: "oklch(0.82 0.16 145)" } },
+  },
+  reqConfig: {
+    requests: { label: t("legacy.chartLegendReq"), theme: { light: "oklch(0.48 0.1 215)", dark: "oklch(0.72 0.14 215)" } },
+  },
+  hourlyConfig: {
+    input: { label: t("legacy.chartLegendInput"), theme: { light: "oklch(0.58 0.17 285)", dark: "oklch(0.75 0.17 285)" } },
+    output: { label: t("legacy.chartLegendOutput"), theme: { light: "oklch(0.62 0.19 330)", dark: "oklch(0.78 0.17 330)" } },
+    cacheR: { label: t("legacy.chartLegendCacheR"), theme: { light: "oklch(0.72 0.16 55)", dark: "oklch(0.84 0.16 62)" } },
+    cacheW: { label: t("legacy.chartLegendCacheW"), theme: { light: "oklch(0.6 0.2 15)", dark: "oklch(0.72 0.2 15)" } },
+  },
+  weekConfig: {
+    cost_usd: { label: t("legacy.chartLegendCost"), theme: { light: "oklch(0.45 0.13 260)", dark: "oklch(0.78 0.16 260)" } },
+  },
+  monthConfig: {
+    cost_usd: { label: t("legacy.chartLegendCost"), theme: { light: "oklch(0.5 0.12 175)", dark: "oklch(0.8 0.15 175)" } },
+  },
+  healthConfig: {
+    healthy: { label: t("legacy.healthy"), theme: { light: "oklch(0.58 0.12 150)", dark: "oklch(0.78 0.16 145)" } },
+    quota: { label: t("legacy.quota"), theme: { light: "oklch(0.68 0.15 70)", dark: "oklch(0.82 0.16 72)" } },
+    unhealthy: { label: t("legacy.unhealthy"), theme: { light: "oklch(0.52 0.18 25)", dark: "oklch(0.68 0.2 25)" } },
+    disabled: { label: t("legacy.disabled"), theme: { light: "oklch(0.7 0.01 85)", dark: "oklch(0.5 0.01 260)" } },
+  },
+});
 
 // ----- helpers -----
 
@@ -150,6 +159,7 @@ export function DashboardBoard({
   userPaidUSD = null,
 }: DashboardBoardProps) {
   const { t } = useTranslation();
+  const { tokenConfig, costConfig, reqConfig, hourlyConfig, weekConfig, monthConfig, healthConfig } = buildConfigs(t);
   const lookupPrice = (model: string): PricingEntry | null => {
     if (!pricing) return null;
     const m = (model || "").toLowerCase().trim();
