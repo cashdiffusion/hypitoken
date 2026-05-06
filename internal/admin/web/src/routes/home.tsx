@@ -67,9 +67,6 @@ export default function HomePage() {
           <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Drop-in compatible with</span>
           <Logo label="Claude Code" />
           <Logo label="Codex CLI" />
-          <Logo label="Anthropic SDK" />
-          <Logo label="OpenAI SDK" />
-          <Logo label="LiteLLM" />
         </div>
       </section>
 
