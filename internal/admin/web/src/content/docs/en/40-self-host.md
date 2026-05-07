@@ -3,7 +3,7 @@ slug: self-host
 title: Self-hosting
 group: Operator
 order: 40
-intro: Run HypiToken from source for your own organisation or team.
+intro: Run HypiToken from source for your own organization or team.
 ---
 
 ## Requirements
@@ -14,16 +14,35 @@ intro: Run HypiToken from source for your own organisation or team.
 
 ## Build
 
+### macOS
+
 ```bash
 git clone https://github.com/cashdiffusion/hypitoken.git
 cd hypitoken
 make build
-# binary at bin/cpa-claude
+# binary at bin/hypitoken
+```
+
+### Windows
+
+For local server builds on Windows, use Windows 11 + WSL2. Install WSL from PowerShell:
+
+```powershell
+wsl --install
+```
+
+After rebooting, open Ubuntu, install Go and Bun, then run:
+
+```bash
+git clone https://github.com/cashdiffusion/hypitoken.git
+cd hypitoken
+make build
+# binary at bin/hypitoken
 ```
 
 ## Configure
 
-Copy `config.example.yaml` to `config.yaml`. Set `saas.enabled: true` and fill in `admin_email` / `admin_password` to bootstrap the first admin user.
+Copy `config.example.yaml` to `config.yaml`. Set `saas.enabled: true` and fill in `admin_email` / `admin_password`; the first start uses them to create the admin account.
 
 ```yaml
 auth_dir: /var/lib/hypitoken/auths   # credential files live here
@@ -49,12 +68,24 @@ saas:
 
 ## Run
 
+### macOS / Linux / WSL2
+
 ```bash
-./bin/cpa-claude -config config.yaml
+./bin/hypitoken -config config.yaml
 # Listening on:
-#   :8317  Claude  (primary, hosts SaaS site at /)
+#   :8317  Claude  (primary, hosts the SaaS site at /)
 #   :8318  Codex
 ```
+
+### Windows PowerShell
+
+If you build a Windows binary, run it from PowerShell:
+
+```powershell
+.\bin\hypitoken.exe -config config.yaml
+```
+
+For production, Linux or WSL2 is still recommended because systemd, reverse proxies, and certificate automation are easier to operate there.
 
 ## Reverse proxy
 

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import React, { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import rehypeRaw from "rehype-raw";
 import { Check, ChevronRight, Copy, Hash, BookOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { PublicHeader } from "@/components/layout/shell";
@@ -93,7 +94,7 @@ export default function DocsLayout() {
             <article className="hypi-prose mt-8">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
-                rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+                rehypePlugins={[rehypeRaw, [rehypeHighlight, { detect: true, ignoreMissing: true }]]}
                 components={mdComponents}
               >
                 {section.body}
@@ -235,6 +236,13 @@ const mdComponents = {
   },
   pre: ({ children }: any) => <CodeBlockShell>{children}</CodeBlockShell>,
   hr: () => <hr className="my-8 border-border" />,
+  div: ({ children, ...props }: any) => {
+    const isTabsRoot = "data-tabs" in props;
+    const isTab = "data-tab" in props;
+    if (isTabsRoot) return <MdTabs>{children}</MdTabs>;
+    if (isTab) return <MdTabPanel label={props["data-tab"]}>{children}</MdTabPanel>;
+    return <div {...props}>{children}</div>;
+  },
 };
 
 function stringifyChildren(c: ReactNode): string {
@@ -270,6 +278,57 @@ function CodeBlockShell({ children }: { children: any }) {
         </button>
       </div>
       <pre className="overflow-x-auto px-4 py-4 font-mono text-sm leading-relaxed">{children}</pre>
+    </div>
+  );
+}
+
+// MdTabPanel is just a data container; MdTabs reads its children.
+function MdTabPanel({ children }: { label: string; children: ReactNode }) {
+  return <>{children}</>;
+}
+
+// MdTabs renders a tab bar from child MdTabPanel elements.
+function MdTabs({ children }: { children: ReactNode }) {
+  const panels = useMemo(() => {
+    const arr: Array<{ label: string; content: ReactNode }> = [];
+    const visit = (c: ReactNode) => {
+      if (!c) return;
+      if (Array.isArray(c)) { c.forEach(visit); return; }
+      if (typeof c === "object" && "props" in (c as any)) {
+        const el = c as React.ReactElement<any>;
+        if (el.props && "data-tab" in el.props) {
+          arr.push({ label: el.props["data-tab"], content: el.props.children });
+          return;
+        }
+        if (el.props?.children) visit(el.props.children);
+      }
+    };
+    visit(children);
+    return arr;
+  }, [children]);
+
+  const [active, setActive] = useState(0);
+  if (!panels.length) return null;
+
+  return (
+    <div className="mt-4 overflow-hidden rounded-lg border border-border">
+      <div className="flex border-b border-border bg-muted/30">
+        {panels.map((p, i) => (
+          <button
+            key={p.label}
+            onClick={() => setActive(i)}
+            className={cn(
+              "px-4 py-2 text-sm font-medium transition-colors",
+              active === i
+                ? "border-b-2 border-primary text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <div className="p-4 [&>*:first-child]:mt-0">{panels[active]?.content}</div>
     </div>
   );
 }
