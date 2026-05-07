@@ -26,6 +26,10 @@ export default defineConfig({
         target: "http://localhost:8317",
         changeOrigin: false,
       },
+      "/api": {
+        target: "http://localhost:8317",
+        changeOrigin: false,
+      },
     },
   },
 });
