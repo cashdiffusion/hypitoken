@@ -13,3 +13,4 @@
 /internal/admin/web/dist/*
 !/internal/admin/web/dist/.gitkeep
 .claude/
+backups/
