@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wjsoj/CPA-Claude/internal/auth"
+	"github.com/wjsoj/cc-core/auth"
 )
 
 // newTestAuth returns a minimal OAuth Auth suitable for sidecar exercises.

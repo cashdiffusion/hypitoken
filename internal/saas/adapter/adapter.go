@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wjsoj/CPA-Claude/internal/auth"
+	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/CPA-Claude/internal/pricing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"

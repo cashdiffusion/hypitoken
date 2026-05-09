@@ -19,9 +19,10 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/wjsoj/CPA-Claude/internal/auth"
 	"github.com/wjsoj/CPA-Claude/internal/requestlog"
 	"github.com/wjsoj/CPA-Claude/internal/usage"
+	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/thinkingsig"
 )
 
 // hopHeaders are stripped when forwarding to upstream.
@@ -276,6 +277,17 @@ func maskClientToken(t string) string {
 //	done=true   → response was delivered successfully (status < 400 or
 //	              non-retryable error already written to client)
 func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, clientName string, start time.Time, attempts int) (retry bool, done bool) {
+	// Mid-conversation account switch: drop prior `thinking` block
+	// signatures before forwarding. Both OAuth and API-key paths bind
+	// thinking signatures to the issuing account, so this runs ahead
+	// of the API-key branch. Scoped to /v1/messages — no other path
+	// carries multi-turn assistant history.
+	if path == "/v1/messages" && s.switchTracker.Check(clientToken, body, a.ID) {
+		log.Infof("auth switch detected: clientToken=%s now on auth=%s — sanitizing prior thinking signatures",
+			maskClientToken(clientToken), a.ID)
+		body = thinkingsig.SanitizeForSwitch(body)
+	}
+
 	if a.Kind == auth.KindAPIKey {
 		return s.doForwardAnthropicAPIKey(c, a, path, body, stream, model, clientToken, clientName, start, attempts)
 	}

@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/wjsoj/CPA-Claude/internal/auth"
+	"github.com/wjsoj/cc-core/auth"
 	legacyadmin "github.com/wjsoj/CPA-Claude/internal/admin"
 	"github.com/wjsoj/CPA-Claude/internal/pricing"
 	"github.com/wjsoj/CPA-Claude/internal/requestlog"

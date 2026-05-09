@@ -17,7 +17,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/wjsoj/CPA-Claude/internal/auth"
+	"github.com/wjsoj/cc-core/auth"
 )
 
 // Sidecar emulates the auxiliary traffic real Claude Code 2.1.126 fires

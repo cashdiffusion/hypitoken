@@ -16,7 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/wjsoj/CPA-Claude/internal/auth"
+	"github.com/wjsoj/cc-core/auth"
 )
 
 // CredHandler is the SaaS-admin's view onto the credential pool. It does not
