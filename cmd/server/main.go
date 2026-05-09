@@ -16,7 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/CPA-Claude/internal/admin"
-	"github.com/wjsoj/CPA-Claude/internal/auth"
+	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/CPA-Claude/internal/clienttoken"
 	"github.com/wjsoj/CPA-Claude/internal/config"
 	"github.com/wjsoj/CPA-Claude/internal/logging"
