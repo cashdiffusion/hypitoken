@@ -242,17 +242,21 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 
 	writeResponseHeaders(c, resp)
 	var counts usage.Counts
-	if stream && strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+	var errSnippet string
+	if resp.StatusCode >= 400 {
+		errBody, _ := io.ReadAll(resp.Body)
+		c.Writer.Write(errBody)
+		errSnippet = truncate(errBody, 500)
+		log.Warnf("codex proxy(apikey): %s returned %d — body=%s", a.ID, resp.StatusCode, errSnippet)
+	} else if stream && strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
 		streamSSEOpenAI(c, resp, &counts, rewriteClientModel)
 	} else {
 		respBody, _ := io.ReadAll(resp.Body)
-		if rewriteClientModel != "" && resp.StatusCode < 400 {
+		if rewriteClientModel != "" {
 			respBody = rewriteResponseModel(respBody, rewriteClientModel)
 		}
 		c.Writer.Write(respBody)
-		if resp.StatusCode < 400 {
-			counts.Add(extractOpenAIUsageFromJSON(respBody))
-		}
+		counts.Add(extractOpenAIUsageFromJSON(respBody))
 	}
 	_ = resp.Body.Close()
 
@@ -287,6 +291,10 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 			s.usage.RecordClient(clientToken, clientName, counts, costUSD)
 		}
 	}
+	errField := ""
+	if resp.StatusCode >= 400 {
+		errField = fmt.Sprintf("upstream %d: %s", resp.StatusCode, truncate([]byte(errSnippet), 200))
+	}
 	s.emitLog(requestlog.Record{
 		Client:      clientName,
 		ClientToken: maskClientToken(clientToken),
@@ -307,6 +315,7 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		Stream:      stream,
 		Path:        path,
 		Attempts:    attempts,
+		Error:       errField,
 	})
 	return false, true
 }
