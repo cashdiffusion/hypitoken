@@ -417,6 +417,51 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		errBody, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 
+		// Reactive signature-error recovery. A 400 "Invalid signature
+		// in thinking block" means the past assistant turns echoed in
+		// messages[] carry signatures bound to a different account
+		// than this credential. Causes include: switch detector miss
+		// (first-touch on a continuing conversation, server restart,
+		// 2h GC eviction), or signatures generated outside this proxy.
+		// One stateless rescue: drop the signed thinking blocks from
+		// the request and replay on the same credential. If it still
+		// fails, fall through to normal error handling.
+		recovered := false
+		if resp.StatusCode == 400 && path == "/v1/messages" && thinkingsig.IsSignatureError(errBody) {
+			sanitized := thinkingsig.SanitizeForSwitch(body)
+			if !bytes.Equal(sanitized, body) {
+				retryUpstream := sanitized
+				if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
+					if rewritten, err := rewriteModelField(retryUpstream, upstreamModel); err == nil {
+						retryUpstream = rewritten
+					}
+				}
+				retryUpstream = applyClaudeCodeBodyMimicry(retryUpstream, model, id)
+				log.Warnf("proxy: %s returned 400 signature-in-thinking — sanitizing and retrying once on same credential", a.ID)
+				if retryReq, rerr := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(retryUpstream)); rerr == nil {
+					copyForwardableHeaders(c.Request.Header, retryReq.Header)
+					stripIngressHeaders(retryReq.Header)
+					applyAnthropicHeaders(retryReq, a, stream, isAnthropicBase, id, retryUpstream)
+					if retryResp, rderr := client.Do(retryReq); rderr == nil {
+						maybeDecompressResponse(retryResp)
+						if retryResp.StatusCode < 400 {
+							log.Infof("proxy: %s signature retry succeeded", a.ID)
+							resp = retryResp
+							recovered = true
+						} else {
+							_ = retryResp.Body.Close()
+							log.Warnf("proxy: %s signature retry still %d — surfacing original error", a.ID, retryResp.StatusCode)
+						}
+					} else {
+						log.Warnf("proxy: %s signature retry transport error: %v", a.ID, rderr)
+					}
+				}
+			}
+		}
+		if recovered {
+			goto recoveredFromSignature
+		}
+
 		// Account-ban detection: Anthropic returns "organization has been
 		// disabled" / "account has been disabled" on terminal bans, usually
 		// with 401/403 but occasionally 400. These should hard-disable the
@@ -514,6 +559,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		return false, true
 	}
 
+recoveredFromSignature:
 	// Success or non-retryable error — stream response body to client.
 	writeResponseHeaders(c, resp)
 
