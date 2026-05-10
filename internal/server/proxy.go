@@ -727,6 +727,11 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		return false, true
 	}
 
+	// Decompress upstream gzip/br before reading. Some relays emit gzipped
+	// 4xx error pages even when the request didn't advertise an
+	// Accept-Encoding; without this the captured snippet is binary.
+	maybeDecompressResponse(resp)
+
 	writeResponseHeaders(c, resp)
 	var counts usage.Counts
 	var sub subUsage
@@ -759,12 +764,17 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		resp.StatusCode == http.StatusForbidden:
 		a.MarkHardFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
 	case resp.StatusCode == http.StatusTooManyRequests,
-		resp.StatusCode == http.StatusServiceUnavailable:
-		// API-key relays routinely emit 429 (per-key throttle) and 503
-		// (vendor-side overload / brief maintenance) without the key
-		// itself being unhealthy. Skip both Mark* paths so transient
-		// upstream weather doesn't pin a working key into cooldown or
-		// trip the consecutive-429 stealth-ban accumulator.
+		resp.StatusCode == http.StatusServiceUnavailable,
+		resp.StatusCode == http.StatusNotFound:
+		// API-key relays routinely emit:
+		//  - 429: per-key throttle
+		//  - 503: vendor-side overload / brief maintenance
+		//  - 404: route not implemented (e.g. /v1/messages/count_tokens
+		//    on relays that only proxy /v1/messages)
+		// None of these reflect on the credential itself. Skip Mark*
+		// so transient upstream weather and route-coverage gaps don't
+		// pin a working key into cooldown or trip the consecutive-429
+		// stealth-ban accumulator.
 	default:
 		a.MarkFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
 	}
