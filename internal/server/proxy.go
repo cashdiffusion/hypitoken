@@ -754,10 +754,13 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		resp.StatusCode == http.StatusPaymentRequired ||
 		resp.StatusCode == http.StatusForbidden:
 		a.MarkHardFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
-	case resp.StatusCode == http.StatusTooManyRequests:
-		// 429 has its own consecutive counter (stealth-ban detection);
-		// don't conflate it with the generic 5-strikes failure path.
-		a.MarkRateLimited(fmt.Sprintf("upstream %d", resp.StatusCode))
+	case resp.StatusCode == http.StatusTooManyRequests,
+		resp.StatusCode == http.StatusServiceUnavailable:
+		// API-key relays routinely emit 429 (per-key throttle) and 503
+		// (vendor-side overload / brief maintenance) without the key
+		// itself being unhealthy. Skip both Mark* paths so transient
+		// upstream weather doesn't pin a working key into cooldown or
+		// trip the consecutive-429 stealth-ban accumulator.
 	default:
 		a.MarkFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
 	}
