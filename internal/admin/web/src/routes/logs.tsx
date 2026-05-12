@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Receipt, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
+import { lookupPriceCard } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -200,7 +201,7 @@ export default function LogsPage() {
                     {e.multiplier ? e.multiplier.toFixed(2) + "×" : "—"}
                   </td>
                   <td className="px-3 py-2 font-mono tabular-nums text-right font-semibold">
-                    <ChargedCell entry={e} priceCard={pricing[e.model]} />
+                    <ChargedCell entry={e} priceCard={lookupPriceCard(pricing, e.provider, e.model)} />
                   </td>
                   <td className={cn("px-3 py-2 font-mono tabular-nums text-right", statusClass(e.status))}>
                     {e.status}

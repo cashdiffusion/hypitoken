@@ -95,24 +95,30 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		// Attach the price card for every distinct model that appears so
-		// the frontend can render a per-row "how was this charged"
-		// breakdown without a follow-up RPC.
+		// Attach the price card for every distinct (provider, model) that
+		// appears so the frontend can render a per-row "how was this
+		// charged" breakdown without a follow-up RPC. Keys are canonical
+		// "<provider>/<model>" matching catalog.Lookup so the frontend can
+		// resolve via the shared lookupPrice helper — keying by bare model
+		// would silently fall back to the global default for OpenAI rows
+		// (since the catalog stores them under "openai/...").
 		prices := map[string]gin.H{}
 		seen := map[string]struct{}{}
-		add := func(model string) {
+		add := func(provider, model string) {
 			if model == "" {
 				return
 			}
-			if _, ok := seen[model]; ok {
+			prov := provider
+			if prov == "" {
+				prov = auth.ProviderAnthropic // legacy records pre-dating the field
+			}
+			key := prov + "/" + model
+			if _, ok := seen[key]; ok {
 				return
 			}
-			seen[model] = struct{}{}
-			p := catalog.Lookup(auth.ProviderAnthropic, model)
-			// auth.ProviderAnthropic is the wrong assumption for codex-side
-			// rows; lookup() falls back to provider-default → global default
-			// so we still get a usable card for unknown models.
-			prices[model] = gin.H{
+			seen[key] = struct{}{}
+			p := catalog.Lookup(prov, model)
+			prices[key] = gin.H{
 				"input_per_1m":        p.InputPer1M,
 				"output_per_1m":       p.OutputPer1M,
 				"cache_read_per_1m":   p.CacheReadPer1M,
@@ -120,10 +126,7 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			}
 		}
 		for _, e := range res.Entries {
-			add(e.Model)
-		}
-		for m := range res.ByModel {
-			add(m)
+			add(e.Provider, e.Model)
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"summary":  res.Summary,
