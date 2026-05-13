@@ -46,6 +46,7 @@ type Filter struct {
 	Model       string    // exact match on Record.Model
 	Provider    string    // exact match on Record.Provider ("anthropic" | "openai"). Legacy records (no provider field) match when Provider == "anthropic" so back-fill isn't needed.
 	Status      int       // 0 = any; otherwise exact match
+	AuthID      string    // exact match on Record.AuthID (credential ID)
 	Limit       int       // page size for Entries (0 = 50)
 	Offset      int       // number of newest-first records to skip before Limit
 	// UserID limits results to records emitted by a specific SaaS user.
@@ -315,6 +316,9 @@ func matches(r Record, f Filter) bool {
 		}
 	}
 	if f.Status != 0 && r.Status != f.Status {
+		return false
+	}
+	if f.AuthID != "" && r.AuthID != f.AuthID {
 		return false
 	}
 	if !f.From.IsZero() && r.TS.Before(f.From) {

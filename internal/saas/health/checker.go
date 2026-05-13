@@ -20,6 +20,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/CPA-Claude/internal/requestlog"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 )
 
@@ -49,15 +50,19 @@ type Checker struct {
 	DB       *db.DB
 	Pool     *auth.Pool
 	Interval time.Duration
-	mu       sync.Mutex
-	running  bool
+	// LogDir is the request-log directory; when set, OAuth health rows are
+	// hydrated with the DurationMs of the most recent successful request
+	// for the credential. Empty = latency reported as 0 for OAuth.
+	LogDir  string
+	mu      sync.Mutex
+	running bool
 }
 
-func New(store *db.DB, pool *auth.Pool, interval time.Duration) *Checker {
+func New(store *db.DB, pool *auth.Pool, interval time.Duration, logDir string) *Checker {
 	if interval <= 0 {
 		interval = 10 * time.Minute
 	}
-	return &Checker{DB: store, Pool: pool, Interval: interval}
+	return &Checker{DB: store, Pool: pool, Interval: interval, LogDir: logDir}
 }
 
 // Run starts the periodic checker. Cancel ctx to stop.
@@ -108,8 +113,90 @@ func (c *Checker) RunOnce(ctx context.Context) {
 		if err := c.DB.PruneModelHealthOtherModels(ctx, a.ID, []string{model}); err != nil {
 			log.Warnf("health: prune stale rows for %s: %v", a.ID, err)
 		}
+		// OAuth credentials must not be probed — every synthetic probe is a
+		// strong third-party-detection signal upstream. Derive status from
+		// the pool's recorded health (populated by real proxy traffic) and
+		// borrow latency from the most recent successful request log entry.
+		if a.Kind == auth.KindOAuth {
+			c.recordOAuthFromPool(ctx, a, provider, model)
+			continue
+		}
 		c.checkOne(ctx, a, provider, model)
 	}
+}
+
+// recordOAuthFromPool writes a ModelHealth row for an OAuth credential
+// without making any upstream request. Status comes from the pool's
+// HealthSnapshot (set by real proxy traffic via MarkSuccess/MarkFailure);
+// latency comes from the DurationMs of the most recent successful entry
+// in the request log for this credential, or 0 if none is available.
+func (c *Checker) recordOAuthFromPool(ctx context.Context, a *auth.Auth, provider, model string) {
+	healthy, hardFail, reason, _ := a.HealthSnapshot()
+	snap := a.Snapshot()
+	st := "ok"
+	errMsg := ""
+	switch {
+	case snap.Disabled:
+		st = "fail"
+		errMsg = "disabled"
+	case !snap.QuotaExceededAt.IsZero():
+		st = "fail"
+		errMsg = "quota exceeded"
+	case hardFail:
+		st = "fail"
+		if reason != "" {
+			errMsg = reason
+		} else {
+			errMsg = "hard failure"
+		}
+	case !healthy:
+		st = "fail"
+		if reason != "" {
+			errMsg = reason
+		} else {
+			errMsg = "unhealthy"
+		}
+	}
+	latency := c.recentSuccessLatencyMs(a.ID)
+	rec := db.ModelHealth{
+		AuthID:    a.ID,
+		Provider:  provider,
+		Model:     model,
+		Status:    st,
+		LatencyMs: latency,
+		Error:     errMsg,
+	}
+	if err := c.DB.UpsertModelHealth(ctx, rec); err != nil {
+		log.Warnf("health: upsert oauth %s/%s: %v", a.ID, model, err)
+	}
+	if err := c.DB.AppendModelHealthHistory(ctx, rec); err != nil {
+		log.Warnf("health: history oauth %s/%s: %v", a.ID, model, err)
+	}
+	log.Infof("health passive %s/%s %s → %s (%dms) %s", a.ID, model, provider, st, latency, errMsg)
+}
+
+// recentSuccessLatencyMs returns the DurationMs of the most recent
+// successful (HTTP < 400) request for this credential in the last 24h.
+// Returns 0 when no log dir is configured or no successful entry exists.
+func (c *Checker) recentSuccessLatencyMs(authID string) int {
+	if c.LogDir == "" || authID == "" {
+		return 0
+	}
+	res, err := requestlog.Query(requestlog.Filter{
+		Dir:    c.LogDir,
+		AuthID: authID,
+		From:   time.Now().Add(-24 * time.Hour),
+		Limit:  50,
+	})
+	if err != nil {
+		return 0
+	}
+	for _, r := range res.Entries {
+		if r.Status < 400 && r.Error == "" && r.DurationMs > 0 {
+			return int(r.DurationMs)
+		}
+	}
+	return 0
 }
 
 // Refresh kicks off RunOnce in the background.
