@@ -102,6 +102,33 @@ func (db *DB) PruneModelHealthOtherModels(ctx context.Context, authID string, ke
 	return err
 }
 
+// PruneModelHealthExcept deletes any health rows (latest + history) whose
+// auth_id is not in `keep`. Called by the periodic checker at the start of
+// each cycle with the current live pool — when a credential has been removed
+// from the pool, this is what evicts its lingering rows so the status page
+// doesn't keep showing a ghost credential. When keep is empty, all rows are
+// wiped (the pool has no live credentials at all).
+func (db *DB) PruneModelHealthExcept(ctx context.Context, keep []string) error {
+	if len(keep) == 0 {
+		if _, err := db.ExecContext(ctx, `DELETE FROM model_health`); err != nil {
+			return err
+		}
+		_, err := db.ExecContext(ctx, `DELETE FROM model_health_history`)
+		return err
+	}
+	q := `DELETE FROM model_health WHERE auth_id NOT IN (?` + repeatPlaceholders(len(keep)-1) + `)`
+	args := make([]any, 0, len(keep))
+	for _, id := range keep {
+		args = append(args, id)
+	}
+	if _, err := db.ExecContext(ctx, q, args...); err != nil {
+		return err
+	}
+	q2 := `DELETE FROM model_health_history WHERE auth_id NOT IN (?` + repeatPlaceholders(len(keep)-1) + `)`
+	_, err := db.ExecContext(ctx, q2, args...)
+	return err
+}
+
 func repeatPlaceholders(n int) string {
 	if n <= 0 {
 		return ""

@@ -51,24 +51,14 @@ const CLAUDE_MODELS = [
 ];
 
 // Codex CLI OAuth models — covered by ChatGPT Plus/Pro/Team subscription.
+// We only ship Codex; there's no generic OpenAI BYOK surface in this gateway,
+// so the previous CODEX_APIKEY_MODELS table was removed.
 const CODEX_OAUTH_MODELS = [
   { name: "gpt-5.5",         display: "GPT-5.5",       input: 5.0,  output: 30.0, cacheWrite: null, cacheRead: 0.5 },
   { name: "gpt-5.4",         display: "GPT-5.4",       input: 2.5,  output: 15.0, cacheWrite: null, cacheRead: 0.25 },
   { name: "gpt-5.4-mini",    display: "GPT-5.4 mini",  input: 0.75, output: 4.5,  cacheWrite: null, cacheRead: 0.075 },
   { name: "gpt-5.3-codex",   display: "GPT-5.3 Codex", input: 1.75, output: 14.0, cacheWrite: null, cacheRead: 0.175 },
   { name: "gpt-5.2",         display: "GPT-5.2",       input: 1.5,  output: 6.0,  cacheWrite: null, cacheRead: null },
-];
-
-// OpenAI API-key models — full lineup accessible with a standard API key.
-// Source: platform.openai.com/docs/pricing (May 2026).
-const CODEX_APIKEY_MODELS = [
-  { name: "gpt-5.5",      display: "GPT-5.5",      input: 5.0,  output: 30.0,  cacheWrite: null, cacheRead: 0.5 },
-  { name: "gpt-5.5-pro",  display: "GPT-5.5 Pro",  input: 30.0, output: 180.0, cacheWrite: null, cacheRead: null },
-  { name: "gpt-5.4",      display: "GPT-5.4",      input: 2.5,  output: 15.0,  cacheWrite: null, cacheRead: 0.25 },
-  { name: "gpt-5.4-mini", display: "GPT-5.4 mini", input: 0.75, output: 4.5,   cacheWrite: null, cacheRead: 0.075 },
-  { name: "gpt-5.4-nano", display: "GPT-5.4 nano", input: 0.2,  output: 1.25,  cacheWrite: null, cacheRead: 0.02 },
-  { name: "gpt-5.4-pro",  display: "GPT-5.4 Pro",  input: 30.0, output: 180.0, cacheWrite: null, cacheRead: null },
-  { name: "gpt-5.2",      display: "GPT-5.2",      input: 1.5,  output: 6.0,   cacheWrite: null, cacheRead: null },
 ];
 
 type ModelRow = { name: string; display: string; input: number; output: number; cacheWrite: number | null; cacheRead: number | null };
@@ -144,22 +134,9 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
         <div>
           <h2 className="font-display text-2xl font-semibold tracking-tight">{t("pricing.codexTitle")}</h2>
           <p className="mt-1 text-sm text-muted-foreground">{t("pricing.codexSub")}</p>
-          <div className="mt-4 space-y-4">
-            <div className="rounded-lg border border-border">
-              <div className="border-b border-border px-4 py-2.5">
-                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{t("pricing.codexOauthSection")}</span>
-              </div>
-              <div className="p-4">
-                <ModelPriceTable models={CODEX_OAUTH_MODELS} hasCaching={true} />
-              </div>
-            </div>
-            <div className="rounded-lg border border-border">
-              <div className="border-b border-border px-4 py-2.5">
-                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{t("pricing.codexApiSection")}</span>
-              </div>
-              <div className="p-4">
-                <ModelPriceTable models={CODEX_APIKEY_MODELS} hasCaching={true} />
-              </div>
+          <div className="mt-4 rounded-lg border border-border">
+            <div className="p-4">
+              <ModelPriceTable models={CODEX_OAUTH_MODELS} hasCaching={true} />
             </div>
           </div>
         </div>

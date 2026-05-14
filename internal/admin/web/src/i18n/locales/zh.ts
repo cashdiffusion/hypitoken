@@ -77,6 +77,8 @@ export default {
     console: "控制台",
     operator: "运维",
     admin: "管理员",
+    product: "产品",
+    account: "账号",
   },
 
   auth: {
@@ -260,6 +262,9 @@ export default {
       multiplier: "× 分组倍率",
       youPaid: "实际扣款",
       drift: "⚠ 重算 {{recomputed}} ≠ 入库 {{stored}}，价格可能已变动",
+      colCategory: "类别",
+      colFormula: "Token × 单价 / 1M",
+      colSub: "小计",
     },
   },
 
