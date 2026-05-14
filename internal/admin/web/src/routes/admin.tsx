@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, Routes, Route } from "react-router-dom";
-import { Users, Tag, KeyRound, ShoppingCart, LayoutDashboard, ScrollText, Gauge, Sparkles } from "lucide-react";
+import { Users, Tag, KeyRound, ShoppingCart, LayoutDashboard, ScrollText, Gauge, Sparkles, ChevronRight, Pencil, RefreshCw, CheckCircle2, Trash2, AlertTriangle, ShieldOff, Ban } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { OverviewPanel } from "@/components/admin/overview-panel";
 import { AdminDashboard } from "@/components/admin/admin-dashboard";
@@ -14,7 +14,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
-import { fmtUSD } from "@/lib/utils";
+import { fmtUSD, fmtInt } from "@/lib/utils";
+import { Sparkline as MiniSpark } from "@/components/admin/sparkline";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { PricingGroup } from "@/lib/types";
@@ -304,11 +305,40 @@ function CredentialsTab() {
   const [openOAuth, setOpenOAuth] = useState<null | "anthropic" | "openai">(null);
   const [usageFor, setUsageFor] = useState<{ id: string; label: string } | null>(null);
   const [providerTab, setProviderTab] = useState<"anthropic" | "openai">("anthropic");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState<any | null>(null);
+  const [busyId, setBusyId] = useState<string>("");
   const reload = async () => {
     const r = await apiGet<any>("/admin/credentials");
     setCreds(r.credentials || []);
   };
   useEffect(() => { reload(); }, []);
+
+  const toggleExpand = (id: string) => {
+    const s = new Set(expanded);
+    if (s.has(id)) s.delete(id); else s.add(id);
+    setExpanded(s);
+  };
+
+  const runAction = async (c: any, kind: "refresh" | "clear-quota" | "clear-failure" | "toggle") => {
+    setBusyId(c.id);
+    try {
+      if (kind === "toggle") {
+        await apiPatch(`/admin/credentials/${encodeURIComponent(c.id)}`, { disabled: !c.disabled });
+        toast.success(c.disabled ? "已启用" : "已禁用");
+      } else {
+        await apiPost(`/admin/credentials/${encodeURIComponent(c.id)}/${kind}`);
+        toast.success(
+          kind === "refresh" ? "已刷新 token" : kind === "clear-quota" ? "已清除配额标记" : "已标记为健康"
+        );
+      }
+      await reload();
+    } catch (e: any) {
+      toast.error(e?.message || String(e));
+    } finally {
+      setBusyId("");
+    }
+  };
 
   const claudeCreds = creds.filter((c) => c.provider === "anthropic");
   const codexCreds = creds.filter((c) => c.provider === "openai");
@@ -359,48 +389,127 @@ function CredentialsTab() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8"></TableHead>
                   <TableHead>{t("admin.creds.cols.label")}</TableHead>
                   <TableHead>{t("admin.creds.cols.kind")}</TableHead>
                   <TableHead>{t("admin.creds.cols.group")}</TableHead>
-                  <TableHead className="text-right">{t("admin.creds.cols.active")}</TableHead>
+                  <TableHead>槽位</TableHead>
+                  <TableHead className="text-right">近 24h</TableHead>
+                  <TableHead className="text-right">累计</TableHead>
                   <TableHead>{t("admin.creds.cols.expires")}</TableHead>
                   <TableHead>{t("admin.creds.cols.health")}</TableHead>
-                  <TableHead></TableHead>
+                  <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visible.map((c) => (
-                  <TableRow key={c.id} className={c.disabled ? "opacity-50" : ""}>
-                    <TableCell>
-                      <div className="font-medium">{c.label}</div>
-                      <code className="text-xs text-muted-foreground">{c.id}</code>
-                    </TableCell>
-                    <TableCell><span className="rounded border border-border bg-muted px-2 py-0.5 text-xs font-mono uppercase">{c.kind}</span></TableCell>
-                    <TableCell className="font-mono text-xs">{c.group || "—"}</TableCell>
-                    <TableCell className="font-mono tabular-nums text-right">{c.active_clients}</TableCell>
-                    <TableCell className="font-mono text-xs"><Expiry at={c.expires_at} /></TableCell>
-                    <TableCell><HealthPill cred={c} /></TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {c.kind === "oauth" && c.provider === "anthropic" && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setUsageFor({ id: c.id, label: c.label })}
+                {visible.map((c) => {
+                  const isOpen = expanded.has(c.id);
+                  const slotPct = c.max_concurrent > 0
+                    ? Math.min(100, Math.round((c.active_clients / c.max_concurrent) * 100))
+                    : 0;
+                  const u = c.usage;
+                  const busy = busyId === c.id;
+                  return (
+                    <React.Fragment key={c.id}>
+                      <TableRow className={c.disabled ? "opacity-50" : ""}>
+                        <TableCell>
+                          <button
+                            onClick={() => toggleExpand(c.id)}
+                            className="text-muted-foreground hover:text-foreground transition-transform"
+                            aria-label={isOpen ? "收起" : "展开"}
                           >
-                            <Gauge className="size-3.5" />
-                          </Button>
-                        )}
-                        <Button size="sm" variant="ghost" className="text-destructive" onClick={async () => {
-                          if (!confirm(t("admin.creds.confirmRemove", { name: c.label }))) return;
-                          await apiDelete(`/admin/credentials/${encodeURIComponent(c.id)}`);
-                          toast.success(t("admin.creds.removed"));
-                          reload();
-                        }}>{t("admin.creds.remove")}</Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                            <ChevronRight className={cn("size-4 transition-transform", isOpen && "rotate-90")} />
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium">{c.label}</div>
+                          <code className="text-xs text-muted-foreground">{c.id}</code>
+                          {c.email && <div className="text-xs text-muted-foreground truncate max-w-[220px]">{c.email}</div>}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="rounded border border-border bg-muted px-2 py-0.5 text-xs font-mono uppercase w-fit">{c.kind}</span>
+                            {c.plan_type && <span className="text-[10px] font-mono uppercase text-muted-foreground">{c.plan_type}</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{c.group || "—"}</TableCell>
+                        <TableCell>
+                          <div className="font-mono tabular-nums text-xs">
+                            {c.active_clients}/{c.max_concurrent > 0 ? c.max_concurrent : "∞"}
+                          </div>
+                          {c.max_concurrent > 0 && (
+                            <div className="mt-1 h-1 w-20 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className={cn("h-full", slotPct > 80 ? "bg-warning" : "bg-success")}
+                                style={{ width: `${slotPct}%` }}
+                              />
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono tabular-nums text-right text-xs">
+                          {u ? (
+                            <>
+                              <div>{fmtInt(u.sum_24h.input_tokens + u.sum_24h.output_tokens)}</div>
+                              <div className="text-muted-foreground">{fmtInt(u.sum_24h.requests || 0)} req</div>
+                            </>
+                          ) : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="font-mono tabular-nums text-right text-xs">
+                          {u ? (
+                            <>
+                              <div>{fmtUSD(u.total_cost_usd)}</div>
+                              <div className="text-muted-foreground">{fmtInt(u.total?.requests || 0)} req</div>
+                            </>
+                          ) : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs"><Expiry at={c.expires_at} /></TableCell>
+                        <TableCell><HealthPill cred={c} /></TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button size="sm" variant="ghost" title="编辑" onClick={() => setEditing(c)}>
+                              <Pencil className="size-3.5" />
+                            </Button>
+                            {c.kind === "oauth" && (
+                              <Button size="sm" variant="ghost" title="刷新 token" disabled={busy} onClick={() => runAction(c, "refresh")}>
+                                <RefreshCw className={cn("size-3.5", busy && "animate-spin")} />
+                              </Button>
+                            )}
+                            {c.kind === "oauth" && c.provider === "anthropic" && (
+                              <Button size="sm" variant="ghost" title="后端配额" onClick={() => setUsageFor({ id: c.id, label: c.label })}>
+                                <Gauge className="size-3.5" />
+                              </Button>
+                            )}
+                            {c.quota_exceeded && (
+                              <Button size="sm" variant="ghost" title="清除配额标记" disabled={busy} onClick={() => runAction(c, "clear-quota")}>
+                                <CheckCircle2 className="size-3.5 text-warning" />
+                              </Button>
+                            )}
+                            {(c.hard_failure || (!c.healthy && !c.quota_exceeded && !c.disabled)) && (
+                              <Button size="sm" variant="ghost" title="标记为健康" disabled={busy} onClick={() => runAction(c, "clear-failure")}>
+                                <CheckCircle2 className="size-3.5 text-success" />
+                              </Button>
+                            )}
+                            <Button size="sm" variant="ghost" className="text-destructive" title="删除" onClick={async () => {
+                              if (!confirm(t("admin.creds.confirmRemove", { name: c.label }))) return;
+                              await apiDelete(`/admin/credentials/${encodeURIComponent(c.id)}`);
+                              toast.success(t("admin.creds.removed"));
+                              reload();
+                            }}>
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {isOpen && (
+                        <TableRow className="bg-muted/20 hover:bg-muted/20">
+                          <TableCell colSpan={10} className="py-4">
+                            <CredentialDetail c={c} />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -414,9 +523,413 @@ function CredentialsTab() {
         authLabel={usageFor?.label || ""}
         onClose={() => setUsageFor(null)}
       />
+      <EditCredentialDialog cred={editing} onClose={() => setEditing(null)} onSaved={reload} />
     </div>
   );
 }
+
+function CredentialDetail({ c }: { c: any }) {
+  const u = c.usage;
+  const daily = (u?.daily || []) as { day: string; input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_create_tokens?: number }[];
+  const sparkPoints = daily.map((d) => ({
+    label: d.day,
+    value: (d.input_tokens || 0) + (d.output_tokens || 0),
+  }));
+  const failureBanner = !c.quota_exceeded && c.failure_reason;
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 px-2">
+      {/* Alerts */}
+      {(c.quota_exceeded || failureBanner || c.last_client_cancel) && (
+        <div className="lg:col-span-3 flex flex-col gap-2">
+          {c.quota_exceeded && (
+            <AlertStrip tone="warning" icon={<AlertTriangle className="size-3.5" />} label="配额已耗尽">
+              {c.quota_reset_at ? `重置于 ${new Date(c.quota_reset_at).toLocaleString()}` : "未报告重置时间"}
+            </AlertStrip>
+          )}
+          {failureBanner && (
+            <AlertStrip
+              tone={c.hard_failure ? "error" : "warning"}
+              icon={c.hard_failure ? <ShieldOff className="size-3.5" /> : <AlertTriangle className="size-3.5" />}
+              label={c.hard_failure ? "硬失败" : "近期失败"}
+            >
+              {c.failure_reason}
+            </AlertStrip>
+          )}
+          {c.last_client_cancel && Date.now() - new Date(c.last_client_cancel).getTime() < 3600 * 1000 && (
+            <AlertStrip tone="muted" icon={<Ban className="size-3.5" />} label="客户端取消">
+              {new Date(c.last_client_cancel).toLocaleString()}
+              {c.client_cancel_reason ? ` · ${c.client_cancel_reason}` : ""}
+            </AlertStrip>
+          )}
+        </div>
+      )}
+
+      {/* Usage card */}
+      <div className="rounded-md border border-border bg-card p-3">
+        <div className="text-xs font-medium uppercase text-muted-foreground mb-2">用量</div>
+        {u ? (
+          <div className="space-y-2 text-xs">
+            <Row k="24h 输入/输出" v={`${fmtInt(u.sum_24h.input_tokens)} / ${fmtInt(u.sum_24h.output_tokens)}`} />
+            {u.sum_24h.cache_read_tokens > 0 && (
+              <Row k="24h 缓存读取" v={fmtInt(u.sum_24h.cache_read_tokens)} />
+            )}
+            <Row k="累计请求" v={`${fmtInt(u.total.requests)}${u.total.errors > 0 ? ` (${fmtInt(u.total.errors)} err)` : ""}`} />
+            <Row k="累计成本" v={fmtUSD(u.total_cost_usd)} />
+            {u.last_used && <Row k="最近使用" v={new Date(u.last_used).toLocaleString()} />}
+            {c.kind === "oauth" && c.provider === "openai" && u.sum_5h && (
+              <Row
+                k="滚动 5h"
+                v={`in ${fmtInt(u.sum_5h.input_tokens)} · out ${fmtInt(u.sum_5h.output_tokens)}`}
+              />
+            )}
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground">暂无用量数据</div>
+        )}
+      </div>
+
+      {/* 14-day spark */}
+      <div className="rounded-md border border-border bg-card p-3">
+        <div className="text-xs font-medium uppercase text-muted-foreground mb-2">近 14 天 token</div>
+        {sparkPoints.length > 0 ? (
+          <MiniSpark data={sparkPoints} />
+        ) : (
+          <div className="text-xs text-muted-foreground">无历史数据</div>
+        )}
+      </div>
+
+      {/* Config */}
+      <div className="rounded-md border border-border bg-card p-3">
+        <div className="text-xs font-medium uppercase text-muted-foreground mb-2">配置</div>
+        <div className="space-y-2 text-xs">
+          <Row k="代理" v={c.proxy_url || <span className="text-muted-foreground">direct</span>} />
+          {c.base_url && <Row k="Base URL" v={<span className="font-mono break-all">{c.base_url}</span>} />}
+          <Row k="最大并发" v={c.max_concurrent > 0 ? String(c.max_concurrent) : "∞"} />
+          <Row k="文件支撑" v={c.file_backed ? "是" : "否（config.yaml）"} />
+          {c.disabled && <Row k="状态" v={<span className="text-warning">已禁用</span>} />}
+        </div>
+      </div>
+
+      {/* Active client tokens */}
+      {c.active_clients > 0 && c.client_tokens && c.client_tokens.length > 0 && (
+        <div className="rounded-md border border-border bg-card p-3 lg:col-span-2">
+          <div className="text-xs font-medium uppercase text-muted-foreground mb-2">
+            活跃客户端 token ({c.client_tokens.length})
+          </div>
+          <ul className="space-y-0.5 text-xs font-mono">
+            {c.client_tokens.map((t: string) => (
+              <li key={t} className="truncate">{t}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Model map */}
+      {c.model_map && Object.keys(c.model_map).length > 0 && (
+        <div className="rounded-md border border-border bg-card p-3 lg:col-span-2">
+          <div className="text-xs font-medium uppercase text-muted-foreground mb-2">
+            模型映射 ({Object.keys(c.model_map).length})
+          </div>
+          <div className="space-y-1 text-xs font-mono">
+            {Object.keys(c.model_map).sort().map((k) => (
+              <div key={k} className="break-all leading-relaxed">
+                <span>{k}</span>
+                {c.model_map[k] ? (
+                  <>
+                    <span className="text-muted-foreground"> → </span>
+                    <span>{c.model_map[k]}</span>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground"> (不改写)</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Codex rate limits */}
+      {c.kind === "oauth" && c.provider === "openai" && c.codex_rate_limits && Object.keys(c.codex_rate_limits).length > 0 && (
+        <div className="rounded-md border border-border bg-card p-3 lg:col-span-3">
+          <CodexRateLimitPanel limits={c.codex_rate_limits} capturedAt={c.codex_rate_limits_at} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Row({ k, v }: { k: string; v: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-muted-foreground shrink-0">{k}</span>
+      <span className="font-mono tabular-nums text-right truncate">{v}</span>
+    </div>
+  );
+}
+
+function AlertStrip({
+  tone,
+  icon,
+  label,
+  children,
+}: {
+  tone: "warning" | "error" | "muted";
+  icon: React.ReactNode;
+  label: string;
+  children: React.ReactNode;
+}) {
+  const tones: Record<string, string> = {
+    warning: "bg-warning/10 text-warning border-warning/25",
+    error: "bg-destructive/10 text-destructive border-destructive/25",
+    muted: "bg-muted text-muted-foreground border-border",
+  };
+  return (
+    <div className={cn("flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs", tones[tone])}>
+      <span className="shrink-0">{icon}</span>
+      <span className="font-medium uppercase tracking-wider text-[10px]">{label}</span>
+      <span className="font-mono truncate ml-auto opacity-90 text-right max-w-[60%]">{children}</span>
+    </div>
+  );
+}
+
+function CodexRateLimitPanel({ limits, capturedAt }: { limits: Record<string, string>; capturedAt?: string }) {
+  const pct = (raw?: string) => {
+    if (!raw) return null;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+  const primaryUsed = pct(limits["x-codex-primary-used-percent"]);
+  const secondaryUsed = pct(limits["x-codex-secondary-used-percent"]);
+  const primaryReset = limits["x-codex-primary-reset-after-seconds"] || limits["x-codex-primary-window-expires-at-iso"];
+  const secondaryReset = limits["x-codex-secondary-reset-after-seconds"] || limits["x-codex-secondary-window-expires-at-iso"];
+  const known = new Set([
+    "x-codex-primary-used-percent",
+    "x-codex-secondary-used-percent",
+    "x-codex-primary-reset-after-seconds",
+    "x-codex-secondary-reset-after-seconds",
+    "x-codex-primary-window-expires-at-iso",
+    "x-codex-secondary-window-expires-at-iso",
+  ]);
+  const others = Object.entries(limits).filter(([k]) => !known.has(k));
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="text-xs font-medium uppercase text-muted-foreground">Codex 后端配额（x-codex 头）</div>
+        {capturedAt && (
+          <div className="text-[10px] text-muted-foreground font-mono">
+            截取于 {new Date(capturedAt).toLocaleTimeString()}
+          </div>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-3 text-xs">
+        <CodexQuotaBar label="Primary (5h)" percent={primaryUsed} reset={primaryReset} />
+        <CodexQuotaBar label="Secondary (weekly)" percent={secondaryUsed} reset={secondaryReset} />
+      </div>
+      {others.length > 0 && (
+        <details className="mt-2 text-[10px]">
+          <summary className="cursor-pointer text-muted-foreground">其余字段 ({others.length})</summary>
+          <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono">
+            {others.map(([k, v]) => (
+              <React.Fragment key={k}>
+                <span className="text-muted-foreground">{k.replace(/^x-codex-/, "")}</span>
+                <span className="truncate">{v}</span>
+              </React.Fragment>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function CodexQuotaBar({ label, percent, reset }: { label: string; percent: number | null; reset?: string }) {
+  if (percent === null) {
+    return (
+      <div>
+        <div className="text-muted-foreground">{label}</div>
+        <div className="font-mono text-[10px] text-muted-foreground">—</div>
+      </div>
+    );
+  }
+  const tone = percent >= 90 ? "bg-destructive" : percent >= 70 ? "bg-warning" : "bg-primary";
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-mono tabular-nums">{percent.toFixed(1)}%</span>
+      </div>
+      <div className="h-1.5 mt-0.5 rounded-full bg-muted overflow-hidden">
+        <div className={cn("h-full", tone)} style={{ width: `${Math.min(100, percent)}%` }} />
+      </div>
+      {reset && <div className="text-[10px] text-muted-foreground font-mono mt-0.5">重置 {formatReset(reset)}</div>}
+    </div>
+  );
+}
+
+function formatReset(raw: string): string {
+  if (/^\d+$/.test(raw)) {
+    const s = parseInt(raw, 10);
+    if (s < 60) return `${s}s 后`;
+    if (s < 3600) return `${Math.round(s / 60)}m 后`;
+    if (s < 86400) return `${Math.round(s / 3600)}h 后`;
+    return `${Math.round(s / 86400)}d 后`;
+  }
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  const delta = (d.getTime() - Date.now()) / 1000;
+  if (delta < 0) return "刚刚";
+  if (delta < 3600) return `${Math.round(delta / 60)}m 后`;
+  if (delta < 86400) return `${Math.round(delta / 3600)}h 后`;
+  return `${Math.round(delta / 86400)}d 后`;
+}
+
+function EditCredentialDialog({
+  cred,
+  onClose,
+  onSaved,
+}: {
+  cred: any | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [group, setGroup] = useState("");
+  const [proxy, setProxy] = useState("");
+  const [base, setBase] = useState("");
+  const [maxC, setMaxC] = useState("");
+  const [disabled, setDisabled] = useState(false);
+  const [modelMap, setModelMap] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (cred) {
+      setLabel(cred.label || "");
+      setGroup(cred.group || "");
+      setProxy(cred.proxy_url || "");
+      setBase(cred.base_url || "");
+      setMaxC(String(cred.max_concurrent ?? 0));
+      setDisabled(!!cred.disabled);
+      setModelMap(
+        cred.model_map && Object.keys(cred.model_map).length > 0
+          ? JSON.stringify(cred.model_map, null, 2)
+          : ""
+      );
+    }
+  }, [cred]);
+
+  if (!cred) return null;
+  const isAPIKey = cred.kind === "apikey";
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const body: any = {
+        label,
+        group,
+        proxy_url: proxy,
+        max_concurrent: Number(maxC) || 0,
+        disabled,
+      };
+      if (isAPIKey) {
+        body.base_url = base;
+        if (modelMap.trim() === "") {
+          body.model_map = {};
+        } else {
+          try {
+            body.model_map = JSON.parse(modelMap);
+          } catch (e: any) {
+            toast.error("model_map JSON 解析失败：" + e.message);
+            setBusy(false);
+            return;
+          }
+        }
+      }
+      await apiPatch(`/admin/credentials/${encodeURIComponent(cred.id)}`, body);
+      toast.success("已保存");
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      toast.error(e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!cred} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>编辑凭证 · {cred.label}</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <div className="space-y-2">
+            <Label>标签</Label>
+            <Input value={label} onChange={(e) => setLabel(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>分组</Label>
+              <Input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="empty = public" />
+            </div>
+            <div className="space-y-2">
+              <Label>最大并发（0 = 无限）</Label>
+              <Input type="number" min={0} value={maxC} onChange={(e) => setMaxC(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>代理 URL</Label>
+            <Input
+              value={proxy}
+              onChange={(e) => setProxy(e.target.value)}
+              placeholder="http:// 或 socks5://"
+              className="font-mono"
+            />
+          </div>
+          {isAPIKey && (
+            <div className="space-y-2">
+              <Label>Base URL</Label>
+              <Input
+                value={base}
+                onChange={(e) => setBase(e.target.value)}
+                placeholder="留空走默认"
+                className="font-mono"
+              />
+            </div>
+          )}
+          {isAPIKey && (
+            <div className="space-y-2">
+              <Label>Model map（JSON，仅 API key）</Label>
+              <Textarea
+                value={modelMap}
+                onChange={(e) => setModelMap(e.target.value)}
+                className="font-mono text-xs h-32"
+                placeholder={'{\n  "claude-sonnet-4-5": "claude-3-5-sonnet-latest"\n}'}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                空值（如 <code className="font-mono">{`"opus": ""`}</code>）= 不改写直接放行；省略键 = 走默认路由。
+              </p>
+            </div>
+          )}
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={disabled}
+              onChange={(e) => setDisabled(e.target.checked)}
+              className="size-4"
+            />
+            <span>禁用（不再被调度）</span>
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t_cancel()}</Button>
+          <Button disabled={busy} onClick={save}>{busy ? "保存中…" : "保存"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function t_cancel() { return "取消"; }
 
 function AddOAuthDialog({
   provider,

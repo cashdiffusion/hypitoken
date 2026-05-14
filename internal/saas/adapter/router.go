@@ -3,6 +3,7 @@ package adapter
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -147,43 +148,197 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 		c.JSON(http.StatusOK, gin.H{"groups": gs})
 	})
 
-	// Public health snapshot for /status (status.claude.com-style). Same
-	// shape as /admin/health but stripped of error strings (operator-only)
-	// and without the refresh trigger. Anonymous so the public status page
-	// renders for visitors who aren't logged in — that page is the whole
-	// point of having upstream credential health visible to users.
+	// Public health snapshot for /status. Two row kinds:
+	//   - OAuth: aggregated to one row per (provider, model). Multiple OAuth
+	//     credentials backing the same model are an implementation detail;
+	//     the public page just needs "can the model be served?".
+	//   - API key: one row per credential, like the operator panel. API keys
+	//     are usually pinned to specific upstream gateways (tcdmx / fucheers
+	//     / etc.) which fail independently, so we keep them split out.
+	// Rows whose auth_id is no longer in the live pool are dropped — they
+	// belong to deleted credentials.
 	v2.GET("/health", func(c *gin.Context) {
 		hs, err := store.ListModelHealth(c.Request.Context())
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		// Stable display-name counter per (provider × kind) — same scheme
-		// as the admin endpoint so operators and users see identical labels.
-		counters := map[string]int{}
-		nameFor := func(authID, provider string) string {
-			kind := "oauth"
-			if len(authID) > 7 && authID[:7] == "apikey-" {
-				kind = "api"
-			} else if len(authID) > 7 && authID[:7] == "openai-" {
-				kind = "api"
-			} else if len(authID) > 10 && authID[:10] == "openai_api" {
-				kind = "api"
+
+		// Build live-pool maps from credH.Pool. When credH is nil (unwired),
+		// fall through with no pool filtering — every row is treated as live.
+		liveKind := map[string]auth.Kind{}
+		havePool := credH != nil && credH.Pool != nil
+		if havePool {
+			for _, st := range credH.Pool.Status() {
+				liveKind[st.Auth.ID] = st.Auth.Kind
 			}
+		}
+
+		// Partition: OAuth rows go to aggregation groups, API-key rows go
+		// straight to the output. Rows missing from the live pool (deleted
+		// creds) are skipped.
+		type groupKey struct{ provider, model string }
+		oauthGroups := map[groupKey][]*db.ModelHealth{}
+		apikeyRows := make([]*db.ModelHealth, 0)
+		for _, rec := range hs {
+			if havePool {
+				k, ok := liveKind[rec.AuthID]
+				if !ok {
+					continue
+				}
+				if k == auth.KindOAuth {
+					oauthGroups[groupKey{provider: rec.Provider, model: rec.Model}] = append(
+						oauthGroups[groupKey{provider: rec.Provider, model: rec.Model}], rec,
+					)
+				} else {
+					apikeyRows = append(apikeyRows, rec)
+				}
+			} else {
+				// Best-effort fallback: treat unknown rows as their own row
+				// (no aggregation), so something still renders.
+				apikeyRows = append(apikeyRows, rec)
+			}
+		}
+
+		// Stable display-name counter for API-key rows (same scheme as the
+		// operator panel and the previous public endpoint).
+		counters := map[string]int{}
+		apikeyName := func(provider string) string {
 			prov := "claude"
 			if provider == auth.ProviderOpenAI {
 				prov = "codex"
 			}
-			key := prov + "-" + kind + "-" + authID
-			if _, seen := counters[key]; !seen {
-				grp := prov + "-" + kind
-				counters[grp]++
-				counters[key] = counters[grp]
-			}
-			return fmt.Sprintf("%s-%s-%03d", prov, kind, counters[key])
+			counters[prov]++
+			return fmt.Sprintf("%s-api-%03d", prov, counters[prov])
 		}
-		out := make([]gin.H, 0, len(hs))
-		for _, rec := range hs {
+
+		// Stable order: Anthropic before OpenAI, OAuth aggregates before
+		// API-key singletons within each provider, then by model name.
+		oauthKeys := make([]groupKey, 0, len(oauthGroups))
+		for k := range oauthGroups {
+			oauthKeys = append(oauthKeys, k)
+		}
+		sort.Slice(oauthKeys, func(i, j int) bool {
+			if oauthKeys[i].provider != oauthKeys[j].provider {
+				return oauthKeys[i].provider < oauthKeys[j].provider
+			}
+			return oauthKeys[i].model < oauthKeys[j].model
+		})
+		sort.SliceStable(apikeyRows, func(i, j int) bool {
+			if apikeyRows[i].Provider != apikeyRows[j].Provider {
+				return apikeyRows[i].Provider < apikeyRows[j].Provider
+			}
+			if apikeyRows[i].Model != apikeyRows[j].Model {
+				return apikeyRows[i].Model < apikeyRows[j].Model
+			}
+			return apikeyRows[i].AuthID < apikeyRows[j].AuthID
+		})
+
+		const bucketSec = 300 // 5-minute buckets for merged OAuth history
+
+		out := make([]gin.H, 0, len(oauthGroups)+len(apikeyRows))
+		nextID := 1
+
+		// OAuth aggregates.
+		for _, k := range oauthKeys {
+			recs := oauthGroups[k]
+			anyOK := false
+			latSum, latN := 0, 0
+			var newestChecked int64
+			for _, r := range recs {
+				if r.Status == "ok" {
+					anyOK = true
+					if r.LatencyMs > 0 {
+						latSum += r.LatencyMs
+						latN++
+					}
+				}
+				if r.CheckedAt.Unix() > newestChecked {
+					newestChecked = r.CheckedAt.Unix()
+				}
+			}
+			status := "fail"
+			if anyOK {
+				status = "ok"
+			}
+			meanLat := 0
+			if latN > 0 {
+				meanLat = latSum / latN
+			}
+
+			type bucket struct {
+				okCount, failCount int
+				latSum, latN       int
+				ts                 int64
+			}
+			buckets := map[int64]*bucket{}
+			for _, r := range recs {
+				hist, _ := store.ListModelHealthHistory(c.Request.Context(), r.AuthID, r.Model, 90)
+				for _, h := range hist {
+					ts := h.CheckedAt.Unix()
+					bkey := ts / bucketSec
+					b := buckets[bkey]
+					if b == nil {
+						b = &bucket{ts: ts}
+						buckets[bkey] = b
+					}
+					if ts > b.ts {
+						b.ts = ts
+					}
+					if h.Status == "ok" {
+						b.okCount++
+						if h.LatencyMs > 0 {
+							b.latSum += h.LatencyMs
+							b.latN++
+						}
+					} else {
+						b.failCount++
+					}
+				}
+			}
+			bkeys := make([]int64, 0, len(buckets))
+			for bk := range buckets {
+				bkeys = append(bkeys, bk)
+			}
+			sort.Slice(bkeys, func(i, j int) bool { return bkeys[i] < bkeys[j] })
+			if len(bkeys) > 90 {
+				bkeys = bkeys[len(bkeys)-90:]
+			}
+			histSlice := make([]gin.H, 0, len(bkeys))
+			for _, bk := range bkeys {
+				b := buckets[bk]
+				bSt := "fail"
+				if b.okCount > 0 {
+					bSt = "ok"
+				}
+				bLat := 0
+				if b.latN > 0 {
+					bLat = b.latSum / b.latN
+				}
+				histSlice = append(histSlice, gin.H{
+					"status":     bSt,
+					"latency_ms": bLat,
+					"checked_at": b.ts,
+				})
+			}
+
+			out = append(out, gin.H{
+				"id":           nextID,
+				"display_name": k.model,
+				"provider":     k.provider,
+				"model":        k.model,
+				"kind":         "oauth",
+				"status":       status,
+				"latency_ms":   meanLat,
+				"checked_at":   newestChecked,
+				"history":      histSlice,
+				"oauth_count":  len(recs),
+			})
+			nextID++
+		}
+
+		// API-key singletons.
+		for _, rec := range apikeyRows {
 			hist, _ := store.ListModelHealthHistory(c.Request.Context(), rec.AuthID, rec.Model, 90)
 			histSlice := make([]gin.H, 0, len(hist))
 			for _, r := range hist {
@@ -194,16 +349,20 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 				})
 			}
 			out = append(out, gin.H{
-				"id":           rec.ID,
-				"display_name": nameFor(rec.AuthID, rec.Provider),
+				"id":           nextID,
+				"display_name": apikeyName(rec.Provider),
 				"provider":     rec.Provider,
+				"model":        rec.Model,
+				"kind":         "apikey",
 				"status":       rec.Status,
 				"latency_ms":   rec.LatencyMs,
 				"checked_at":   rec.CheckedAt.Unix(),
 				"history":      histSlice,
 				// `error` intentionally omitted — operator-only detail.
 			})
+			nextID++
 		}
+
 		c.JSON(http.StatusOK, gin.H{"checks": out, "as_of": time.Now().Unix()})
 	})
 

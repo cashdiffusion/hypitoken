@@ -298,84 +298,191 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
   // unnoticed.
   const drift = Math.abs(computed - entry.cost_usd) > 0.0005;
 
+  const rows: Array<{
+    key: string;
+    label: string;
+    tokens: number;
+    rate: number;
+    sub: number;
+    dim?: boolean;
+  }> = [
+    { key: "in", label: t("logs.popup.input"), tokens: entry.input_tokens, rate: priceCard.input_per_1m, sub: inUSD },
+    { key: "out", label: t("logs.popup.output"), tokens: entry.output_tokens, rate: priceCard.output_per_1m, sub: outUSD },
+    { key: "cr", label: t("logs.popup.cacheR"), tokens: entry.cache_read_tokens, rate: priceCard.cache_read_per_1m, sub: crUSD, dim: true },
+    { key: "cw", label: t("logs.popup.cacheW"), tokens: entry.cache_create_tokens, rate: priceCard.cache_create_per_1m, sub: cwUSD, dim: true },
+  ];
+
   return (
-    <TooltipProvider delayDuration={150}>
+    <TooltipProvider delayDuration={120} disableHoverableContent={false}>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
             className={cn(
-              "underline decoration-dotted decoration-border-strong underline-offset-4 cursor-help",
-              drift && "text-amber-500",
+              "group relative inline-flex items-baseline gap-1 cursor-help font-semibold tabular-nums",
+              "transition-colors hover:text-primary",
+              drift && "text-amber-500 hover:text-amber-400",
             )}
           >
-            {fmtUSD(entry.cost_usd)}
+            <span>{fmtUSD(entry.cost_usd)}</span>
+            {/* Animated dotted-underline that draws in on hover. */}
+            <span
+              aria-hidden
+              className={cn(
+                "pointer-events-none absolute inset-x-0 -bottom-0.5 h-px",
+                "bg-[linear-gradient(to_right,currentColor_50%,transparent_50%)] bg-[length:4px_1px] bg-repeat-x",
+                "scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100",
+                drift ? "opacity-90" : "opacity-60",
+              )}
+            />
           </button>
         </TooltipTrigger>
         <TooltipContent
           side="left"
           align="start"
-          sideOffset={8}
-          className="max-w-md w-[22rem] p-0 bg-popover text-popover-foreground border border-border-strong shadow-2xl rounded-lg overflow-hidden"
+          sideOffset={10}
+          collisionPadding={12}
+          className={cn(
+            "w-[22rem] max-w-[92vw] p-0 overflow-hidden",
+            "rounded-xl border border-border-strong/80 bg-popover text-popover-foreground",
+            "shadow-[0_20px_70px_-20px_rgba(0,0,0,0.45),0_4px_12px_-6px_rgba(0,0,0,0.25)]",
+          )}
         >
-          <div className="bg-muted/50 px-4 py-2.5 border-b border-border">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t("logs.popup.header")}</div>
-            <div className="font-mono text-xs text-foreground mt-0.5 truncate">{entry.model}</div>
+          {/* Hairline accent ribbon along the top edge — primary→transparent. */}
+          <div
+            aria-hidden
+            className="h-[2px] w-full bg-gradient-to-r from-primary/0 via-primary/70 to-primary/0 animate-in fade-in-0 zoom-in-95 fill-mode-both"
+            style={{ animationDuration: "260ms" }}
+          />
+
+          {/* Header — model + total. */}
+          <div
+            className="flex items-start justify-between gap-3 px-4 pt-3.5 pb-3 border-b border-border/60 animate-in fade-in-0 slide-in-from-top-1 fill-mode-both"
+            style={{ animationDelay: "40ms", animationDuration: "280ms" }}
+          >
+            <div className="min-w-0 flex-1">
+              <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/80">
+                {t("logs.popup.header")}
+              </div>
+              <div className="mt-1 font-mono text-xs font-medium text-foreground truncate" title={entry.model}>
+                {entry.model}
+              </div>
+              <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                {(entry.provider || "anthropic")} · {entry.auth_kind}
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/80">
+                Total
+              </div>
+              <div className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
+                {fmtUSD(entry.cost_usd)}
+              </div>
+            </div>
           </div>
 
-          <div className="px-4 py-3 space-y-2 text-xs font-mono">
-            <FormulaRow label={t("logs.popup.input")} tokens={entry.input_tokens} ratePer1M={priceCard.input_per_1m} subtotal={inUSD} />
-            <FormulaRow label={t("logs.popup.output")} tokens={entry.output_tokens} ratePer1M={priceCard.output_per_1m} subtotal={outUSD} />
-            <FormulaRow label={t("logs.popup.cacheR")} tokens={entry.cache_read_tokens} ratePer1M={priceCard.cache_read_per_1m} subtotal={crUSD} dim />
-            <FormulaRow label={t("logs.popup.cacheW")} tokens={entry.cache_create_tokens} ratePer1M={priceCard.cache_create_per_1m} subtotal={cwUSD} dim />
+          {/* Body — table-like rows with column eyebrows. */}
+          <div className="px-4 pt-2.5 pb-3 space-y-1">
+            <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 items-baseline pb-1.5 font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground/60">
+              <span>{t("logs.popup.colCategory", "Category")}</span>
+              <span className="text-right">{t("logs.popup.colFormula", "Tokens × Rate / 1M")}</span>
+              <span className="text-right">{t("logs.popup.colSub", "Subtotal")}</span>
+            </div>
+            {rows.map((r, i) => (
+              <div
+                key={r.key}
+                className={cn(
+                  "grid grid-cols-[auto_1fr_auto] gap-x-3 items-baseline font-mono text-[11px] py-0.5",
+                  r.dim && "opacity-70",
+                  "animate-in fade-in-0 slide-in-from-left-2 fill-mode-both",
+                )}
+                style={{
+                  animationDelay: `${100 + i * 50}ms`,
+                  animationDuration: "280ms",
+                }}
+              >
+                <span className="text-foreground/85">{r.label}</span>
+                <span className="text-right text-foreground/70 tabular-nums whitespace-nowrap">
+                  <span className="text-foreground">{fmtTokens(r.tokens)}</span>
+                  <span className="text-muted-foreground/60"> × </span>
+                  <span>${r.rate.toFixed(2)}</span>
+                  <span className="text-muted-foreground/60">/M</span>
+                </span>
+                <span className="text-right tabular-nums text-foreground">
+                  ${r.sub.toFixed(6)}
+                </span>
+              </div>
+            ))}
 
-            <div className="pt-2 mt-2 border-t border-dashed border-border flex items-baseline justify-between">
-              <span className="text-muted-foreground text-[10px] uppercase tracking-wider">{t("logs.popup.official")}</span>
-              <span className="tabular-nums">${officialUSD.toFixed(6)}</span>
+            {/* Σ official total */}
+            <div
+              className="grid grid-cols-[auto_1fr_auto] gap-x-3 items-baseline font-mono text-[11px] pt-2 mt-1 border-t border-dashed border-border/60 animate-in fade-in-0 fill-mode-both"
+              style={{
+                animationDelay: `${100 + rows.length * 50}ms`,
+                animationDuration: "300ms",
+              }}
+            >
+              <span className="text-muted-foreground/80">Σ {t("logs.popup.official")}</span>
+              <span />
+              <span className="text-right tabular-nums font-medium">
+                ${officialUSD.toFixed(6)}
+              </span>
             </div>
 
-            <div className="flex items-baseline justify-between">
-              <span className="text-muted-foreground text-[10px] uppercase tracking-wider">{t("logs.popup.multiplier")}</span>
-              <span className="tabular-nums">{mult.toFixed(2)}×</span>
-            </div>
-
-            <div className="pt-2 mt-2 border-t border-border flex items-baseline justify-between bg-primary/[0.06] -mx-4 px-4 py-2 -mb-3">
-              <span className="text-foreground font-semibold text-[11px] uppercase tracking-wider">{t("logs.popup.youPaid")}</span>
-              <span className="tabular-nums text-foreground font-semibold text-sm">{fmtUSD(entry.cost_usd)}</span>
-            </div>
-
-            {drift && (
-              <div className="text-amber-500 text-[10px] pt-2">
-                {t("logs.popup.drift", { recomputed: "$" + computed.toFixed(6), stored: fmtUSD(entry.cost_usd) })}
+            {/* Multiplier line — only if non-trivial */}
+            {Math.abs(mult - 1) > 1e-6 && (
+              <div
+                className="grid grid-cols-[auto_1fr_auto] gap-x-3 items-baseline font-mono text-[11px] animate-in fade-in-0 fill-mode-both"
+                style={{
+                  animationDelay: `${100 + (rows.length + 1) * 50}ms`,
+                  animationDuration: "300ms",
+                }}
+              >
+                <span className="text-muted-foreground/80">{t("logs.popup.multiplier")}</span>
+                <span />
+                <span className="text-right tabular-nums">{mult.toFixed(2)}×</span>
               </div>
             )}
           </div>
+
+          {/* Settled — accented strip at the bottom */}
+          <div
+            className={cn(
+              "relative px-4 py-2.5 flex items-baseline justify-between gap-3",
+              "border-t border-border/60 bg-primary/[0.07]",
+              "animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both",
+            )}
+            style={{
+              animationDelay: `${100 + (rows.length + 2) * 50}ms`,
+              animationDuration: "320ms",
+            }}
+          >
+            <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-foreground/80">
+              {t("logs.popup.youPaid")}
+            </span>
+            <span className="font-mono text-sm font-semibold tabular-nums text-foreground">
+              {fmtUSD(entry.cost_usd)}
+            </span>
+            <span
+              aria-hidden
+              className="absolute inset-y-0 left-0 w-[2px] bg-primary"
+            />
+          </div>
+
+          {/* Drift warning */}
+          {drift && (
+            <div
+              className="px-4 py-2 border-t border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[10px] leading-relaxed animate-in fade-in-0 fill-mode-both"
+              style={{
+                animationDelay: `${100 + (rows.length + 3) * 50}ms`,
+                animationDuration: "320ms",
+              }}
+            >
+              {t("logs.popup.drift", { recomputed: "$" + computed.toFixed(6), stored: fmtUSD(entry.cost_usd) })}
+            </div>
+          )}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
-  );
-}
-
-function FormulaRow({
-  label,
-  tokens,
-  ratePer1M,
-  subtotal,
-  dim,
-}: {
-  label: string;
-  tokens: number;
-  ratePer1M: number;
-  subtotal: number;
-  dim?: boolean;
-}) {
-  return (
-    <div className={cn("flex items-baseline justify-between gap-3", dim && "opacity-70")}>
-      <span className="text-muted-foreground text-[10px] uppercase tracking-wider min-w-[5rem]">{label}</span>
-      <span className="text-[11px] text-foreground tabular-nums whitespace-nowrap">
-        {fmtTokens(tokens)} × ${ratePer1M.toFixed(2)}/M
-      </span>
-      <span className="tabular-nums text-foreground min-w-[5.5rem] text-right">${subtotal.toFixed(6)}</span>
-    </div>
   );
 }

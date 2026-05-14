@@ -91,7 +91,20 @@ func (c *Checker) RunOnce(ctx context.Context) {
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); c.running = false; c.mu.Unlock() }()
 
-	for _, st := range c.Pool.Status() {
+	// Evict health rows for credentials that no longer exist in the live pool.
+	// Without this, deleted credentials keep their last status forever and
+	// /status keeps probing/showing them as ghost rows. Built once per cycle
+	// — the pool's Status() snapshot is the source of truth.
+	statuses := c.Pool.Status()
+	liveIDs := make([]string, 0, len(statuses))
+	for _, st := range statuses {
+		liveIDs = append(liveIDs, st.Auth.ID)
+	}
+	if err := c.DB.PruneModelHealthExcept(ctx, liveIDs); err != nil {
+		log.Warnf("health: prune stale auth rows: %v", err)
+	}
+
+	for _, st := range statuses {
 		a := c.Pool.FindByID(st.Auth.ID)
 		if a == nil {
 			continue

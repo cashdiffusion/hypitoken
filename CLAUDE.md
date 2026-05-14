@@ -11,7 +11,7 @@ Derivative of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT).
 ## Build & run
 
 ```bash
-make build              # build admin SPA (bun) + Go binary into bin/cpa-claude
+make build              # build admin SPA (bun) + Go binary into bin/hypitoken
 make web-dev            # Vite dev server with API proxy to :8317 (frontend hot reload)
 make tidy               # go mod tidy
 go build ./...          # Go-only build (skips SPA; admin panel falls back to embedded /dist)

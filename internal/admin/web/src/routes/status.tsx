@@ -15,11 +15,13 @@ interface HealthCheck {
   id: number;
   display_name: string;
   provider: string;
+  model?: string;
   status: string;      // "ok" | "fail"
   latency_ms: number;
   error: string;
   checked_at: number;  // unix seconds
   history: HistoryPoint[];
+  oauth_count?: number;
 }
 
 interface Props {
@@ -210,6 +212,11 @@ function CredRow({ check }: { check: HealthCheck }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span className="font-mono text-sm font-medium text-foreground">{check.display_name}</span>
+          {check.oauth_count && check.oauth_count > 0 && (
+            <span className="text-xs text-muted-foreground font-mono">
+              {check.oauth_count} OAuth
+            </span>
+          )}
           {!ok && check.error && (
             <span className="hidden max-w-xs truncate text-xs text-muted-foreground sm:block" title={check.error}>
               {check.error.slice(0, 80)}{check.error.length > 80 ? "…" : ""}

@@ -3,7 +3,7 @@ SHELL := /bin/bash
 WEB_DIR := internal/admin/web
 WEB_DIST := $(WEB_DIR)/dist
 GO_MAIN := ./cmd/server
-BIN := bin/cpa-claude
+BIN := bin/hypitoken
 
 .PHONY: all build web web-install web-dev generate tidy clean help
 

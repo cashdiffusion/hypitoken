@@ -335,12 +335,12 @@ type usageSummary struct {
 	TotalCostUSD float64 `json:"total_cost_usd"`
 }
 
-func (h *Handler) handleSummary(c *gin.Context) {
+// buildAuthRows produces the rich credential rows used by both the legacy
+// /summary endpoint and the SaaS /api/v2/admin/credentials bridge. Factored
+// out so the SaaS panel can render the same data (usage / quota / model_map
+// / client_tokens / codex rate-limits) without re-shipping all of /summary.
+func (h *Handler) buildAuthRows() []authRow {
 	usageMap := h.usage.Snapshot()
-	// Lifetime and rolling-24h totals come from the request log instead of
-	// the in-memory counters: the log is append-only and survives state
-	// rebuilds, so sums over it are the source of truth. The in-memory
-	// Daily buckets still drive per-auth 14-day sparklines.
 	lifetime := h.lifetimeByAuth()
 	last24h, err := requestlog.AggregateByAuth(h.cfg.LogDir, time.Now().Add(-24*time.Hour), time.Time{})
 	if err != nil {
@@ -452,6 +452,11 @@ func (h *Handler) handleSummary(c *gin.Context) {
 			}(),
 		})
 	}
+	return rows
+}
+
+func (h *Handler) handleSummary(c *gin.Context) {
+	rows := h.buildAuthRows()
 	// Clients (per-access-token spending).
 	clientSnap := h.usage.SnapshotClients()
 	currentWeek := h.usage.CurrentWeekKey()
@@ -1553,4 +1558,21 @@ func (h *Handler) RegisterSaaSBridge(g *gin.RouterGroup) {
 	g.GET("/requests/clients", h.handleRequestsClients)
 	g.GET("/requests/hourly", h.handleRequestsHourly)
 	g.POST("/credentials/:id/anthropic-usage", h.handleAnthropicUsage)
+	// Rich credential read + mutations. Mirrors the legacy /summary fields so
+	// the SaaS panel can render the same usage / quota / model_map / sparkline
+	// data that the operator panel does. The saas/admin CredHandler still owns
+	// create / oauth-start / oauth-finish / delete — those are not just
+	// pass-throughs (they write JSON files into AuthDir).
+	g.GET("/credentials", h.handleBridgeListCreds)
+	g.PATCH("/credentials/:id", h.handlePatchAuth)
+	g.POST("/credentials/:id/refresh", h.handleRefresh)
+	g.POST("/credentials/:id/clear-quota", h.handleClearQuota)
+	g.POST("/credentials/:id/clear-failure", h.handleClearFailure)
+}
+
+// handleBridgeListCreds emits the rich credential rows for the SaaS panel
+// (/api/v2/admin/credentials). Same shape as /summary's "auths" but without
+// the clients/pricing fan-out — those have their own endpoints elsewhere.
+func (h *Handler) handleBridgeListCreds(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"credentials": h.buildAuthRows()})
 }

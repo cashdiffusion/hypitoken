@@ -7,6 +7,7 @@ import { LogOut, User as UserIcon, Wallet, KeyRound, LayoutDashboard, Shield, Te
 import { fmtUSD } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { MobileMenu } from "@/components/layout/mobile-menu";
 
 // NAV_ITEMS is keyed by i18n string id rather than the literal label —
 // resolved at render time so language switching reflows the sidebar.
@@ -101,26 +102,29 @@ function Header() {
               <span className="font-mono text-sm font-semibold tabular-nums">{fmtUSD(user.balance_usd)}</span>
             </div>
           )}
-          <LanguageToggle />
-          <ThemeToggle />
-          {user ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                signOut();
-                nav("/login");
-              }}
-              className="gap-1.5"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{t("nav.signOut")}</span>
-            </Button>
-          ) : (
-            <Button size="sm" onClick={() => nav("/login")}>
-              <UserIcon className="h-3.5 w-3.5 mr-1.5" /> {t("nav.signIn")}
-            </Button>
-          )}
+          <div className="hidden items-center gap-2 lg:flex">
+            <LanguageToggle />
+            <ThemeToggle />
+            {user ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  signOut();
+                  nav("/login");
+                }}
+                className="gap-1.5"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{t("nav.signOut")}</span>
+              </Button>
+            ) : (
+              <Button size="sm" onClick={() => nav("/login")}>
+                <UserIcon className="h-3.5 w-3.5 mr-1.5" /> {t("nav.signIn")}
+              </Button>
+            )}
+          </div>
+          <MobileMenu variant="app" />
         </div>
       </div>
     </header>
@@ -139,29 +143,32 @@ export function PublicHeader() {
           </span>
           HypiToken
         </Link>
-        <nav className="hidden items-center gap-1 sm:flex">
+        <nav className="hidden items-center gap-1 lg:flex">
           <NavLink to="/" end className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>{t("nav.home")}</NavLink>
           <NavLink to="/pricing" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>{t("nav.pricing")}</NavLink>
           <NavLink to="/docs" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>{t("nav.docs")}</NavLink>
           <NavLink to="/status" className={({ isActive }) => cn("rounded-md px-3 py-1.5 text-sm transition-colors", isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>{t("nav.status")}</NavLink>
         </nav>
         <div className="flex items-center gap-2">
-          <LanguageToggle />
-          <ThemeToggle />
-          {user ? (
-            <Button asChild size="sm">
-              <Link to="/app">{t("nav.dashboard")} →</Link>
-            </Button>
-          ) : (
-            <>
-              <Button asChild variant="ghost" size="sm">
-                <Link to="/login">{t("nav.signIn")}</Link>
-              </Button>
+          <div className="hidden items-center gap-2 lg:flex">
+            <LanguageToggle />
+            <ThemeToggle />
+            {user ? (
               <Button asChild size="sm">
-                <Link to="/register">{t("nav.signUp")}</Link>
+                <Link to="/app">{t("nav.dashboard")} →</Link>
               </Button>
-            </>
-          )}
+            ) : (
+              <>
+                <Button asChild variant="ghost" size="sm">
+                  <Link to="/login">{t("nav.signIn")}</Link>
+                </Button>
+                <Button asChild size="sm">
+                  <Link to="/register">{t("nav.signUp")}</Link>
+                </Button>
+              </>
+            )}
+          </div>
+          <MobileMenu variant="public" />
         </div>
       </div>
     </header>

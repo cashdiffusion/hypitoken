@@ -250,6 +250,10 @@ var builtIn = map[string]ModelPrice{
 		CacheReadPer1M:   0.10,
 		CacheCreatePer1M: 1.25,
 	},
+	// Anthropic Opus 4.x official list price: $5 / $25 / $0.50 / $6.25 per 1M
+	// for input / output / cache_read / cache_write. The 0.3× user-facing
+	// discount is applied via group/token multiplier, not by scaling this
+	// table — keep these at the upstream rate.
 	ProviderAnthropic + "/claude-opus-4-6": {
 		InputPer1M:       5.00,
 		OutputPer1M:      25.00,
@@ -310,31 +314,7 @@ var builtIn = map[string]ModelPrice{
 		OutputPer1M:      20.00,
 		CacheReadPer1M:   0.25,
 	},
-
-	// Also include the currently-shipping OpenAI API models for BYOK users.
-	ProviderOpenAI + "/gpt-5": {
-		InputPer1M:       1.25,
-		OutputPer1M:      10.00,
-		CacheReadPer1M:   0.125,
-	},
-	ProviderOpenAI + "/gpt-5-mini": {
-		InputPer1M:       0.25,
-		OutputPer1M:      2.00,
-		CacheReadPer1M:   0.025,
-	},
-	ProviderOpenAI + "/gpt-5-nano": {
-		InputPer1M:       0.05,
-		OutputPer1M:      0.40,
-		CacheReadPer1M:   0.005,
-	},
-	ProviderOpenAI + "/gpt-4o": {
-		InputPer1M:       2.50,
-		OutputPer1M:      10.00,
-		CacheReadPer1M:   1.25,
-	},
-	ProviderOpenAI + "/gpt-4o-mini": {
-		InputPer1M:       0.15,
-		OutputPer1M:      0.60,
-		CacheReadPer1M:   0.075,
-	},
+	// We expose only Codex-tier models (gpt-5.x); the gateway does not
+	// ship a generic OpenAI BYOK surface, so gpt-5 / gpt-5-mini / gpt-5-nano
+	// / gpt-4o entries would never match anything real.
 }

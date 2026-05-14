@@ -77,6 +77,8 @@ export default {
     console: "Console",
     operator: "Operator",
     admin: "Admin",
+    product: "Product",
+    account: "Account",
   },
 
   // Auth pages
@@ -262,6 +264,9 @@ export default {
       multiplier: "× Group multiplier",
       youPaid: "You paid",
       drift: "⚠ recomputed {{recomputed}} ≠ stored {{stored}}; pricing may have changed",
+      colCategory: "Category",
+      colFormula: "Tokens × Rate / 1M",
+      colSub: "Subtotal",
     },
   },
 

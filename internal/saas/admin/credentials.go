@@ -33,67 +33,14 @@ func NewCred(p *auth.Pool, authDir string, useUTLS bool) *CredHandler {
 }
 
 func (c *CredHandler) Routes(g *gin.RouterGroup) {
-	g.GET("/credentials", c.list)
+	// GET /credentials and the per-id mutation routes (PATCH / refresh /
+	// clear-quota / clear-failure) are owned by the legacy admin bridge so
+	// the SaaS panel sees the same rich usage / quota / model_map data the
+	// operator panel does. See legacyadmin.Handler.RegisterSaaSBridge.
 	g.POST("/credentials/apikey", c.createAPIKey)
 	g.POST("/credentials/oauth/start", c.oauthStart)
 	g.POST("/credentials/oauth/finish", c.oauthFinish)
 	g.DELETE("/credentials/:id", c.remove)
-}
-
-func (c *CredHandler) list(ctx *gin.Context) {
-	type row struct {
-		ID            string    `json:"id"`
-		Kind          string    `json:"kind"`
-		Provider      string    `json:"provider"`
-		Label         string    `json:"label"`
-		ProxyURL      string    `json:"proxy_url,omitempty"`
-		BaseURL       string    `json:"base_url,omitempty"`
-		Group         string    `json:"group,omitempty"`
-		MaxConcurrent int       `json:"max_concurrent"`
-		ActiveClients int       `json:"active_clients"`
-		Disabled      bool      `json:"disabled"`
-		Healthy       bool      `json:"healthy"`
-		HardFailure   bool      `json:"hard_failure"`
-		FailureReason string    `json:"failure_reason,omitempty"`
-		QuotaExceeded bool      `json:"quota_exceeded,omitempty"`
-		QuotaResetAt  time.Time `json:"quota_reset_at,omitempty"`
-		ExpiresAt     time.Time `json:"expires_at,omitempty"`
-	}
-	out := make([]row, 0)
-	for _, st := range c.Pool.Status() {
-		kind := "oauth"
-		if st.Auth.Kind == auth.KindAPIKey {
-			kind = "apikey"
-		}
-		live := c.Pool.FindByID(st.Auth.ID)
-		healthy := false
-		hard := false
-		failReason := ""
-		if live != nil {
-			healthy = live.IsHealthy()
-			hard = live.IsHardFailed()
-			failReason = live.LastFailureReason
-		}
-		out = append(out, row{
-			ID:            st.Auth.ID,
-			Kind:          kind,
-			Provider:      auth.NormalizeProvider(st.Auth.Provider),
-			Label:         st.Auth.Label,
-			ProxyURL:      st.Auth.ProxyURL,
-			BaseURL:       st.Auth.BaseURL,
-			Group:         st.Auth.Group,
-			MaxConcurrent: st.Auth.MaxConcurrent,
-			ActiveClients: st.ActiveClients,
-			Disabled:      st.Auth.Disabled,
-			Healthy:       healthy,
-			HardFailure:   hard,
-			FailureReason: failReason,
-			QuotaExceeded: !st.Auth.QuotaExceededAt.IsZero(),
-			QuotaResetAt:  st.Auth.QuotaResetAt,
-			ExpiresAt:     st.Auth.ExpiresAt,
-		})
-	}
-	ctx.JSON(http.StatusOK, gin.H{"credentials": out})
 }
 
 type apikeyReq struct {
