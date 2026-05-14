@@ -124,7 +124,7 @@ func TestBootstrapFiresAllStepsWithCorrectUA(t *testing.T) {
 
 	// Bootstrap takes ~2.4s of real timing — wait a bit beyond that for
 	// all steps to land but stop before the heartbeat (8s) kicks in.
-	if !waitForCallCount(rec, 8, 5*time.Second) {
+	if !waitForCallCount(rec, 9, 5*time.Second) {
 		t.Fatalf("expected at least 8 bootstrap calls, got %d after timeout", rec.count())
 	}
 
@@ -146,12 +146,13 @@ func TestBootstrapFiresAllStepsWithCorrectUA(t *testing.T) {
 	}{
 		"/api/eval/sdk-zAZezfDKGoZuXXKe":  {"Bun/", "oauth-2025-04-20"},
 		"/api/oauth/account/settings":    {"claude-code/", "oauth-2025-04-20"},
-		"/api/claude_code_grove":         {"claude-cli/", "oauth-2025-04-20"},
+		"/api/claude_code_grove":         {"claude-code/", "oauth-2025-04-20"},
 		"/api/claude_cli/bootstrap":      {"claude-code/", "oauth-2025-04-20"},
 		"/api/claude_code_penguin_mode":  {"axios/", "oauth-2025-04-20"},
 		"/v1/messages":                   {"claude-cli/", quotaProbeBeta},
 		"/mcp-registry/v0/servers":       {"axios/", ""},
 		"/v1/mcp_servers":                {"axios/", "mcp-servers-2025-12-04"},
+		"/v1/code/triggers":              {"axios/", "ccr-triggers-2026-01-30"},
 		// /claude-code-releases/latest is on a different host (downloads.claude.ai)
 		// — won't hit our test server, so it's not in this list.
 	}
@@ -194,7 +195,7 @@ func TestBootstrapFiresOncePerSession(t *testing.T) {
 	mgr.Notify(a, "client-A")
 
 	// Wait for bootstrap to finish.
-	if !waitForCallCount(rec, 8, 5*time.Second) {
+	if !waitForCallCount(rec, 9, 5*time.Second) {
 		t.Fatalf("bootstrap never completed, got %d calls", rec.count())
 	}
 	time.Sleep(300 * time.Millisecond)
@@ -209,8 +210,8 @@ func TestBootstrapFiresOncePerSession(t *testing.T) {
 			bootstrapHits++
 		}
 	}
-	if bootstrapHits > 9 {
-		t.Errorf("bootstrap should fire at most 8 endpoints (downloads is off-host) per session, got %d (total recorded %d)", bootstrapHits, count)
+	if bootstrapHits > 10 {
+		t.Errorf("bootstrap should fire at most 9 endpoints (downloads is off-host) per session, got %d (total recorded %d)", bootstrapHits, count)
 	}
 }
 
@@ -234,7 +235,7 @@ func TestBootstrapDeduplicatesAcrossClientTokens(t *testing.T) {
 	mgr.Notify(a, "client-B")
 
 	// One bootstrap should fire ~8 on-host calls, regardless of token count.
-	if !waitForCallCount(rec, 8, 5*time.Second) {
+	if !waitForCallCount(rec, 9, 5*time.Second) {
 		t.Fatalf("expected ~8 bootstrap calls (one shared burst), got %d", rec.count())
 	}
 	// Wait a bit longer to confirm a second burst doesn't sneak in.
@@ -245,7 +246,7 @@ func TestBootstrapDeduplicatesAcrossClientTokens(t *testing.T) {
 			bootstrapHits++
 		}
 	}
-	if bootstrapHits > 9 {
+	if bootstrapHits > 10 {
 		t.Errorf("expected at most 9 bootstrap hits across both client_tokens (per-account dedupe), got %d", bootstrapHits)
 	}
 }
@@ -298,7 +299,7 @@ func TestSidecarRefiresAfterIdle(t *testing.T) {
 
 	a := newTestAuth("auth-1", "alice@example.com")
 	mgr.Notify(a, "client-A")
-	if !waitForCallCount(rec, 8, 5*time.Second) {
+	if !waitForCallCount(rec, 9, 5*time.Second) {
 		t.Fatalf("first bootstrap never landed, got %d calls", rec.count())
 	}
 
@@ -319,7 +320,7 @@ func TestSidecarRefiresAfterIdle(t *testing.T) {
 
 	before := rec.count()
 	mgr.Notify(a, "client-A")
-	if !waitForCallCount(rec, before+8, 5*time.Second) {
+	if !waitForCallCount(rec, before+9, 5*time.Second) {
 		t.Errorf("expected another bootstrap burst after idle, got %d calls (before=%d)", rec.count(), before)
 	}
 }

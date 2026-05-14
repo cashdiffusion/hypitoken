@@ -370,14 +370,16 @@ func realBootstrapSteps(baseURL string) []bootstrapStep {
 			method:         "GET",
 			url:            baseURL + "/api/claude_code_grove",
 			delayFromStart: 160 * time.Millisecond,
-			userAgent:      uaClaudeCLI,
+			userAgent:      uaClaudeCode, // CC 2.1.141: switched from claude-cli to claude-code
 			beta:           "oauth-2025-04-20",
 			connection:     "close",
 		},
 		{
+			// CC 2.1.141: bootstrap URL now carries query params advertising
+			// the entrypoint and the model the user is launching with.
 			name:            "claude_cli_bootstrap",
 			method:          "GET",
-			url:             baseURL + "/api/claude_cli/bootstrap",
+			url:             baseURL + "/api/claude_cli/bootstrap?entrypoint=cli&model=claude-opus-4-7",
 			delayFromStart:  1250 * time.Millisecond,
 			userAgent:       uaClaudeCode,
 			beta:            "oauth-2025-04-20",
@@ -436,6 +438,24 @@ func realBootstrapSteps(baseURL string) []bootstrapStep {
 			anthropicVer:   claudeAnthropicVersion,
 			contentType:    "application/json",
 			connection:     "close",
+		},
+		{
+			// CC 2.1.141: new bootstrap step — GET /v1/code/triggers
+			// behind the ccr-triggers-2026-01-30 beta. Carries
+			// anthropic-client-platform and X-Organization-UUID;
+			// extraHeaders below sets the latter from the auth at dispatch.
+			name:           "code_triggers",
+			method:         "GET",
+			url:            baseURL + "/v1/code/triggers",
+			delayFromStart: 1960 * time.Millisecond,
+			userAgent:      uaAxios,
+			beta:           "ccr-triggers-2026-01-30",
+			anthropicVer:   claudeAnthropicVersion,
+			contentType:    "application/json",
+			connection:     "close",
+			extraHeaders: map[string]string{
+				"Anthropic-Client-Platform": "claude_code_cli",
+			},
 		},
 		{
 			name:           "claude_code_releases",
@@ -572,6 +592,13 @@ func (m *sidecarMgr) sendBootstrapStep(parent context.Context, a *auth.Auth, ses
 	if step.name == "quota_probe" {
 		req.Header.Set("X-Claude-Code-Session-Id", sessionID)
 		req.Header.Set("X-Client-Request-Id", newRequestUUID())
+	}
+	// /v1/code/triggers carries the account's organization UUID. Real CC
+	// derives it from the OAuth account; we mirror that.
+	if step.name == "code_triggers" {
+		if uuid := strings.TrimSpace(a.OrganizationUUID); uuid != "" {
+			req.Header.Set("X-Organization-UUID", uuid)
+		}
 	}
 
 	client := m.httpClient
