@@ -702,12 +702,6 @@ function CredentialDetail({ c }: { c: any }) {
         </div>
       )}
 
-      {/* Codex rate limits */}
-      {c.kind === "oauth" && c.provider === "openai" && c.codex_rate_limits && Object.keys(c.codex_rate_limits).length > 0 && (
-        <div className="rounded-md border border-border bg-card p-3 lg:col-span-3">
-          <CodexRateLimitPanel limits={c.codex_rate_limits} capturedAt={c.codex_rate_limits_at} />
-        </div>
-      )}
     </div>
   );
 }
@@ -744,97 +738,6 @@ function AlertStrip({
       <span className="font-mono truncate ml-auto opacity-90 text-right max-w-[60%]">{children}</span>
     </div>
   );
-}
-
-function CodexRateLimitPanel({ limits, capturedAt }: { limits: Record<string, string>; capturedAt?: string }) {
-  const pct = (raw?: string) => {
-    if (!raw) return null;
-    const n = parseFloat(raw);
-    return Number.isFinite(n) ? n : null;
-  };
-  const primaryUsed = pct(limits["x-codex-primary-used-percent"]);
-  const secondaryUsed = pct(limits["x-codex-secondary-used-percent"]);
-  const primaryReset = limits["x-codex-primary-reset-after-seconds"] || limits["x-codex-primary-window-expires-at-iso"];
-  const secondaryReset = limits["x-codex-secondary-reset-after-seconds"] || limits["x-codex-secondary-window-expires-at-iso"];
-  const known = new Set([
-    "x-codex-primary-used-percent",
-    "x-codex-secondary-used-percent",
-    "x-codex-primary-reset-after-seconds",
-    "x-codex-secondary-reset-after-seconds",
-    "x-codex-primary-window-expires-at-iso",
-    "x-codex-secondary-window-expires-at-iso",
-  ]);
-  const others = Object.entries(limits).filter(([k]) => !known.has(k));
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="text-xs font-medium uppercase text-muted-foreground">Codex 后端配额（x-codex 头）</div>
-        {capturedAt && (
-          <div className="text-[10px] text-muted-foreground font-mono">
-            截取于 {new Date(capturedAt).toLocaleTimeString()}
-          </div>
-        )}
-      </div>
-      <div className="grid grid-cols-2 gap-3 text-xs">
-        <CodexQuotaBar label="Primary (5h)" percent={primaryUsed} reset={primaryReset} />
-        <CodexQuotaBar label="Secondary (weekly)" percent={secondaryUsed} reset={secondaryReset} />
-      </div>
-      {others.length > 0 && (
-        <details className="mt-2 text-[10px]">
-          <summary className="cursor-pointer text-muted-foreground">其余字段 ({others.length})</summary>
-          <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono">
-            {others.map(([k, v]) => (
-              <React.Fragment key={k}>
-                <span className="text-muted-foreground">{k.replace(/^x-codex-/, "")}</span>
-                <span className="truncate">{v}</span>
-              </React.Fragment>
-            ))}
-          </div>
-        </details>
-      )}
-    </div>
-  );
-}
-
-function CodexQuotaBar({ label, percent, reset }: { label: string; percent: number | null; reset?: string }) {
-  if (percent === null) {
-    return (
-      <div>
-        <div className="text-muted-foreground">{label}</div>
-        <div className="font-mono text-[10px] text-muted-foreground">—</div>
-      </div>
-    );
-  }
-  const tone = percent >= 90 ? "bg-destructive" : percent >= 70 ? "bg-warning" : "bg-primary";
-  return (
-    <div>
-      <div className="flex items-baseline justify-between">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-mono tabular-nums">{percent.toFixed(1)}%</span>
-      </div>
-      <div className="h-1.5 mt-0.5 rounded-full bg-muted overflow-hidden">
-        <div className={cn("h-full", tone)} style={{ width: `${Math.min(100, percent)}%` }} />
-      </div>
-      {reset && <div className="text-[10px] text-muted-foreground font-mono mt-0.5">重置 {formatReset(reset)}</div>}
-    </div>
-  );
-}
-
-function formatReset(raw: string): string {
-  if (/^\d+$/.test(raw)) {
-    const s = parseInt(raw, 10);
-    if (s < 60) return `${s}s 后`;
-    if (s < 3600) return `${Math.round(s / 60)}m 后`;
-    if (s < 86400) return `${Math.round(s / 3600)}h 后`;
-    return `${Math.round(s / 86400)}d 后`;
-  }
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return raw;
-  const delta = (d.getTime() - Date.now()) / 1000;
-  if (delta < 0) return "刚刚";
-  if (delta < 3600) return `${Math.round(delta / 60)}m 后`;
-  if (delta < 86400) return `${Math.round(delta / 3600)}h 后`;
-  return `${Math.round(delta / 86400)}d 后`;
 }
 
 function EditCredentialDialog({
