@@ -131,6 +131,22 @@ func (c *Checker) RunOnce(ctx context.Context) {
 		// the pool's recorded health (populated by real proxy traffic) and
 		// borrow latency from the most recent successful request log entry.
 		if a.Kind == auth.KindOAuth {
+			// For Codex OAuth, opportunistically refresh the wham/usage
+			// snapshot before reading from the pool. Unlike the /responses
+			// probe — which is a third-party-detection signal we must
+			// avoid — wham/usage is the official portal endpoint used by
+			// chatgpt.com itself, so polling it is safe and gives the
+			// admin a live view even when no traffic is flowing.
+			// Errors are swallowed: this is a best-effort background
+			// refresh, and a transient chatgpt.com failure must not
+			// taint the (separately maintained) /responses health view.
+			if provider == auth.ProviderOpenAI {
+				probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+				if _, err := a.FetchCodexUsage(probeCtx, c.Pool.UseUTLS()); err != nil {
+					log.Debugf("health: codex wham/usage probe %s: %v", a.ID, err)
+				}
+				cancel()
+			}
 			c.recordOAuthFromPool(ctx, a, provider, model)
 			continue
 		}
