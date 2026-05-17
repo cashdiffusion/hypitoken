@@ -151,6 +151,7 @@ func (h *Handler) Register(r *gin.Engine) {
 		api.POST("/oauth/finish", h.handleOAuthFinish)
 		api.POST("/apikeys", h.handleCreateAPIKey)
 		api.POST("/auths/:id/anthropic-usage", h.handleAnthropicUsage)
+		api.POST("/auths/:id/codex-usage", h.handleCodexUsage)
 		api.GET("/requests", h.handleRequestsQuery)
 		api.GET("/requests/clients", h.handleRequestsClients)
 		api.GET("/requests/hourly", h.handleRequestsHourly)
@@ -304,6 +305,14 @@ type authRow struct {
 	Healthy       bool          `json:"healthy"`
 	HardFailure   bool          `json:"hard_failure"`
 	FailureReason string        `json:"failure_reason,omitempty"`
+	// RefreshSuspended is true when the background OAuth refresher
+	// (cc-core/auth Pool.RefreshExpiring) will deliberately skip this
+	// credential — i.e. it is disabled or hard-failed. The frontend uses
+	// this to explain why an OAuth token can show "expired Xd ago"
+	// without ever being refreshed: refresh is intentionally frozen
+	// pending operator action (clear-failure / re-enable).
+	RefreshSuspended       bool   `json:"refresh_suspended,omitempty"`
+	RefreshSuspendedReason string `json:"refresh_suspended_reason,omitempty"`
 	// Most recent client-initiated cancellation. Informational only —
 	// doesn't affect Healthy or trigger any cooldown. Used by the panel to
 	// show a low-tone "client canceled" hint distinct from upstream
@@ -317,6 +326,11 @@ type authRow struct {
 	// Empty for non-OAuth / non-Codex credentials or until first call.
 	CodexRateLimits   map[string]string `json:"codex_rate_limits,omitempty"`
 	CodexRateLimitsAt *time.Time        `json:"codex_rate_limits_at,omitempty"`
+	// CodexUsage is the latest wham/usage snapshot (active probe of the
+	// chatgpt.com web portal). Stays nil for non-Codex creds and for Codex
+	// creds that have never been probed.
+	CodexUsage   *auth.CodexUsageInfo `json:"codex_usage,omitempty"`
+	CodexUsageAt *time.Time           `json:"codex_usage_at,omitempty"`
 }
 
 type usageSummary struct {
@@ -407,6 +421,26 @@ func (h *Handler) buildAuthRows() []authRow {
 		if live != nil {
 			_, planType = live.CodexIdentity()
 		}
+		// refresh_suspended mirrors the gate in cc-core/auth Pool.RefreshExpiring:
+		// background refresh skips disabled and hard-failed credentials. We
+		// surface the gate here so the admin UI can explain why an OAuth
+		// shows "expired Xd ago" yet never gets refreshed — operator action
+		// (re-enable or clear-failure) is required first.
+		var refreshSuspended bool
+		var refreshSuspendedReason string
+		if st.Auth.Kind == auth.KindOAuth {
+			if st.Auth.Disabled {
+				refreshSuspended = true
+				refreshSuspendedReason = "credential disabled"
+			} else if hardFail {
+				refreshSuspended = true
+				if failReason != "" {
+					refreshSuspendedReason = "hard failure: " + failReason
+				} else {
+					refreshSuspendedReason = "hard failure"
+				}
+			}
+		}
 		rows = append(rows, authRow{
 			ID:            st.Auth.ID,
 			Kind:          kind,
@@ -425,9 +459,11 @@ func (h *Handler) buildAuthRows() []authRow {
 			QuotaResetAt:  quotaReset,
 			ExpiresAt:     expAt,
 			FileBacked:    strings.TrimSpace(st.Auth.FilePath) != "",
-			Healthy:            healthy,
-			HardFailure:        hardFail,
-			FailureReason:      failReason,
+			Healthy:                healthy,
+			HardFailure:            hardFail,
+			FailureReason:          failReason,
+			RefreshSuspended:       refreshSuspended,
+			RefreshSuspendedReason: refreshSuspendedReason,
 			LastClientCancel:   cancelAt,
 			ClientCancelReason: cancelReason,
 			ModelMap:           st.Auth.ModelMap,
@@ -448,6 +484,23 @@ func (h *Handler) buildAuthRows() []authRow {
 					return nil
 				}
 				t := snap.CodexRateLimitsAt
+				return &t
+			}(),
+			CodexUsage: func() *auth.CodexUsageInfo {
+				if live == nil {
+					return nil
+				}
+				return live.Snapshot().CodexUsage
+			}(),
+			CodexUsageAt: func() *time.Time {
+				if live == nil {
+					return nil
+				}
+				snap := live.Snapshot()
+				if snap.CodexUsageAt.IsZero() {
+					return nil
+				}
+				t := snap.CodexUsageAt
 				return &t
 			}(),
 		})
@@ -1072,6 +1125,32 @@ func (h *Handler) handleAnthropicUsage(c *gin.Context) {
 	})
 }
 
+// handleCodexUsage actively probes chatgpt.com/backend-api/wham/usage for an
+// OpenAI OAuth credential. The same data is mirrored into a.CodexRateLimits
+// so the legacy "Rolling 5h / weekly" panel stays in sync; the full payload
+// (plan_type / credits / spend_control) is returned to the caller for the
+// admin dialog. See cc-core/auth/codex_usage.go for the response shape.
+func (h *Handler) handleCodexUsage(c *gin.Context) {
+	id := c.Param("id")
+	a := h.pool.FindByID(id)
+	if a == nil || a.Kind != auth.KindOAuth {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "oauth credential not found"})
+		return
+	}
+	if auth.NormalizeProvider(a.Provider) != auth.ProviderOpenAI {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "codex-usage endpoint is OpenAI-only"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	info, err := a.FetchCodexUsage(ctx, h.pool.UseUTLS())
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"usage": info})
+}
+
 // ---- request log query ----
 
 func (h *Handler) handleRequestsHourly(c *gin.Context) {
@@ -1558,6 +1637,7 @@ func (h *Handler) RegisterSaaSBridge(g *gin.RouterGroup) {
 	g.GET("/requests/clients", h.handleRequestsClients)
 	g.GET("/requests/hourly", h.handleRequestsHourly)
 	g.POST("/credentials/:id/anthropic-usage", h.handleAnthropicUsage)
+	g.POST("/credentials/:id/codex-usage", h.handleCodexUsage)
 	// Rich credential read + mutations. Mirrors the legacy /summary fields so
 	// the SaaS panel can render the same usage / quota / model_map / sparkline
 	// data that the operator panel does. The saas/admin CredHandler still owns

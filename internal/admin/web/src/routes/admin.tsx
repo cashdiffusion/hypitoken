@@ -303,7 +303,7 @@ function CredentialsTab() {
   const [creds, setCreds] = useState<any[]>([]);
   const [openKey, setOpenKey] = useState(false);
   const [openOAuth, setOpenOAuth] = useState<null | "anthropic" | "openai">(null);
-  const [usageFor, setUsageFor] = useState<{ id: string; label: string } | null>(null);
+  const [usageFor, setUsageFor] = useState<{ id: string; label: string; provider: string } | null>(null);
   const [providerTab, setProviderTab] = useState<"anthropic" | "openai">("anthropic");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<any | null>(null);
@@ -424,7 +424,42 @@ function CredentialsTab() {
                         <TableCell>
                           <div className="font-medium">{c.label}</div>
                           <code className="text-xs text-muted-foreground">{c.id}</code>
-                          {c.email && <div className="text-xs text-muted-foreground truncate max-w-[220px]">{c.email}</div>}
+                          {c.email && <div className="text-xs text-muted-foreground truncate max-w-[260px]">{c.email}</div>}
+                          {/* Always-visible failure reason. Mirrors the AlertStrip
+                              inside the expanded detail panel, so operators don't have to
+                              click to see *why* a credential is in trouble. */}
+                          {c.failure_reason && !c.quota_exceeded && (
+                            <div
+                              className={cn(
+                                "mt-1 flex items-start gap-1 text-[11px] font-mono leading-tight max-w-[280px]",
+                                c.hard_failure ? "text-destructive" : "text-warning"
+                              )}
+                              title={c.failure_reason}
+                            >
+                              {c.hard_failure
+                                ? <ShieldOff className="size-3 shrink-0 mt-0.5" />
+                                : <AlertTriangle className="size-3 shrink-0 mt-0.5" />}
+                              <span className="truncate">{c.failure_reason}</span>
+                            </div>
+                          )}
+                          {c.quota_exceeded && (
+                            <div className="mt-1 flex items-start gap-1 text-[11px] font-mono leading-tight text-warning max-w-[280px]"
+                              title={c.quota_reset_at ? `Resets ${new Date(c.quota_reset_at).toLocaleString()}` : "no reset time"}>
+                              <AlertTriangle className="size-3 shrink-0 mt-0.5" />
+                              <span className="truncate">
+                                配额耗尽{c.quota_reset_at ? ` · 重置 ${new Date(c.quota_reset_at).toLocaleString()}` : " · 无重置时间"}
+                              </span>
+                            </div>
+                          )}
+                          {c.last_client_cancel && Date.now() - new Date(c.last_client_cancel).getTime() < 3600 * 1000 && (
+                            <div className="mt-1 flex items-start gap-1 text-[11px] font-mono leading-tight text-muted-foreground max-w-[280px]"
+                              title={`${new Date(c.last_client_cancel).toLocaleString()}${c.client_cancel_reason ? ` · ${c.client_cancel_reason}` : ""}`}>
+                              <Ban className="size-3 shrink-0 mt-0.5" />
+                              <span className="truncate">
+                                客户端取消{c.client_cancel_reason ? ` · ${c.client_cancel_reason}` : ""}
+                              </span>
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col gap-0.5">
@@ -462,7 +497,7 @@ function CredentialsTab() {
                             </>
                           ) : <span className="text-muted-foreground">—</span>}
                         </TableCell>
-                        <TableCell className="font-mono text-xs"><Expiry at={c.expires_at} /></TableCell>
+                        <TableCell className="font-mono text-xs"><Expiry cred={c} /></TableCell>
                         <TableCell><HealthPill cred={c} /></TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -474,8 +509,13 @@ function CredentialsTab() {
                                 <RefreshCw className={cn("size-3.5", busy && "animate-spin")} />
                               </Button>
                             )}
-                            {c.kind === "oauth" && c.provider === "anthropic" && (
-                              <Button size="sm" variant="ghost" title="后端配额" onClick={() => setUsageFor({ id: c.id, label: c.label })}>
+                            {c.kind === "oauth" && (c.provider === "anthropic" || c.provider === "openai") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                title={c.provider === "openai" ? "chatgpt.com wham/usage 主动探针" : "后端配额"}
+                                onClick={() => setUsageFor({ id: c.id, label: c.label, provider: c.provider })}
+                              >
                                 <Gauge className="size-3.5" />
                               </Button>
                             )}
@@ -521,6 +561,7 @@ function CredentialsTab() {
       <UpstreamUsageDialog
         authId={usageFor?.id ?? null}
         authLabel={usageFor?.label || ""}
+        provider={usageFor?.provider === "openai" ? "openai" : "anthropic"}
         onClose={() => setUsageFor(null)}
       />
       <EditCredentialDialog cred={editing} onClose={() => setEditing(null)} onSaved={reload} />
@@ -539,7 +580,7 @@ function CredentialDetail({ c }: { c: any }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 px-2">
       {/* Alerts */}
-      {(c.quota_exceeded || failureBanner || c.last_client_cancel) && (
+      {(c.quota_exceeded || failureBanner || c.last_client_cancel || c.refresh_suspended) && (
         <div className="lg:col-span-3 flex flex-col gap-2">
           {c.quota_exceeded && (
             <AlertStrip tone="warning" icon={<AlertTriangle className="size-3.5" />} label="配额已耗尽">
@@ -553,6 +594,19 @@ function CredentialDetail({ c }: { c: any }) {
               label={c.hard_failure ? "硬失败" : "近期失败"}
             >
               {c.failure_reason}
+            </AlertStrip>
+          )}
+          {c.refresh_suspended && (
+            <AlertStrip
+              tone="error"
+              icon={<ShieldOff className="size-3.5" />}
+              label="刷新已冻结"
+            >
+              {c.refresh_suspended_reason || (c.disabled ? "credential disabled" : "hard failure")}
+              {" · "}
+              <span className="opacity-70">
+                {c.disabled ? "启用后会自动恢复" : "执行「标记为健康」后会自动恢复"}
+              </span>
             </AlertStrip>
           )}
           {c.last_client_cancel && Date.now() - new Date(c.last_client_cancel).getTime() < 3600 * 1000 && (
@@ -1120,31 +1174,94 @@ function AddOAuthDialog({
 }
 
 function HealthPill({ cred }: { cred: any }) {
-  if (cred.disabled) return <span className="rounded border border-muted-foreground/30 bg-muted/40 px-2 py-0.5 text-xs font-mono uppercase text-muted-foreground">disabled</span>;
-  if (cred.hard_failure) return <span className="rounded border border-destructive/30 bg-destructive/15 px-2 py-0.5 text-xs font-mono uppercase text-destructive" title={cred.failure_reason}>hard fail</span>;
-  if (cred.quota_exceeded) return <span className="rounded border border-warning/30 bg-warning/15 px-2 py-0.5 text-xs font-mono uppercase text-warning" title={cred.quota_reset_at ? `Resets ${new Date(cred.quota_reset_at).toLocaleString()}` : ""}>quota</span>;
-  if (cred.healthy) return <span className="rounded border border-success/30 bg-success/15 px-2 py-0.5 text-xs font-mono uppercase text-success" title={cred.failure_reason || ""}>ok</span>;
-  return <span className="rounded border border-warning/30 bg-warning/15 px-2 py-0.5 text-xs font-mono uppercase text-warning" title={cred.failure_reason || ""}>cooldown</span>;
+  // Tooltip composer — always prefer a multi-line tooltip carrying every
+  // diagnostic we have, so hovering tells the whole story.
+  const tip = (lines: (string | false | undefined)[]) => lines.filter(Boolean).join("\n");
+  const frozen: string | undefined = cred?.refresh_suspended
+    ? `刷新已冻结：${cred.refresh_suspended_reason || "需手动恢复"}`
+    : undefined;
+
+  if (cred.disabled) {
+    return (
+      <span
+        className="rounded border border-muted-foreground/30 bg-muted/40 px-2 py-0.5 text-xs font-mono uppercase text-muted-foreground"
+        title={tip(["已禁用 — 不接受新流量", frozen])}
+      >disabled</span>
+    );
+  }
+  if (cred.hard_failure) {
+    return (
+      <span
+        className="rounded border border-destructive/30 bg-destructive/15 px-2 py-0.5 text-xs font-mono uppercase text-destructive"
+        title={tip(["硬失败 — 需点击「标记为健康」才会重新参与调度", cred.failure_reason && `原因: ${cred.failure_reason}`, frozen])}
+      >hard fail</span>
+    );
+  }
+  if (cred.quota_exceeded) {
+    return (
+      <span
+        className="rounded border border-warning/30 bg-warning/15 px-2 py-0.5 text-xs font-mono uppercase text-warning"
+        title={tip(["配额已耗尽", cred.quota_reset_at && `重置于 ${new Date(cred.quota_reset_at).toLocaleString()}`])}
+      >quota</span>
+    );
+  }
+  if (cred.healthy) {
+    return (
+      <span
+        className="rounded border border-success/30 bg-success/15 px-2 py-0.5 text-xs font-mono uppercase text-success"
+        title={tip(["健康", cred.failure_reason && `最近一次错误: ${cred.failure_reason}`])}
+      >ok</span>
+    );
+  }
+  return (
+    <span
+      className="rounded border border-warning/30 bg-warning/15 px-2 py-0.5 text-xs font-mono uppercase text-warning"
+      title={tip(["短时冷却中 — 累计失败但未到硬失败阈值", cred.failure_reason && `原因: ${cred.failure_reason}`])}
+    >cooldown</span>
+  );
 }
 
-function Expiry({ at }: { at?: string }) {
+function Expiry({ cred }: { cred: any }) {
+  const at: string | undefined = cred?.expires_at;
   if (!at || at.startsWith("0001-")) return <span className="text-muted-foreground">—</span>;
   const d = new Date(at);
   const now = Date.now();
   const dt = d.getTime() - now;
   const days = Math.round(dt / 86400000);
+  const absolute = d.toLocaleString();
+  const rel = dt < 0
+    ? `${-days}d ago`
+    : days < 1
+    ? `${Math.round(dt / 3600000)}h`
+    : `${days}d`;
+
+  // Background refresher in cc-core/auth.Pool.RefreshExpiring skips disabled
+  // and hard-failed creds. When that's the case, the "expired Xd ago" text
+  // is misleading — refresh isn't being attempted. Show "frozen" instead and
+  // route the actual reason into the tooltip.
+  if (cred?.refresh_suspended) {
+    const suspendReason: string = cred.refresh_suspended_reason || (cred.disabled ? "credential disabled" : "hard failure");
+    const tip = `Token exp: ${absolute}\n刷新已冻结 · ${suspendReason}`;
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-muted-foreground"
+        title={tip}
+      >
+        <ShieldOff className="size-3 text-destructive/70" />
+        <span className="font-mono text-xs">冻结</span>
+        <span className="text-[10px] opacity-60">({dt < 0 ? `${rel} 已过` : `还剩 ${rel}`})</span>
+      </span>
+    );
+  }
+
   const cls =
     dt < 0
       ? "text-destructive"
       : days < 7
       ? "text-warning"
       : "text-muted-foreground";
-  const rel = dt < 0
-    ? `expired ${-days}d ago`
-    : days < 1
-    ? `${Math.round(dt / 3600000)}h`
-    : `${days}d`;
-  return <span className={cls} title={d.toLocaleString()}>{rel}</span>;
+  const text = dt < 0 ? `expired ${rel}` : rel;
+  return <span className={cls} title={absolute}>{text}</span>;
 }
 
 function AddAPIKeyDialog({ open, onOpenChange, onCreated }: any) {
