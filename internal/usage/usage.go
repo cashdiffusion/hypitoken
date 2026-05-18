@@ -168,6 +168,14 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}
+	// Probe-write to detect path/permission misconfig early instead of letting
+	// periodic flushes fail silently for the lifetime of the process. Mimics
+	// the writeAtomic pattern (tmp file in the same dir, then unlink).
+	probe := path + ".probe"
+	if err := os.WriteFile(probe, []byte("ok"), 0600); err != nil {
+		return nil, fmt.Errorf("state_file %s is not writable: %w", path, err)
+	}
+	_ = os.Remove(probe)
 	s := &Store{
 		state:    &State{Auths: make(map[string]*PerAuth)},
 		path:     path,
@@ -234,9 +242,18 @@ func (s *Store) Flush() error {
 	s.dirty = false
 	s.mu.Unlock()
 	if err != nil {
+		s.mu.Lock()
+		s.dirty = true
+		s.mu.Unlock()
 		return err
 	}
-	return writeAtomic(s.path, data)
+	if werr := writeAtomic(s.path, data); werr != nil {
+		s.mu.Lock()
+		s.dirty = true
+		s.mu.Unlock()
+		return werr
+	}
+	return nil
 }
 
 // writeAtomic writes data via a tmp file + rename, then fsyncs the renamed
