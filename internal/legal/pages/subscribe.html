@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Confirm Subscription — HypiToken</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@10..48,400;10..48,500;10..48,600;10..48,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      :root { --primary: #1f5d6c; --primary-dark: #154553; --bg: #fafbfa; --ink: #0f1a16; }
+      html, body { font-family: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+      .font-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+      .btn-primary { background: var(--primary); color: white; }
+      .btn-primary:hover { background: var(--primary-dark); }
+      .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+  </head>
+  <body class="min-h-screen flex flex-col">
+    <header class="border-b border-gray-200 bg-white/80 backdrop-blur sticky top-0 z-10">
+      <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+        <a href="/legal/pricing" class="flex items-center gap-2">
+          <svg width="28" height="28" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#5DDC9A"/><g fill="none" stroke="#0d281f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><circle cx="22" cy="42" r="9"/><path d="M28 36 L52 12"/><path d="M44 20 L50 26"/><path d="M38 26 L43 31"/></g></svg>
+          <span class="text-lg font-semibold tracking-tight">HypiToken</span>
+        </a>
+        <nav class="text-sm text-gray-600">
+          <span class="text-gray-900 font-medium">Step 2 of 2 · Confirm subscription</span>
+        </nav>
+      </div>
+    </header>
+
+    <main class="flex-1 max-w-4xl mx-auto px-6 py-12 w-full">
+      <h1 class="text-3xl font-semibold tracking-tight mb-2">Confirm your subscription</h1>
+      <p class="text-gray-600 mb-8">Review your plan and authorize recurring billing to activate your HypiToken account.</p>
+
+      <div class="grid md:grid-cols-3 gap-8">
+        <!-- Order summary -->
+        <aside class="md:col-span-1 bg-white border border-gray-200 rounded-xl p-6 h-fit">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Order summary</h2>
+          <div class="flex justify-between mb-3">
+            <span class="font-medium">HypiToken Pro</span>
+            <span class="font-mono">$30.00</span>
+          </div>
+          <div class="text-sm text-gray-500 mb-3">Billed monthly · auto-renews on the same day each month</div>
+          <div class="border-t border-gray-200 my-4"></div>
+          <div class="flex justify-between text-sm mb-1">
+            <span class="text-gray-600">Subtotal</span>
+            <span class="font-mono">$30.00</span>
+          </div>
+          <div class="flex justify-between text-sm mb-1">
+            <span class="text-gray-600">VAT / GST</span>
+            <span class="font-mono text-gray-500">Calculated at checkout</span>
+          </div>
+          <div class="border-t border-gray-200 my-4"></div>
+          <div class="flex justify-between font-semibold">
+            <span>Today's charge</span>
+            <span class="font-mono">$30.00 USD</span>
+          </div>
+          <div class="text-xs text-gray-500 mt-3">Charged immediately upon confirmation. Renews automatically on the 18th of each following month.</div>
+        </aside>
+
+        <!-- Authorization + agreement -->
+        <section class="md:col-span-2 space-y-6">
+          <div class="bg-white border border-gray-200 rounded-xl p-6">
+            <h2 class="text-base font-semibold mb-2">Payment method</h2>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="border-2 border-[color:var(--primary)] rounded-lg p-3 text-sm flex items-center gap-3">
+                <input type="radio" name="pm" checked class="accent-[color:var(--primary)]" />
+                <div>
+                  <div class="font-medium">Alipay</div>
+                  <div class="text-xs text-gray-500">Auto-debit · supported via Stripe</div>
+                </div>
+              </div>
+              <div class="border border-gray-200 rounded-lg p-3 text-sm flex items-center gap-3">
+                <input type="radio" name="pm" class="accent-[color:var(--primary)]" />
+                <div>
+                  <div class="font-medium">Credit / Debit card</div>
+                  <div class="text-xs text-gray-500">Visa, Mastercard, AmEx</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white border border-gray-200 rounded-xl p-6">
+            <h2 class="text-base font-semibold mb-3">Auto-debit authorization</h2>
+            <div class="bg-amber-50 border border-amber-200 rounded-md p-4 text-sm text-amber-900 mb-4">
+              <strong>Important:</strong> By subscribing, you authorize HYPIT LIMITED to automatically charge your selected payment method <strong>$30.00 USD per month</strong> until you cancel. There is no free trial; the first charge occurs immediately when you confirm below.
+            </div>
+
+            <div class="border border-gray-200 rounded-md p-4 mb-4 max-h-56 overflow-y-auto text-sm text-gray-700 space-y-2 bg-gray-50">
+              <p class="font-semibold text-gray-900">Subscription &amp; Auto-debit Agreement</p>
+              <p><strong>1. The Service.</strong> HypiToken is operated by HYPIT LIMITED (Hong Kong, registration 80230447). The Service provides recurring access to AI model connectivity, API usage quota, workflow automation, and team collaboration features as described on the Pricing page.</p>
+              <p><strong>2. Billing cadence.</strong> Your selected plan is a pre-paid recurring subscription. The first charge is made immediately upon confirmation; subsequent charges occur on the same calendar day each month (or each year for annual plans) until you cancel.</p>
+              <p><strong>3. Authorization.</strong> By ticking the box below you authorize HYPIT LIMITED, via our payment processor (Stripe Payments / Alipay International), to debit your selected payment instrument for the recurring amount shown above, including any applicable taxes.</p>
+              <p><strong>4. Cancellation.</strong> You may cancel at any time from your account dashboard. Cancellation stops the next renewal; access continues through the end of the already-paid period. No partial refunds for unused time, except where required by applicable law or under our Refund Policy.</p>
+              <p><strong>5. Refunds &amp; disputes.</strong> Refund eligibility, unauthorized-transaction handling, and account-takeover compensation are governed by our <a href="/legal/refund-policy" class="text-[color:var(--primary)] underline">Refund Policy</a>.</p>
+              <p><strong>6. Inactivity.</strong> If your account has no usage activity for 12 consecutive months, we will automatically suspend the auto-debit authorization and notify you by email. You may re-enable it at any time.</p>
+              <p><strong>7. Changes to the plan.</strong> Any change to the price or features of a plan will be communicated by email at least 30 days in advance, and you may cancel before the change takes effect.</p>
+              <p><strong>8. Governing law.</strong> This agreement is governed by the laws of Hong Kong SAR.</p>
+            </div>
+
+            <label class="flex items-start gap-3 mb-4 cursor-pointer">
+              <input type="checkbox" id="consent" class="mt-1 accent-[color:var(--primary)] w-4 h-4" />
+              <span class="text-sm text-gray-800"><strong>I authorize HYPIT LIMITED to automatically charge my selected payment method $30.00 USD every month</strong> for the HypiToken Pro plan, until I cancel from my account dashboard. I have read and agree to the Subscription &amp; Auto-debit Agreement above and the <a href="/legal/refund-policy" class="text-[color:var(--primary)] underline">Refund Policy</a>.</span>
+            </label>
+
+            <button id="confirm" class="btn-primary w-full py-3 rounded-md font-medium" disabled>Confirm and pay $30.00</button>
+            <div class="text-center mt-3 text-xs text-gray-500">Payment securely processed by Stripe Payments. You will see <span class="font-mono">HYPITOKEN</span> on your statement.</div>
+          </div>
+
+          <div class="text-xs text-gray-500">
+            Need help before subscribing? Contact <a class="underline" href="/legal/support">customer support</a> or email <a class="underline" href="mailto:support@novadiffusion.com">support@novadiffusion.com</a>.
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="border-t border-gray-200 bg-white py-8 mt-12">
+      <div class="max-w-6xl mx-auto px-6 text-sm text-gray-500 flex flex-col md:flex-row justify-between gap-2">
+        <div>© 2026 HYPIT LIMITED. All rights reserved.</div>
+        <div>Room 704, 7/F, A Block, New Mandarin Plaza, 14 Science Museum Road, Tsim Sha Tsui East, Hong Kong</div>
+      </div>
+    </footer>
+    <script>
+      const consent = document.getElementById('consent');
+      const btn = document.getElementById('confirm');
+      consent.addEventListener('change', () => { btn.disabled = !consent.checked; });
+      btn.addEventListener('click', e => { e.preventDefault(); alert('This is a preview page. Subscriptions go live after payment provider approval.'); });
+    </script>
+  </body>
+</html>
