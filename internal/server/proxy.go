@@ -70,6 +70,12 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		return
 	}
 
+	// Per-window slot identity. Each Claude Code CLI window sends a distinct
+	// X-Claude-Code-Session-Id, so the same user opening multiple windows is
+	// scheduled as multiple independent slots (and can land on different
+	// upstream credentials). Empty for raw API callers → one slot per token.
+	slotID := clientSlotID(c)
+
 	// Parse minimal request metadata for usage reporting + streaming detection.
 	var peek struct {
 		Model  string `json:"model"`
@@ -215,7 +221,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		for id := range tried {
 			excludeIDs = append(excludeIDs, id)
 		}
-		a := s.pool.Acquire(c.Request.Context(), provider, clientToken, clientGroup, model, excludeIDs...)
+		a := s.pool.Acquire(c.Request.Context(), provider, clientToken, clientGroup, model, slotID, excludeIDs...)
 		if a == nil {
 			msg := "no upstream credentials available"
 			if len(tried) > 0 {
@@ -237,14 +243,14 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		case auth.ProviderOpenAI:
 			retry, done = s.doForwardCodex(c, a, path, body, peek.Stream, model, clientToken, clientName, start, attempts)
 		default:
-			retry, done = s.doForward(c, a, path, body, peek.Stream, model, clientToken, clientName, start, attempts)
+			retry, done = s.doForward(c, a, path, body, peek.Stream, model, clientToken, slotID, clientName, start, attempts)
 		}
 		if done {
-			s.pool.Release(provider, clientToken)
+			s.pool.Release(provider, clientToken, slotID)
 			return
 		}
 		if !retry {
-			s.pool.Release(provider, clientToken)
+			s.pool.Release(provider, clientToken, slotID)
 			return
 		}
 		log.Warnf("proxy: retrying with a different credential (last auth=%s)", a.ID)
@@ -264,6 +270,23 @@ func (s *Server) emitLog(r requestlog.Record) {
 	s.reqLog.Log(r)
 }
 
+// clientSlotID derives a per-window slot identifier from the incoming request.
+// Claude Code sends a stable per-window X-Claude-Code-Session-Id header (also
+// mirrored in metadata.user_id.session_id); the Codex CLI sends a session_id
+// header. Treating each distinct value as its own pool slot lets one user's
+// multiple CLI windows occupy independent slots and be load-balanced across
+// different credentials. Returns "" when the client supplies neither (raw API
+// callers) — the pool then keeps one slot per client token.
+func clientSlotID(c *gin.Context) string {
+	if v := strings.TrimSpace(c.GetHeader("X-Claude-Code-Session-Id")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(c.GetHeader("Session_id")); v != "" {
+		return v
+	}
+	return ""
+}
+
 func maskClientToken(t string) string {
 	if len(t) <= 10 {
 		return "***"
@@ -276,7 +299,7 @@ func maskClientToken(t string) string {
 //	retry=true  → caller should try another credential
 //	done=true   → response was delivered successfully (status < 400 or
 //	              non-retryable error already written to client)
-func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, clientName string, start time.Time, attempts int) (retry bool, done bool) {
+func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, slotID, clientName string, start time.Time, attempts int) (retry bool, done bool) {
 	// Mid-conversation account switch: drop prior `thinking` block
 	// signatures before forwarding. Both OAuth and API-key paths bind
 	// thinking signatures to the issuing account, so this runs ahead
@@ -552,7 +575,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		})
 		// Break sticky session so the next request from this client can
 		// be assigned to a different (hopefully healthy) credential.
-		s.pool.Unstick(auth.NormalizeProvider(a.Provider), clientToken)
+		s.pool.Unstick(auth.NormalizeProvider(a.Provider), clientToken, slotID)
 
 		writeResponseHeaders(c, resp)
 		c.Writer.Write(errBody)
