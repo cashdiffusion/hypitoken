@@ -8,15 +8,15 @@ import (
 	"strings"
 )
 
-// Header values pinned to Claude Code 2.1.141 / @anthropic-ai/sdk 0.94.0.
-// Values verified against a live CC 2.1.141 OAuth session capture
-// (whistle dump 2026-05-14, rows 003/006/008/010/014/015/016/018).
+// Header values pinned to Claude Code 2.1.146 / @anthropic-ai/sdk 0.94.0.
+// Values verified against a live CC 2.1.146 OAuth session capture
+// (whistle dump 2026-05-21, rows 018/028/037/044).
 // CLICurrentVersion below MUST match the version baked into claudeCLIUserAgent;
 // any drift will cause the cc_version=X.Y.Z.{fp} billing block to disagree
 // with the User-Agent and trigger Anthropic's third-party detection.
 const (
-	CLICurrentVersion       = "2.1.141"
-	claudeCLIUserAgent      = "claude-cli/2.1.141 (external, cli)"
+	CLICurrentVersion       = "2.1.146"
+	claudeCLIUserAgent      = "claude-cli/2.1.146 (external, cli)"
 	claudeStainlessLang     = "js"
 	claudeStainlessRuntime  = "node"
 	claudeStainlessRuntimeV = "v24.3.0"
@@ -26,16 +26,16 @@ const (
 	claudeStainlessTimeout  = "600"
 	claudeStainlessRetryCnt = "0"
 	claudeAnthropicVersion  = "2023-06-01"
-	// Beta list captured from real CC 2.1.141 — exact value, exact order.
+	// Beta list captured from real CC 2.1.146 — exact value, exact order.
 	// Any beta we drop that real CLI sends will downgrade us to "extra usage"
 	// billing; any extra beta we add that real CLI does not send is also a
 	// fingerprint signal Anthropic edges look for.
 	//
 	// OAuth path (subscription accounts hitting api.anthropic.com):
-	// captured live from CC 2.1.141 on 2026-05-14.
-	// 2.1.126→2.1.141 diff: dropped context-1m-2025-08-07; added
-	// extended-cache-ttl-2025-04-11 (immediately before cache-diagnosis).
-	claudeAnthropicBetaFull = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07"
+	// captured live from CC 2.1.146 on 2026-05-21.
+	// 2.1.141→2.1.146 diff: re-added context-1m-2025-08-07 (positioned
+	// immediately after oauth-2025-04-20).
+	claudeAnthropicBetaFull = "claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07"
 
 	// API-key path (real CC pointed at a 3rd-party gateway with x-api-key):
 	// captured from crack/apikey/rows/*-POST-…v1_messages.json. Strict
