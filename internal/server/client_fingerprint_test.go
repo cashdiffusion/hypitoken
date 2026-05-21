@@ -5,18 +5,30 @@ import (
 	"testing"
 )
 
-// realClaudeCodeHeaders is a snapshot of crack/oauth/rows/06-POST-…_v1_messages.json
-// — the exact headers a real CC 2.1.126 client sends on /v1/messages. The
-// fingerprint gate must accept this verbatim.
+// realClaudeCodeHeaders is a snapshot of a real CC 2.1.146 OAuth client
+// /v1/messages request (whistle dump 2026-05-21, row 018). The fingerprint
+// gate must accept this verbatim.
 func realClaudeCodeHeaders() http.Header {
 	h := http.Header{}
-	h.Set("User-Agent", "claude-cli/2.1.126 (external, cli)")
+	h.Set("User-Agent", "claude-cli/2.1.146 (external, cli)")
 	h.Set("X-App", "cli")
 	h.Set("X-Stainless-Lang", "js")
 	h.Set("X-Stainless-Runtime", "node")
-	h.Set("X-Stainless-Package-Version", "0.81.0")
-	h.Set("X-Claude-Code-Session-Id", "d85790bb-6261-43c0-982d-550eb177c8d5")
+	h.Set("X-Stainless-Package-Version", "0.94.0")
+	h.Set("X-Claude-Code-Session-Id", "f332de63-dc4b-4667-b73e-ef0447c4e223")
 	h.Set("Anthropic-Beta", "oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05")
+	return h
+}
+
+// realClaudeCodeIDEHeaders is what an IDE/Web Claude Code surface sends:
+// `claude-code/<v>` UA with no Anthropic-SDK stainless fingerprint, since
+// those surfaces use fetch/axios directly. Only UA and Anthropic-Beta are
+// guaranteed. Modelled after the `claude-code/2.1.146` UA observed in the
+// same 2026-05-21 capture (e.g. /api/event_logging from the official CLI).
+func realClaudeCodeIDEHeaders() http.Header {
+	h := http.Header{}
+	h.Set("User-Agent", "claude-code/2.1.146")
+	h.Set("Anthropic-Beta", "oauth-2025-04-20")
 	return h
 }
 
@@ -33,6 +45,24 @@ func TestFingerprint_AcceptsAPIKeyMode(t *testing.T) {
 	h.Set("Anthropic-Beta", "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05")
 	if _, ok := matchClaudeCodeClient(h); !ok {
 		t.Fatal("api-key-mode CC headers should pass")
+	}
+}
+
+// IDE/Web surfaces of the official Claude Code product family ship `claude-code/<v>`
+// without the SDK stainless headers — they must still pass.
+func TestFingerprint_AcceptsIDEUA(t *testing.T) {
+	if _, ok := matchClaudeCodeClient(realClaudeCodeIDEHeaders()); !ok {
+		t.Fatal("claude-code/<v> IDE UA + Anthropic-Beta should pass")
+	}
+}
+
+// Non-CLI UA without Anthropic-Beta must still be rejected — the relaxation
+// for IDE/Web surfaces does not turn into a free-pass on UA spoof.
+func TestFingerprint_RejectsIDEUAWithoutBeta(t *testing.T) {
+	h := http.Header{}
+	h.Set("User-Agent", "claude-code/2.1.146")
+	if _, ok := matchClaudeCodeClient(h); ok {
+		t.Fatal("claude-code/<v> without Anthropic-Beta must reject")
 	}
 }
 
