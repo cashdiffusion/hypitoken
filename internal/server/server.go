@@ -72,6 +72,11 @@ type Server struct {
 	// prior account's signed `thinking` blocks before forwarding (they
 	// would 400 with "signature in thinking" on the new account).
 	switchTracker *thinkingsig.SwitchTracker
+
+	// kiro carries the Kiro-side state (credentials, PKCE sessions, dispatcher).
+	// nil when no token_groups declare upstream=kiro — that's the OSS path.
+	// Initialized via Server.InitKiro after construction.
+	kiro *KiroState
 }
 
 // LegacyAdmin returns the legacy admin handler so main.go can wire its

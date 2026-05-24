@@ -69,6 +69,13 @@ type Handler struct {
 	// so minor staleness is acceptable.
 	reqCacheMu sync.Mutex
 	reqCache   map[string]reqCacheEntry
+
+	// kiro is the Kiro side-channel access plug. nil = Kiro disabled.
+	kiro KiroAccess
+	// apiGroup remembers the /api router group from Register so
+	// SetKiroAccess can lazily attach kiro routes when main.go finishes
+	// wiring after Server.New + Register completes.
+	apiGroup *gin.RouterGroup
 }
 
 type reqCacheEntry struct {
@@ -139,6 +146,7 @@ func (h *Handler) Register(r *gin.Engine) {
 	// sibling at the same prefix.
 	api := r.Group(base + "/api")
 	api.Use(h.adminAuth())
+	h.apiGroup = api
 	{
 		api.GET("/summary", h.handleSummary)
 		api.POST("/auths/upload", h.handleUpload)
@@ -162,6 +170,9 @@ func (h *Handler) Register(r *gin.Engine) {
 		api.DELETE("/tokens/:token", h.handleDeleteToken)
 		api.POST("/tokens/:token/reset", h.handleResetToken)
 		api.POST("/tokens/:token/inherit", h.handleInheritToken)
+		// Kiro side-channel endpoints (no-op when SetKiroAccess wasn't
+		// called yet — late wiring re-attaches them).
+		h.RegisterKiro(api)
 	}
 
 	// Static SPA. Vite emits a single entry HTML plus hashed chunks under
@@ -1427,6 +1438,7 @@ type tokenView struct {
 	MaxConcurrent int        `json:"max_concurrent,omitempty"`
 	RPM           int        `json:"rpm,omitempty"`
 	Group         string     `json:"group,omitempty"`
+	Groups        []string   `json:"groups,omitempty"` // priority-ordered fallthrough channel list
 	CreatedAt     *time.Time `json:"created_at,omitempty"`
 	// Live usage for the current ISO week, convenient for the panel row.
 	WeeklyUsedUSD float64 `json:"weekly_used_usd"`
@@ -1444,6 +1456,7 @@ func (h *Handler) handleListTokens(c *gin.Context) {
 			MaxConcurrent: t.MaxConcurrent,
 			RPM:           t.RPM,
 			Group:         t.Group,
+			Groups:        append([]string(nil), t.Groups...),
 			WeeklyUsedUSD: h.usage.WeeklyCostUSD(t.Token),
 		}
 		if !t.CreatedAt.IsZero() {
@@ -1459,13 +1472,14 @@ func (h *Handler) handleListTokens(c *gin.Context) {
 }
 
 type createTokenBody struct {
-	Token         string  `json:"token"`
-	Name          string  `json:"name"`
-	WeeklyUSD     float64 `json:"weekly_usd"`
-	MaxConcurrent int     `json:"max_concurrent,omitempty"`
-	RPM           int     `json:"rpm,omitempty"`
-	Group         string  `json:"group,omitempty"`
-	Generate      bool    `json:"generate"` // if true and Token == "", mint a fresh sk-...
+	Token         string   `json:"token"`
+	Name          string   `json:"name"`
+	WeeklyUSD     float64  `json:"weekly_usd"`
+	MaxConcurrent int      `json:"max_concurrent,omitempty"`
+	RPM           int      `json:"rpm,omitempty"`
+	Group         string   `json:"group,omitempty"`
+	Groups        []string `json:"groups,omitempty"` // priority-ordered fallthrough list
+	Generate      bool     `json:"generate"`         // if true and Token == "", mint a fresh sk-...
 }
 
 func (h *Handler) handleCreateToken(c *gin.Context) {
@@ -1494,6 +1508,7 @@ func (h *Handler) handleCreateToken(c *gin.Context) {
 		MaxConcurrent: body.MaxConcurrent,
 		RPM:           body.RPM,
 		Group:         body.Group,
+		Groups:        body.Groups,
 	}
 	if err := h.tokens.Add(entry); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1508,11 +1523,12 @@ func (h *Handler) handleCreateToken(c *gin.Context) {
 }
 
 type patchTokenBody struct {
-	Name          *string  `json:"name"`
-	WeeklyUSD     *float64 `json:"weekly_usd"`
-	MaxConcurrent *int     `json:"max_concurrent"`
-	RPM           *int     `json:"rpm"`
-	Group         *string  `json:"group"`
+	Name          *string   `json:"name"`
+	WeeklyUSD     *float64  `json:"weekly_usd"`
+	MaxConcurrent *int      `json:"max_concurrent"`
+	RPM           *int      `json:"rpm"`
+	Group         *string   `json:"group"`
+	Groups        *[]string `json:"groups"` // priority-ordered fallthrough list; nil = unchanged
 }
 
 func (h *Handler) handlePatchToken(c *gin.Context) {
@@ -1522,7 +1538,7 @@ func (h *Handler) handlePatchToken(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.tokens.Update(tok, body.Name, body.WeeklyUSD, body.MaxConcurrent, body.RPM, body.Group); err != nil {
+	if err := h.tokens.Update(tok, body.Name, body.WeeklyUSD, body.MaxConcurrent, body.RPM, body.Group, body.Groups); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -1648,6 +1664,18 @@ func (h *Handler) RegisterSaaSBridge(g *gin.RouterGroup) {
 	g.POST("/credentials/:id/refresh", h.handleRefresh)
 	g.POST("/credentials/:id/clear-quota", h.handleClearQuota)
 	g.POST("/credentials/:id/clear-failure", h.handleClearFailure)
+	// Kiro side-channel mirror: same /api/kiro/* surface exposed under
+	// /api/v2/admin/kiro/* so the SaaS panel can manage Kiro creds with the
+	// SaaS JWT (instead of a legacy admin token). No-op when Kiro disabled.
+	if h.kiro != nil {
+		kg := g.Group("/kiro")
+		kg.GET("/credentials", h.handleKiroList)
+		kg.PATCH("/credentials/:id", h.handleKiroPatch)
+		kg.DELETE("/credentials/:id", h.handleKiroDelete)
+		kg.GET("/credentials/:id/credits", h.handleKiroCredits)
+		kg.POST("/login/start", h.handleKiroLoginStart)
+		kg.POST("/login/finish", h.handleKiroLoginFinish)
+	}
 }
 
 // handleBridgeListCreds emits the rich credential rows for the SaaS panel

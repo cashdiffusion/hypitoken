@@ -90,6 +90,10 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	// pricing group. Legacy weekly-budget logic still applies to non-SaaS tokens.
 	saasInfo, saasOK := saasInfoFrom(c)
 	var clientGroup string
+	// clientGroups is the priority-ordered fallthrough list for multi-channel
+	// routing (anthropic vs kiro). Populated from token.EffectiveGroups() in
+	// the non-SaaS branch. Empty = single-channel anthropic, like before.
+	var clientGroups []string
 	if saasOK && s.saas != nil {
 		clientGroup = s.saas.CredentialGroup(saasInfo)
 		if pre := s.saas.PreCheck(c.Request.Context(), saasInfo); pre != nil {
@@ -107,6 +111,9 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		if tokOK {
 			weeklyLimit = entry.WeeklyUSD
 			clientGroup = entry.Group
+			// Capture the priority-ordered Groups for kiro routing below.
+			// Falls back to [Group] (or [""]) when only the legacy field is set.
+			clientGroups = entry.EffectiveGroups()
 		}
 		if tokOK && weeklyLimit > 0 {
 			spent := s.usage.WeeklyCostUSD(clientToken)
@@ -209,6 +216,14 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 			})
 			return
 		}
+	}
+
+	// Kiro side-channel: if the resolved token has a kiro-routed group in its
+	// priority list, AND that group has healthy Kiro credentials, dispatch via
+	// kirobridge and return. Falls through to the anthropic path below when no
+	// kiro group matches OR no kiro creds are healthy.
+	if path == "/v1/messages" && s.tryKiro(c, body, model, peek.Stream, clientToken, clientName, path, clientGroups, start) {
+		return
 	}
 
 	// Try upstream with retries across auths. On saturation / quota / auth

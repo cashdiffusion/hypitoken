@@ -304,7 +304,7 @@ function CredentialsTab() {
   const [openKey, setOpenKey] = useState(false);
   const [openOAuth, setOpenOAuth] = useState<null | "anthropic" | "openai">(null);
   const [usageFor, setUsageFor] = useState<{ id: string; label: string; provider: string } | null>(null);
-  const [providerTab, setProviderTab] = useState<"anthropic" | "openai">("anthropic");
+  const [providerTab, setProviderTab] = useState<"anthropic" | "openai" | "kiro">("anthropic");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<any | null>(null);
   const [busyId, setBusyId] = useState<string>("");
@@ -343,17 +343,23 @@ function CredentialsTab() {
   const claudeCreds = creds.filter((c) => c.provider === "anthropic");
   const codexCreds = creds.filter((c) => c.provider === "openai");
   const visible = providerTab === "anthropic" ? claudeCreds : codexCreds;
+  // Kiro creds live behind a separate endpoint (different storage, different
+  // auth flow), so we keep them out of the unified `creds` list and render
+  // them in their own panel below the provider tabs.
 
   return (
     <div className="space-y-4">
       {/* Provider tabs */}
       <div className="flex gap-1 border-b border-border">
-        {(["anthropic", "openai"] as const).map((p) => {
-          const count = p === "anthropic" ? claudeCreds.length : codexCreds.length;
+        {(["anthropic", "openai", "kiro"] as const).map((p) => {
+          const count =
+            p === "anthropic" ? claudeCreds.length :
+            p === "openai" ? codexCreds.length :
+            0; // kiro count rendered inside the panel itself
           return (
             <button
               key={p}
-              onClick={() => setProviderTab(p)}
+              onClick={() => setProviderTab(p as any)}
               className={cn(
                 "inline-flex items-center gap-2 border-b-2 px-4 py-2 text-sm transition-colors",
                 providerTab === p
@@ -361,13 +367,26 @@ function CredentialsTab() {
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
-              {p === "anthropic" ? t("admin.creds.claudeTab") : t("admin.creds.codexTab")}
-              <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-mono">{count}</span>
+              {p === "anthropic" ? t("admin.creds.claudeTab") :
+               p === "openai" ? t("admin.creds.codexTab") :
+               "Kiro"}
+              {p !== "kiro" && (
+                <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-mono">{count}</span>
+              )}
             </button>
           );
         })}
       </div>
 
+      {providerTab === "kiro" && <KiroCredentialsPanel />}
+      {providerTab !== "kiro" && (
+        <>
+      {/* anchor: only render the legacy Anthropic/Codex card when not on the
+          Kiro tab. The card body below stays unchanged. */}
+        </>
+      )}
+
+      {providerTab !== "kiro" && (
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
@@ -555,6 +574,7 @@ function CredentialsTab() {
           )}
         </CardContent>
       </Card>
+      )}
 
       <AddAPIKeyDialog open={openKey} onOpenChange={setOpenKey} onCreated={reload} />
       <AddOAuthDialog provider={openOAuth} onClose={() => setOpenOAuth(null)} onCreated={reload} />
@@ -1208,6 +1228,267 @@ function AddAPIKeyDialog({ open, onOpenChange, onCreated }: any) {
             } catch (e: any) { toast.error(e.message); }
           }}>{t("common.add")}</Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// KiroCredentialsPanel renders the Kiro side-channel credentials with
+// live `getUsageLimits` balance lookups. Add-credential flow runs as a
+// PKCE login: the admin starts /login/start, opens the returned signin
+// URL in a new tab, manually pastes the code+state back to /login/finish.
+// (Browser-side OAuth callback would need to live on :3128 which is the
+// hardcoded kiro redirect_uri; outside scope for now.)
+function KiroCredentialsPanel() {
+  type Entry = {
+    id: string;
+    label: string;
+    group?: string;
+    disabled: boolean;
+    created_at: string;
+    profile_arn?: string;
+    email?: string;
+    plan?: string;
+    masked_token?: string;
+    expires_at?: string;
+  };
+  type Balance = {
+    plan?: string;
+    used?: number;
+    limit?: number;
+    remaining?: number;
+    reset_at?: string;
+  };
+  const [creds, setCreds] = useState<Entry[]>([]);
+  const [balances, setBalances] = useState<Record<string, Balance>>({});
+  const [adding, setAdding] = useState(false);
+  const [busyID, setBusyID] = useState("");
+  const reload = async () => {
+    const r = await apiGet<{ credentials: Entry[] }>("/admin/kiro/credentials");
+    setCreds(r.credentials || []);
+  };
+  useEffect(() => { reload(); }, []);
+  const loadBalance = async (id: string) => {
+    try {
+      const r = await apiGet<Balance>(`/admin/kiro/credentials/${id}/credits`);
+      setBalances((b) => ({ ...b, [id]: r }));
+    } catch (e: any) {
+      toast.error(`balance: ${e?.message || String(e)}`);
+    }
+  };
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle>Kiro 凭证</CardTitle>
+              <CardDescription>
+                Amazon Q / Kiro 账户。请求经由 kirobridge 转换为 Smithy + event-stream
+                上送 q.us-east-1。仅在 token_groups 中的 kiro-anthropic 分组(默认 5% 折扣)
+                使用。
+              </CardDescription>
+            </div>
+            <Button onClick={() => setAdding(true)}>添加凭证 (PKCE)</Button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {creds.length === 0 ? (
+            <div className="p-12 text-center text-sm text-muted-foreground">
+              暂无 Kiro 凭证。点击「添加凭证」走 PKCE 登录,或使用 standalone CLI 工具
+              (`/tmp/kiro-roundtrip/kirortrip login` → 将生成的 credentials.json
+              拷贝到服务器的 kiro_auth_dir/&lt;id&gt;.json)。
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>标签</TableHead>
+                  <TableHead>ID</TableHead>
+                  <TableHead>计划</TableHead>
+                  <TableHead className="text-right">使用 / 配额</TableHead>
+                  <TableHead>过期</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {creds.map((c) => {
+                  const bal = balances[c.id];
+                  const busy = busyID === c.id;
+                  return (
+                    <TableRow key={c.id} className={c.disabled ? "opacity-50" : ""}>
+                      <TableCell>
+                        <div className="font-medium">{c.label || "(unnamed)"}</div>
+                        {c.email && <div className="text-xs text-muted-foreground">{c.email}</div>}
+                        {c.masked_token && (
+                          <code className="text-[11px] text-muted-foreground">{c.masked_token}</code>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <code className="text-xs">{c.id}</code>
+                      </TableCell>
+                      <TableCell>
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
+                          {bal?.plan ?? c.plan ?? "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {bal ? (
+                          <div>
+                            <div>{bal.used?.toFixed(2)} / {bal.limit?.toFixed(2)}</div>
+                            {typeof bal.remaining === "number" && (
+                              <div className="text-xs text-muted-foreground">
+                                剩余 {bal.remaining.toFixed(2)}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <Button size="sm" variant="ghost" onClick={() => loadBalance(c.id)}>查询</Button>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs text-muted-foreground">{c.expires_at || "—"}</span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="icon" variant="ghost" className="h-8 w-8"
+                          title={c.disabled ? "启用" : "禁用"}
+                          disabled={busy}
+                          onClick={async () => {
+                            setBusyID(c.id);
+                            try {
+                              await apiPatch(`/admin/kiro/credentials/${c.id}`, { disabled: !c.disabled });
+                              toast.success(c.disabled ? "已启用" : "已禁用");
+                              await reload();
+                            } catch (e: any) { toast.error(e?.message || String(e)); }
+                            finally { setBusyID(""); }
+                          }}
+                        >
+                          {c.disabled ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button
+                          size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                          disabled={busy}
+                          onClick={async () => {
+                            if (!confirm(`删除 ${c.label || c.id} ?该 Kiro 账户的 refresh chain 不会被撤销 - 如需主动 logout 请使用 kirortrip 工具。`)) return;
+                            setBusyID(c.id);
+                            try {
+                              await apiDelete(`/admin/kiro/credentials/${c.id}`);
+                              toast.success("已删除");
+                              await reload();
+                            } catch (e: any) { toast.error(e?.message || String(e)); }
+                            finally { setBusyID(""); }
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+      <KiroAddDialog open={adding} onOpenChange={setAdding} onAdded={reload} />
+    </div>
+  );
+}
+
+function KiroAddDialog({
+  open, onOpenChange, onAdded,
+}: { open: boolean; onOpenChange: (b: boolean) => void; onAdded: () => void }) {
+  const [step, setStep] = useState<"start" | "waiting" | "done">("start");
+  const [label, setLabel] = useState("");
+  const [signInURL, setSignInURL] = useState("");
+  const [state, setState] = useState("");
+  const [code, setCode] = useState("");
+  const [loginOption, setLoginOption] = useState("");
+  const reset = () => {
+    setStep("start"); setLabel(""); setSignInURL(""); setState("");
+    setCode(""); setLoginOption("");
+  };
+  const start = async () => {
+    try {
+      const r = await apiPost<any>("/admin/kiro/login/start", {
+        label,
+        redirect_uri: "http://localhost:3128",
+      });
+      setSignInURL(r.signin_url);
+      setState(r.state);
+      setStep("waiting");
+    } catch (e: any) {
+      toast.error(e?.message || String(e));
+    }
+  };
+  const finish = async () => {
+    try {
+      await apiPost<any>("/admin/kiro/login/finish", {
+        code, state, login_option: loginOption,
+      });
+      toast.success("Kiro 凭证已添加");
+      setStep("done");
+      onAdded();
+      setTimeout(() => { onOpenChange(false); reset(); }, 800);
+    } catch (e: any) {
+      toast.error(e?.message || String(e));
+    }
+  };
+  return (
+    <Dialog open={open} onOpenChange={(b) => { onOpenChange(b); if (!b) reset(); }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>添加 Kiro 凭证(PKCE 登录)</DialogTitle>
+        </DialogHeader>
+        {step === "start" && (
+          <div className="space-y-3">
+            <div>
+              <Label>标签(可选,便于识别)</Label>
+              <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="alice@example.com" />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              点击「生成登录链接」后会得到一个 https://app.kiro.dev/signin?... 链接。
+              在浏览器中打开并完成 IdP 授权,Kiro 会重定向到 http://localhost:3128/oauth/callback?code=...&amp;state=...&amp;login_option=...,
+              请将 URL 中的 code / state / login_option 三个参数复制粘贴回来。
+            </p>
+            <DialogFooter>
+              <Button onClick={start}>生成登录链接</Button>
+            </DialogFooter>
+          </div>
+        )}
+        {step === "waiting" && (
+          <div className="space-y-3">
+            <div>
+              <Label>登录链接</Label>
+              <div className="flex gap-2">
+                <Input value={signInURL} readOnly className="font-mono text-xs" />
+                <Button variant="outline" onClick={() => window.open(signInURL, "_blank")}>打开</Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label>code</Label>
+                <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="callback URL 中的 code= 值" />
+              </div>
+              <div>
+                <Label>login_option</Label>
+                <Input value={loginOption} onChange={(e) => setLoginOption(e.target.value)} placeholder="github / google / builder-id" />
+              </div>
+            </div>
+            <div>
+              <Label>state (必须与生成时一致 = {state})</Label>
+              <Input value={state} readOnly className="font-mono text-xs" />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setStep("start")}>返回</Button>
+              <Button onClick={finish} disabled={!code}>完成添加</Button>
+            </DialogFooter>
+          </div>
+        )}
+        {step === "done" && (
+          <div className="py-6 text-center text-sm">已成功添加 Kiro 凭证 ✓</div>
+        )}
       </DialogContent>
     </Dialog>
   );

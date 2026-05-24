@@ -120,9 +120,69 @@ type Config struct {
 	// claude-opus-4-6, and claude-sonnet-4-6.
 	Pricing pricing.Config `yaml:"pricing"`
 
+	// TokenGroups declares the named credential-group registry that client
+	// tokens can attach to. A token's Groups slice is a priority-ordered
+	// list of these names; AcquireMulti walks them in order.
+	//
+	// Each entry binds a group to an upstream channel + a billing discount.
+	// Models is an optional whitelist (empty = accept everything that the
+	// upstream supports).
+	TokenGroups []TokenGroup `yaml:"token_groups,omitempty"`
+
+	// KiroAuthDir holds Kiro PKCE credential JSON files added via the
+	// admin panel. Defaults to <dir>/kiro_auths. Each file is one
+	// credentials.json (kiroauth.File format).
+	KiroAuthDir string `yaml:"kiro_auth_dir,omitempty"`
+
 	// SaaS multi-tenant layer (commercial mode). Disabled by default; the
 	// proxy behaves exactly like the OSS build when SaaS.Enabled is false.
 	SaaS saas.Config `yaml:"saas"`
+}
+
+// TokenGroup defines one named credential group + its upstream channel +
+// per-group billing discount. Declared at config.token_groups[]; consumed
+// by the dispatch layer (which upstream to forward to) and the billing
+// layer (how to multiply the recorded cost).
+type TokenGroup struct {
+	// Name is the group identifier as it appears in clienttoken.Token.Groups.
+	// Required; canonicalized via auth.NormalizeGroup at load time.
+	Name string `yaml:"name"`
+
+	// Upstream selects the channel: "anthropic" (existing OAuth/API-key
+	// path to api.anthropic.com) or "kiro" (kirobridge + kiroapi against
+	// q.us-east-1.amazonaws.com via Kiro credentials).
+	// Defaults to "anthropic".
+	Upstream string `yaml:"upstream,omitempty"`
+
+	// Discount is a multiplier applied to the official Anthropic price
+	// before debiting the user's wallet. 1.0 = no discount, 0.05 = 1/20.
+	// Must be > 0. Defaults to 1.0.
+	Discount float64 `yaml:"discount,omitempty"`
+
+	// Models is an optional whitelist (Anthropic-side model names). Empty
+	// = accept any model the upstream supports. For Kiro this typically
+	// lists the Claude family only since DeepSeek / Minimax / GLM / Qwen
+	// are not exposed to end users (per business decision).
+	Models []string `yaml:"models,omitempty"`
+}
+
+// Upstream constants for TokenGroup.Upstream.
+const (
+	UpstreamAnthropic = "anthropic"
+	UpstreamKiro      = "kiro"
+)
+
+// AcceptsModel reports whether g's whitelist allows model (empty list = wildcard).
+func (g *TokenGroup) AcceptsModel(model string) bool {
+	if len(g.Models) == 0 {
+		return true
+	}
+	for _, m := range g.Models {
+		if m == model {
+			return true
+		}
+	}
+	return false
 }
 
 func Load(path string) (*Config, error) {
@@ -205,4 +265,67 @@ func applyDefaults(c *Config, path string) {
 	}
 	c.AdminPath = p
 	c.SaaS.ApplyDefaults(filepath.Dir(path))
+
+	if c.KiroAuthDir == "" {
+		c.KiroAuthDir = filepath.Join(dir, "kiro_auths")
+	} else if !filepath.IsAbs(c.KiroAuthDir) {
+		c.KiroAuthDir = filepath.Join(dir, c.KiroAuthDir)
+	}
+	c.applyTokenGroupDefaults()
+}
+
+// applyTokenGroupDefaults seeds the two built-in groups if the config
+// omits them entirely: claude-official (no discount, anthropic upstream)
+// and kiro-anthropic (5% of official price, kiro upstream, Claude-family
+// whitelist).
+func (c *Config) applyTokenGroupDefaults() {
+	have := make(map[string]bool, len(c.TokenGroups))
+	for i := range c.TokenGroups {
+		g := &c.TokenGroups[i]
+		g.Name = strings.TrimSpace(strings.ToLower(g.Name))
+		if g.Upstream == "" {
+			g.Upstream = UpstreamAnthropic
+		}
+		if g.Discount <= 0 {
+			g.Discount = 1.0
+		}
+		if g.Name != "" {
+			have[g.Name] = true
+		}
+	}
+	if !have["claude-official"] {
+		c.TokenGroups = append(c.TokenGroups, TokenGroup{
+			Name:     "claude-official",
+			Upstream: UpstreamAnthropic,
+			Discount: 1.0,
+		})
+	}
+	if !have["kiro-anthropic"] {
+		c.TokenGroups = append(c.TokenGroups, TokenGroup{
+			Name:     "kiro-anthropic",
+			Upstream: UpstreamKiro,
+			Discount: 0.05,
+			Models: []string{
+				"claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5",
+				"claude-sonnet-4-6", "claude-sonnet-4-5", "claude-sonnet-4",
+				"claude-haiku-4-5",
+				// Dated variants common in client SDKs.
+				"claude-sonnet-4-5-20250929",
+				"claude-haiku-4-5-20251001",
+				"claude-opus-4-1-20250805",
+			},
+		})
+	}
+}
+
+// FindTokenGroup looks up a TokenGroup by (canonicalized) name. Returns nil
+// when not found. Callers shouldn't mutate the returned pointer.
+func (c *Config) FindTokenGroup(name string) *TokenGroup {
+	name = strings.TrimSpace(strings.ToLower(name))
+	for i := range c.TokenGroups {
+		if c.TokenGroups[i].Name == name {
+			return &c.TokenGroups[i]
+		}
+	}
+	return nil
 }
