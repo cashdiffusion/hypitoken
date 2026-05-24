@@ -52,6 +52,11 @@ type SaaSTokenInfo struct {
 	DailyUSDCap   float64
 	MonthlyUSDCap float64
 	Disabled      bool
+	// Groups is the priority-ordered credential-group list set on the
+	// token itself. When non-empty it overrides the user's pricing-group
+	// credential mapping for dispatch (legacy single-group routing via
+	// CredentialGroup still works as a fallback).
+	Groups []string
 }
 
 // PreCheckError is the per-request rejection produced by SaaSAdapter.PreCheck.

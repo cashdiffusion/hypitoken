@@ -144,6 +144,16 @@ WHERE  is_default = 1
   AND  claude_multiplier = 1.0
   AND  codex_multiplier  = 1.0;
 `,
+	// 4: per-user-token priority-ordered group list. Stored as a JSON
+	//    array column on user_tokens. Empty / NULL → uses the user's
+	//    pricing group (legacy behavior). Non-empty → the token-side
+	//    priority list takes over for credential routing (e.g. drop
+	//    through Kiro → official Anthropic). Billing still happens
+	//    via the resolved group's discount, so existing rate cards
+	//    continue to apply unchanged.
+	`
+ALTER TABLE user_tokens ADD COLUMN groups TEXT NOT NULL DEFAULT '';
+`,
 }
 
 func (db *DB) migrate() error {

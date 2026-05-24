@@ -36,6 +36,9 @@ export interface UserToken {
   disabled: boolean;
   last_used_at: number;
   created_at: number;
+  // Priority-ordered credential-channel fallthrough list. Empty = use the
+  // user's pricing group (legacy routing).
+  groups?: string[];
 }
 
 export interface WalletTx {

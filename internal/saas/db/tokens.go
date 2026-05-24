@@ -21,15 +21,19 @@ type UserToken struct {
 	Disabled       bool
 	LastUsedAt     time.Time
 	CreatedAt      time.Time
+	// Groups is the priority-ordered credential-group fallthrough list.
+	// Empty = inherit user.GroupID (legacy single-group routing).
+	Groups         []string
 }
 
-const tokenCols = `id, user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at`
+const tokenCols = `id, user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at, groups`
 
 func scanToken(row interface{ Scan(...any) error }) (*UserToken, error) {
 	var t UserToken
 	var disabled int
 	var lastUsed, created int64
-	if err := row.Scan(&t.ID, &t.UserID, &t.Token, &t.Name, &t.DailyUSDCap, &t.MonthlyUSDCap, &t.MaxConcurrent, &t.RPM, &disabled, &lastUsed, &created); err != nil {
+	var groupsJSON string
+	if err := row.Scan(&t.ID, &t.UserID, &t.Token, &t.Name, &t.DailyUSDCap, &t.MonthlyUSDCap, &t.MaxConcurrent, &t.RPM, &disabled, &lastUsed, &created, &groupsJSON); err != nil {
 		return nil, err
 	}
 	t.Disabled = disabled != 0
@@ -37,7 +41,29 @@ func scanToken(row interface{ Scan(...any) error }) (*UserToken, error) {
 		t.LastUsedAt = time.Unix(lastUsed, 0)
 	}
 	t.CreatedAt = time.Unix(created, 0)
+	t.Groups = parseGroupsJSON(groupsJSON)
 	return &t, nil
+}
+
+// parseGroupsJSON decodes the groups column. Empty / malformed → nil slice.
+func parseGroupsJSON(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	if err := jsonUnmarshal([]byte(s), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// marshalGroupsJSON encodes a groups slice for storage. Empty → "".
+func marshalGroupsJSON(g []string) string {
+	if len(g) == 0 {
+		return ""
+	}
+	b, _ := jsonMarshal(g)
+	return string(b)
 }
 
 type TokenParams struct {
@@ -46,6 +72,7 @@ type TokenParams struct {
 	MonthlyUSDCap  float64
 	MaxConcurrent  int
 	RPM            int
+	Groups         []string
 }
 
 func (db *DB) CreateUserToken(ctx context.Context, userID int64, p TokenParams) (*UserToken, error) {
@@ -55,9 +82,9 @@ func (db *DB) CreateUserToken(ctx context.Context, userID int64, p TokenParams) 
 	}
 	now := time.Now().Unix()
 	res, err := db.ExecContext(ctx, `INSERT INTO user_tokens
-		(user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`,
-		userID, tok, p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, now)
+		(user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at, groups)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
+		userID, tok, p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, now, marshalGroupsJSON(p.Groups))
 	if err != nil {
 		return nil, err
 	}
@@ -101,17 +128,18 @@ func (db *DB) ListUserTokens(ctx context.Context, userID int64) ([]*UserToken, e
 }
 
 func (db *DB) UpdateUserToken(ctx context.Context, id int64, p TokenParams, disabled *bool) error {
+	groups := marshalGroupsJSON(p.Groups)
 	if disabled != nil {
 		d := 0
 		if *disabled {
 			d = 1
 		}
-		_, err := db.ExecContext(ctx, `UPDATE user_tokens SET name=?, daily_usd_cap=?, monthly_usd_cap=?, max_concurrent=?, rpm=?, disabled=? WHERE id=?`,
-			p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, d, id)
+		_, err := db.ExecContext(ctx, `UPDATE user_tokens SET name=?, daily_usd_cap=?, monthly_usd_cap=?, max_concurrent=?, rpm=?, disabled=?, groups=? WHERE id=?`,
+			p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, d, groups, id)
 		return err
 	}
-	_, err := db.ExecContext(ctx, `UPDATE user_tokens SET name=?, daily_usd_cap=?, monthly_usd_cap=?, max_concurrent=?, rpm=? WHERE id=?`,
-		p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, id)
+	_, err := db.ExecContext(ctx, `UPDATE user_tokens SET name=?, daily_usd_cap=?, monthly_usd_cap=?, max_concurrent=?, rpm=?, groups=? WHERE id=?`,
+		p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, groups, id)
 	return err
 }
 
