@@ -17,11 +17,11 @@ import (
 
 	"github.com/wjsoj/CPA-Claude/internal/admin"
 	"github.com/wjsoj/cc-core/auth"
-	"github.com/wjsoj/CPA-Claude/internal/clienttoken"
+	"github.com/wjsoj/cc-core/clienttoken"
 	"github.com/wjsoj/CPA-Claude/internal/config"
 	"github.com/wjsoj/CPA-Claude/internal/logging"
-	"github.com/wjsoj/CPA-Claude/internal/pricing"
-	"github.com/wjsoj/CPA-Claude/internal/requestlog"
+	"github.com/wjsoj/cc-core/pricing"
+	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/CPA-Claude/internal/saas"
 	saasadapter "github.com/wjsoj/CPA-Claude/internal/saas/adapter"
 	saasadmin "github.com/wjsoj/CPA-Claude/internal/saas/admin"
@@ -32,7 +32,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/mail"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	"github.com/wjsoj/CPA-Claude/internal/server"
-	"github.com/wjsoj/CPA-Claude/internal/usage"
+	"github.com/wjsoj/cc-core/usage"
 )
 
 var (

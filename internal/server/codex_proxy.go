@@ -17,8 +17,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/cc-core/auth"
-	"github.com/wjsoj/CPA-Claude/internal/requestlog"
-	"github.com/wjsoj/CPA-Claude/internal/usage"
+	"github.com/wjsoj/cc-core/requestlog"
+	"github.com/wjsoj/cc-core/usage"
 )
 
 // Codex / OpenAI endpoint handlers. The request/retry/accounting machinery

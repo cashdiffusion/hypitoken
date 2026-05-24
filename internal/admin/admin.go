@@ -24,11 +24,11 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/cc-core/auth"
-	"github.com/wjsoj/CPA-Claude/internal/clienttoken"
+	"github.com/wjsoj/cc-core/clienttoken"
 	"github.com/wjsoj/CPA-Claude/internal/config"
-	"github.com/wjsoj/CPA-Claude/internal/pricing"
-	"github.com/wjsoj/CPA-Claude/internal/requestlog"
-	"github.com/wjsoj/CPA-Claude/internal/usage"
+	"github.com/wjsoj/cc-core/pricing"
+	"github.com/wjsoj/cc-core/requestlog"
+	"github.com/wjsoj/cc-core/usage"
 )
 
 //go:generate bash -c "cd web && bun install --frozen-lockfile && bun run build"
@@ -636,8 +636,8 @@ func (h *Handler) resolveClientTokenLabels(tokens []string) []string {
 	for _, t := range tokens {
 		label := ""
 		if h.tokens != nil {
-			if name, _, _, _, ok := h.tokens.Lookup(t); ok && strings.TrimSpace(name) != "" {
-				label = name
+			if entry, ok := h.tokens.Lookup(t); ok && strings.TrimSpace(entry.Name) != "" {
+				label = entry.Name
 			}
 		}
 		if label == "" {
@@ -1610,13 +1610,13 @@ func (h *Handler) handleInheritToken(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "from required"})
 		return
 	}
-	if _, _, _, _, ok := h.tokens.Lookup(dst); !ok {
+	if _, ok := h.tokens.Lookup(dst); !ok {
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "destination token not registered"})
 		return
 	}
 	// Refuse merging from a still-registered token: it's either a mistake
 	// or the caller should delete the source explicitly first.
-	if _, _, _, _, ok := h.tokens.Lookup(src); ok {
+	if _, ok := h.tokens.Lookup(src); ok {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "source token is still registered; delete it first or pick an orphan"})
 		return
 	}
