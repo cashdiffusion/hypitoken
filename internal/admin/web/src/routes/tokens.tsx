@@ -53,6 +53,7 @@ export default function TokensPage() {
                 <TableRow>
                   <TableHead>{tt("common.name")}</TableHead>
                   <TableHead>Token</TableHead>
+                  <TableHead>渠道</TableHead>
                   <TableHead className="text-right">{tt("tokens.spendingCap")}</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
@@ -71,6 +72,19 @@ export default function TokensPage() {
                         </Button>
                         <CopyBtn text={t.token} />
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {t.groups && t.groups.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {t.groups.map((g, i) => (
+                            <span key={i} className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono">
+                              {i > 0 && <span className="mr-0.5 text-muted-foreground">→</span>}{g}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">默认</span>
+                      )}
                     </TableCell>
                     <TableCell className="font-mono tabular-nums text-right">{t.monthly_usd_cap > 0 ? fmtUSD(t.monthly_usd_cap) : tt("common.unlimited")}</TableCell>
                     <TableCell>
@@ -320,17 +334,27 @@ function CreateTokenDialog({ open, onOpenChange, onCreated }: any) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [cap, setCap] = useState("");
+  // Groups is the priority-ordered credential-channel list. UI is a comma-
+  // separated input that orders matter: first item is the preferred upstream
+  // channel; when its credentials are exhausted (e.g. Kiro quota=0), the
+  // dispatcher falls through to the next.
+  const [groupsStr, setGroupsStr] = useState("");
 
   const submit = async () => {
     try {
+      const groups = groupsStr
+        .split(",")
+        .map((g) => g.trim())
+        .filter((g) => g.length > 0);
       await apiPost("/tokens", {
         name,
         monthly_usd_cap: parseFloat(cap) || 0,
+        groups,
       });
       toast.success(t("tokens.dialog.created"));
       onCreated();
       onOpenChange(false);
-      setName(""); setCap("");
+      setName(""); setCap(""); setGroupsStr("");
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -352,6 +376,20 @@ function CreateTokenDialog({ open, onOpenChange, onCreated }: any) {
             <Label htmlFor="cap">{t("tokens.dialog.capLabel")}</Label>
             <Input id="cap" type="number" step="0.01" placeholder={t("tokens.dialog.capPlaceholder")} value={cap} onChange={(e) => setCap(e.target.value)} />
             <p className="text-xs text-muted-foreground">{t("tokens.dialog.capHint")}</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="groups">渠道(可选,按优先级排列)</Label>
+            <Input
+              id="groups"
+              placeholder="kiro-anthropic, claude-official"
+              value={groupsStr}
+              onChange={(e) => setGroupsStr(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              逗号分隔。前面的渠道优先 —— 不可用(配额/凭证耗尽)时自动跳到后面的渠道。
+              留空则按账户默认分组路由。常用组合:
+              <code className="ml-1 rounded bg-muted px-1">kiro-anthropic, claude-official</code>
+            </p>
           </div>
         </div>
         <DialogFooter>

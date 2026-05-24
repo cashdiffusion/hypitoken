@@ -36,6 +36,11 @@ type Dispatcher struct {
 	// Nil = http.DefaultClient.
 	HTTP *http.Client
 
+	// Quota caches Kiro getUsageLimits results so PickCredential can skip
+	// over zero-remaining-quota credentials without re-probing each time.
+	// Auto-initialized on first use; tests can substitute a stub.
+	Quota *QuotaCache
+
 	// rrCounter is a round-robin index across healthy entries — gives an
 	// approximate even-load distribution without needing per-entry stats.
 	rrCounter uint64
@@ -48,6 +53,11 @@ type ChosenCred struct {
 
 // PickCredential returns one healthy credential after refreshing it if
 // needed. Returns (nil, error) when none are usable.
+//
+// Quota awareness: when the credential's cached Kiro quota balance is at
+// zero (no remaining requests), the picker treats it as unhealthy and
+// continues scanning. The cache TTL is 60s so repeated probes don't hit
+// upstream getUsageLimits on every request. See QuotaCache.
 func (d *Dispatcher) PickCredential(ctx context.Context, excludeIDs map[string]bool) (*ChosenCred, error) {
 	if d.Store == nil {
 		return nil, errors.New("kiroupstream: no credential store configured")
@@ -55,6 +65,10 @@ func (d *Dispatcher) PickCredential(ctx context.Context, excludeIDs map[string]b
 	all := d.Store.HealthyEntries()
 	if len(all) == 0 {
 		return nil, errors.New("kiroupstream: no healthy Kiro credentials available")
+	}
+
+	if d.Quota == nil {
+		d.Quota = newQuotaCache()
 	}
 
 	// Round-robin offset then linear scan; first usable wins.
@@ -72,12 +86,16 @@ func (d *Dispatcher) PickCredential(ctx context.Context, excludeIDs map[string]b
 			}
 			continue
 		}
+		if !d.Quota.allowed(ctx, refreshed) {
+			// Cached / probed quota = 0 → skip; will recheck after TTL.
+			continue
+		}
 		return &ChosenCred{Entry: refreshed}, nil
 	}
 	if firstErr != nil {
 		return nil, fmt.Errorf("kiroupstream: all candidates failed: %w", firstErr)
 	}
-	return nil, errors.New("kiroupstream: no candidates left after exclusions")
+	return nil, errors.New("kiroupstream: no candidates left (all out of quota?)")
 }
 
 // Forward runs the full Anthropic-format request through the Kiro upstream

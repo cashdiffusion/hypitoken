@@ -92,8 +92,12 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	var clientGroup string
 	// clientGroups is the priority-ordered fallthrough list for multi-channel
 	// routing (anthropic vs kiro). Populated from token.EffectiveGroups() in
-	// the non-SaaS branch. Empty = single-channel anthropic, like before.
+	// the non-SaaS branch, and from saasInfo.Groups (when non-empty) in the
+	// SaaS branch. Empty = single-channel anthropic, like before.
 	var clientGroups []string
+	if saasOK && len(saasInfo.Groups) > 0 {
+		clientGroups = append(clientGroups, saasInfo.Groups...)
+	}
 	if saasOK && s.saas != nil {
 		clientGroup = s.saas.CredentialGroup(saasInfo)
 		if pre := s.saas.PreCheck(c.Request.Context(), saasInfo); pre != nil {

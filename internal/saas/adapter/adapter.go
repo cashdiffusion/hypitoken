@@ -103,6 +103,7 @@ func (a *Adapter) Lookup(token string) (server.SaaSTokenInfo, bool) {
 		DailyUSDCap:   t.DailyUSDCap,
 		MonthlyUSDCap: t.MonthlyUSDCap,
 		Disabled:      t.Disabled || u.Disabled,
+		Groups:        append([]string(nil), t.Groups...),
 	}, true
 }
 
