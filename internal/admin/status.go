@@ -10,8 +10,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/cc-core/auth"
-	"github.com/wjsoj/CPA-Claude/internal/requestlog"
-	"github.com/wjsoj/CPA-Claude/internal/usage"
+	"github.com/wjsoj/cc-core/requestlog"
+	"github.com/wjsoj/cc-core/usage"
 )
 
 // RegisterStatus mounts the public /status/ SPA + API. Unlike Register(),
@@ -379,15 +379,15 @@ func (h *Handler) handleStatusQuery(c *gin.Context) {
 	for _, tok := range tokens {
 		masked := maskToken(tok)
 		r := statusTokenResult{Masked: masked}
-		name, weekly, _, group, ok := h.tokens.Lookup(tok)
+		entry, ok := h.tokens.Lookup(tok)
 		if !ok {
 			results = append(results, r)
 			continue
 		}
 		r.Found = true
-		r.Name = name
-		r.Group = group
-		r.WeeklyLimit = weekly
+		r.Name = entry.Name
+		r.Group = entry.Group
+		r.WeeklyLimit = entry.WeeklyUSD
 		if pc, hasData := clients[tok]; hasData {
 			r.Total = pc.Total
 			r.Weekly = pc.WeeklyOrdered(8)
@@ -555,7 +555,7 @@ func (h *Handler) handleStatusHistory(c *gin.Context) {
 	// Same ownership check as /query: the caller must present a token the
 	// store knows about. We don't reveal whether an unknown token was once
 	// valid or never existed.
-	if _, _, _, _, ok := h.tokens.Lookup(tok); !ok {
+	if _, ok := h.tokens.Lookup(tok); !ok {
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "token not found"})
 		return
 	}

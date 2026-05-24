@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/wjsoj/CPA-Claude/internal/usage"
+	"github.com/wjsoj/cc-core/usage"
 )
 
 // TestAdvisorIterationsParsing locks in the captured wire shape for the

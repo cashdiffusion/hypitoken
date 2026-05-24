@@ -12,15 +12,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/andybalholm/brotli"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/wjsoj/CPA-Claude/internal/requestlog"
-	"github.com/wjsoj/CPA-Claude/internal/usage"
+	"github.com/wjsoj/cc-core/requestlog"
+	"github.com/wjsoj/cc-core/usage"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/thinkingsig"
 )
@@ -103,9 +102,12 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 			return
 		}
 	} else {
+		entry, tokOK := s.tokens.Lookup(clientToken)
 		var weeklyLimit float64
-		var tokOK bool
-		_, weeklyLimit, _, clientGroup, tokOK = s.tokens.Lookup(clientToken)
+		if tokOK {
+			weeklyLimit = entry.WeeklyUSD
+			clientGroup = entry.Group
+		}
 		if tokOK && weeklyLimit > 0 {
 			spent := s.usage.WeeklyCostUSD(clientToken)
 			if spent >= weeklyLimit {
@@ -156,7 +158,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	// 429s doesn't briefly occupy slots.
 	rpmKey := auth.NormalizeProvider(provider) + "|" + clientToken
 	if limit := s.clientRPM(c, clientToken); limit > 0 {
-		if ok, retry := s.rpm.allow(rpmKey, limit); !ok {
+		if ok, retry := s.rpm.Allow(rpmKey, limit); !ok {
 			c.Header("Retry-After", strconv.Itoa(retry))
 			c.AbortWithStatusJSON(429, gin.H{
 				"error":       "rate limit exceeded",
@@ -185,10 +187,8 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		// but not a concurrency bucket — matches the per-provider session
 		// keying in Pool.Acquire.
 		inflightKey := auth.NormalizeProvider(provider) + "|" + clientToken
-		v, _ := s.inflight.LoadOrStore(inflightKey, new(int32))
-		counter := v.(*int32)
-		cur := atomic.AddInt32(counter, 1)
-		defer atomic.AddInt32(counter, -1)
+		cur, releaseSlot := s.inflight.Begin(inflightKey)
+		defer releaseSlot()
 		if cur > int32(maxConc) {
 			c.Header("Retry-After", "5")
 			c.AbortWithStatusJSON(429, gin.H{

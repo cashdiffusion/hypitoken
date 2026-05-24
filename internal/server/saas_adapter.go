@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 
-	"github.com/wjsoj/CPA-Claude/internal/usage"
+	"github.com/wjsoj/cc-core/usage"
 )
 
 // SaaSAdapter bridges the proxy to the optional multi-tenant SaaS layer.

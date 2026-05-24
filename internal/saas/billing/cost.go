@@ -15,8 +15,8 @@
 package billing
 
 import (
-	"github.com/wjsoj/CPA-Claude/internal/pricing"
-	"github.com/wjsoj/CPA-Claude/internal/usage"
+	"github.com/wjsoj/cc-core/pricing"
+	"github.com/wjsoj/cc-core/usage"
 )
 
 // Charge looks up the official price for (provider, model, counts) and

@@ -11,8 +11,8 @@ import (
 
 	"github.com/wjsoj/cc-core/auth"
 	legacyadmin "github.com/wjsoj/CPA-Claude/internal/admin"
-	"github.com/wjsoj/CPA-Claude/internal/pricing"
-	"github.com/wjsoj/CPA-Claude/internal/requestlog"
+	"github.com/wjsoj/cc-core/pricing"
+	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/CPA-Claude/internal/saas/admin"
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"

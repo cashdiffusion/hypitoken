@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/wjsoj/cc-core/auth"
-	"github.com/wjsoj/CPA-Claude/internal/pricing"
+	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 	"github.com/wjsoj/CPA-Claude/internal/server"
-	"github.com/wjsoj/CPA-Claude/internal/usage"
+	"github.com/wjsoj/cc-core/usage"
 )
 
 // Default billing multipliers used when a pricing group has no value set

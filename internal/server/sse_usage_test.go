@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/wjsoj/CPA-Claude/internal/usage"
+	"github.com/wjsoj/cc-core/usage"
 )
 
 // TestMergeSSEUsageNoDoubleCount locks in the fix for the streaming-billing
