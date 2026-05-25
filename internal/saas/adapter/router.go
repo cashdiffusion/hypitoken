@@ -59,6 +59,68 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	tokensH.Routes(authed.Group("/tokens"))
 	billingH.UserRoutes(authed.Group("/billing"))
 
+	// Available credential channels — the dropdown source for the per-token
+	// "渠道" selector. Deduplicated by group name; each entry reports which
+	// provider(s) back it and how many usable credentials it currently has.
+	// "Usable" = not Disabled and not HardFailure — credentials in cooldown
+	// (quota / rate-limit) still count, since they recover automatically.
+	// The empty-string group (public pool) is exposed as "default".
+	authed.GET("/channels", func(c *gin.Context) {
+		if credH == nil || credH.Pool == nil {
+			c.JSON(http.StatusOK, gin.H{"channels": []any{}})
+			return
+		}
+		type chanInfo struct {
+			Name      string   `json:"name"`
+			Providers []string `json:"providers"`
+			Count     int      `json:"count"`
+		}
+		acc := map[string]*chanInfo{}
+		provSeen := map[string]map[string]bool{}
+		for _, s := range credH.Pool.Status() {
+			a := s.Auth
+			if a.Disabled {
+				continue
+			}
+			if live := credH.Pool.FindByID(a.ID); live != nil {
+				if _, hardFail, _, _ := live.HealthSnapshot(); hardFail {
+					continue
+				}
+			}
+			name := a.Group
+			if name == "" {
+				name = "default"
+			}
+			ci, ok := acc[name]
+			if !ok {
+				ci = &chanInfo{Name: name}
+				acc[name] = ci
+				provSeen[name] = map[string]bool{}
+			}
+			ci.Count++
+			prov := string(a.Provider)
+			if prov != "" && !provSeen[name][prov] {
+				provSeen[name][prov] = true
+				ci.Providers = append(ci.Providers, prov)
+			}
+		}
+		out := make([]*chanInfo, 0, len(acc))
+		for _, ci := range acc {
+			sort.Strings(ci.Providers)
+			out = append(out, ci)
+		}
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].Name == "default" {
+				return false
+			}
+			if out[j].Name == "default" {
+				return true
+			}
+			return out[i].Name < out[j].Name
+		})
+		c.JSON(http.StatusOK, gin.H{"channels": out})
+	})
+
 	// Per-user request log. Same shape as /admin/api/requests but filtered
 	// to records emitted while the requester was the authenticated user —
 	// powers the /app/logs page where customers reconcile every charge
