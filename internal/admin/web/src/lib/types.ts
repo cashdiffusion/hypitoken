@@ -41,6 +41,16 @@ export interface UserToken {
   groups?: string[];
 }
 
+// Channel = a credential group with at least one usable (non-disabled,
+// non-hard-failed) backing credential, as reported by /api/v2/channels.
+// Powers the per-token "渠道" dropdown so users only see options that
+// actually have credentials behind them.
+export interface Channel {
+  name: string;        // group filter name ("default", "kiro-anthropic", ...)
+  providers: string[]; // distinct providers backing this channel
+  count: number;       // usable credential count
+}
+
 export interface WalletTx {
   id: number;
   kind: "topup" | "charge" | "adjust" | "refund";

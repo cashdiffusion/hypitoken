@@ -567,8 +567,22 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 				s.pool.ReportUpstreamError(a, resp.StatusCode, resetAt)
 			}
 		case resp.StatusCode == 401 || resp.StatusCode == 403:
-			resetAt := parseRetryAfter(resp.Header)
-			s.pool.ReportUpstreamError(a, resp.StatusCode, resetAt)
+			// On 401, a body of {"type":"authentication_error", ...} or
+			// "Invalid authentication credentials" means Anthropic has
+			// definitively rejected this credential. For OAuth we just
+			// refreshed the access token before this call, so a 401 here
+			// is not a transient token-expiry — the underlying account
+			// has been revoked or had its Opus/Sonnet entitlements
+			// stripped. The default 60s cooldown just lets the credential
+			// cycle back into rotation a minute later and 401 the next
+			// random customer, so promote to sticky hard-failure instead.
+			if resp.StatusCode == 401 && isDefinitiveAuthRejection(errBody) {
+				a.MarkHardFailure(fmt.Sprintf("upstream 401 authentication rejected: %s", truncate(errBody, 200)))
+				log.Warnf("auth: %s hard-disabled — definitive 401 authentication rejection", a.ID)
+			} else {
+				resetAt := parseRetryAfter(resp.Header)
+				s.pool.ReportUpstreamError(a, resp.StatusCode, resetAt)
+			}
 		case resp.StatusCode == 529, resp.StatusCode >= 500:
 			a.MarkFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
 		}
@@ -1513,6 +1527,33 @@ func isAccountBanBody(b []byte) bool {
 		// (typically a stealth/soft ban). Recovery requires manual
 		// intervention, not a cooldown — treat as terminal.
 		[]byte("oauth authentication is currently not allowed"),
+	}
+	for _, m := range markers {
+		if bytes.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDefinitiveAuthRejection reports whether a 401 response body indicates
+// Anthropic has terminally rejected the credential (subscription revoked,
+// account dead, Opus access stripped). Distinguished from transient 401s
+// (which we'd want to cooldown-and-retry) by matching only the explicit
+// authentication-error wording: `error.type == "authentication_error"` is
+// reserved by Anthropic for credential-validity failures and never used
+// for quota / permission / request-shape issues. Caller must also have
+// confirmed status == 401 — at other statuses these markers can appear
+// in benign contexts.
+func isDefinitiveAuthRejection(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	lower := bytes.ToLower(b)
+	markers := [][]byte{
+		[]byte(`"type":"authentication_error"`),
+		[]byte(`"type": "authentication_error"`),
+		[]byte("invalid authentication credentials"),
 	}
 	for _, m := range markers {
 		if bytes.Contains(lower, m) {
