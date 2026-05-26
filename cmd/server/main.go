@@ -260,10 +260,16 @@ func main() {
 	// own SQLite + Z-Pay gateway + SMTP mailer onto its own gin engine,
 	// attached to the server's endpoint list so Start()/Shutdown() see it.
 	if cfg.Shop.Enabled && cfg.Endpoints.Shop.IsEnabled() {
+		// Same @file convention used by saas.zpay.key — keeps secrets out
+		// of the main config file when the operator prefers it.
+		shopZPayKey, err := loadKeyFile(cfg.Shop.ZPay.Key)
+		if err != nil {
+			log.Fatalf("shop zpay key: %v", err)
+		}
 		shopGw, err := billing.NewZPayGateway(billing.ZPayParams{
 			BaseURL:   cfg.Shop.ZPay.BaseURL,
 			PID:       cfg.Shop.ZPay.PID,
-			Key:       cfg.Shop.ZPay.Key,
+			Key:       shopZPayKey,
 			NotifyURL: cfg.Shop.NotifyURL,
 			ReturnURL: cfg.Shop.SiteURL, // generic return; per-order URL is the buyer-facing page
 		})
