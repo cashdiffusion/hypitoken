@@ -1,0 +1,17 @@
+{{define "title"}}{{.Status}} · {{.SiteName}}{{end}}
+{{define "content"}}
+
+<div class="max-w-md mx-auto text-center pt-16 pb-24 reveal">
+  <div class="eyebrow mb-8">errata · {{.Status}}</div>
+  <div class="font-display text-[120px] leading-none text-foreground num tracking-tight">
+    {{.Status}}
+  </div>
+  <div class="mt-2 font-display italic text-[24px] text-muted-fg opacity-80 font-light">—</div>
+  <p class="mt-6 text-[15px] text-muted-fg leading-relaxed">{{.Message}}</p>
+  <a href="/" class="mt-10 inline-flex btn-primary px-7 py-3">
+    <span>回到目录</span>
+    <span class="arrow">→</span>
+  </a>
+</div>
+
+{{end}}

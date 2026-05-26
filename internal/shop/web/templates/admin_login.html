@@ -1,0 +1,35 @@
+{{define "title"}}管理员登录 · {{.SiteName}}{{end}}
+{{define "content"}}
+
+<div class="max-w-sm mx-auto pt-10 reveal">
+  <div class="section-meta mb-6">
+    <span class="eyebrow">Restricted · Atelier</span>
+  </div>
+  <h1 class="font-display text-[36px] leading-tight tracking-tight text-foreground font-medium">
+    管理员入口
+  </h1>
+  <p class="mt-4 text-[14px] text-muted-fg leading-relaxed">
+    输入 <code class="font-mono text-[12.5px] bg-secondary px-1.5 py-0.5 rounded border border-border">admin_token</code> 以进入控制台。
+  </p>
+
+  {{if .Error}}
+  <div class="mt-6 bg-destructive-soft border border-destructive-soft rounded-md px-4 py-3 text-[13px] text-destructive">
+    {{.Error}}
+  </div>
+  {{end}}
+
+  <form method="POST" action="/admin/login" class="mt-8 bg-card hairline rounded-lg  p-7 space-y-5">
+    <div>
+      <label class="text-[13px] font-medium text-foreground mb-2 block">操作员密令</label>
+      <input type="password" name="password" required autofocus class="field font-mono">
+    </div>
+    <button type="submit" class="w-full btn-primary py-3">
+      <span>进入</span>
+      <span class="arrow">→</span>
+    </button>
+  </form>
+
+  <p class="mt-6 text-center eyebrow">authorised personnel only</p>
+</div>
+
+{{end}}

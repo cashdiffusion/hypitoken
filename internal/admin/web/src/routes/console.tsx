@@ -11,7 +11,7 @@ import { cn, fmtInt, fmtDate } from "@/legacy/lib/utils";
 
 // /app/console exposes only the original CPA-Claude OVERVIEW panel —
 // charts and fleet KPIs — wrapped in the SaaS shell. Visible to any
-// signed-in user since the underlying /mgmt-console/api/summary endpoint
+// signed-in user since the underlying /admin/api/summary endpoint
 // is GET-only and the SSO bridge admits any authenticated user. No
 // credential CRUD, no token management, no requests explorer here —
 // those tabs are intentionally dropped.

@@ -1,0 +1,147 @@
+{{define "title"}}订单 {{.Order.OutTradeNo}} · {{.SiteName}}{{end}}
+{{define "content"}}
+
+<div class="mb-10 reveal">
+  <a href="/" class="eyebrow hover:text-primary inline-flex items-center gap-2 transition-colors">
+    <span>←</span> 返回目录
+  </a>
+</div>
+
+<div class="max-w-3xl mx-auto reveal">
+
+  <!-- Receipt header -->
+  <div class="bg-card hairline rounded-lg  overflow-hidden">
+
+    <!-- Header band -->
+    <div class="p-8 lg:p-10 hairline-b">
+      <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-5">
+        <div class="flex-1">
+          <div class="eyebrow mb-3">订单凭证 · Receipt</div>
+          <h1 class="font-display text-[32px] leading-tight tracking-tight text-foreground font-medium">
+            {{.Order.ProductName}}
+          </h1>
+          <div class="mt-3 font-mono text-[12px] text-muted-fg opacity-80 num">
+            ID · {{.Order.OutTradeNo}}
+          </div>
+        </div>
+        <div class="shrink-0">
+          {{if eq .Order.Status "paid"}}
+            <span class="pill text-primary bg-primary-soft border-primary-soft">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-primary"></span>已完成
+            </span>
+          {{else if eq .Order.Status "pending"}}
+            <span class="pill text-warning bg-warning-soft border-warning-soft pulse">待支付</span>
+          {{else if eq .Order.Status "await_manual"}}
+            <span class="pill text-destructive bg-destructive-soft border-destructive-soft">人工处理</span>
+          {{else if eq .Order.Status "expired"}}
+            <span class="pill text-muted-fg opacity-80 bg-secondary border-border-strong">已过期</span>
+          {{else}}
+            <span class="pill text-muted-fg bg-secondary border-border-strong">{{statusLabel .Order.Status}}</span>
+          {{end}}
+        </div>
+      </div>
+    </div>
+
+    <!-- Order facts -->
+    <dl class="grid grid-cols-2 sm:grid-cols-4 gap-px bg-border">
+      <div class="bg-card p-5">
+        <dt class="eyebrow mb-2">金额</dt>
+        <dd class="font-display text-[22px] text-foreground num leading-none">
+          <span class="text-[13px] text-muted-fg align-top">¥</span>{{printf "%.2f" .Order.AmountCNY}}
+        </dd>
+      </div>
+      <div class="bg-card p-5">
+        <dt class="eyebrow mb-2">渠道</dt>
+        <dd class="text-[14px] text-foreground font-mono">{{.Order.PayMethod}}</dd>
+      </div>
+      <div class="bg-card p-5">
+        <dt class="eyebrow mb-2">下单时间</dt>
+        <dd class="text-[13px] text-foreground font-mono num">{{fmtTime .Order.CreatedAt}}</dd>
+      </div>
+      <div class="bg-card p-5">
+        <dt class="eyebrow mb-2">{{if not .Order.PaidAt.IsZero}}支付时间{{else}}状态{{end}}</dt>
+        <dd class="text-[13px] text-foreground font-mono num">
+          {{if not .Order.PaidAt.IsZero}}{{fmtTime .Order.PaidAt}}{{else}}—{{end}}
+        </dd>
+      </div>
+    </dl>
+
+    {{if .Order.TradeNo}}
+    <div class="px-8 lg:px-10 py-4 hairline-b bg-secondary/40">
+      <div class="flex items-baseline justify-between">
+        <span class="eyebrow">网关流水</span>
+        <span class="font-mono text-[12px] text-muted-fg">{{.Order.TradeNo}}</span>
+      </div>
+    </div>
+    {{end}}
+
+    <!-- Status-specific body -->
+    <div class="p-8 lg:p-10">
+
+    {{if eq .Order.Status "pending"}}
+      <div class="text-center py-4">
+        <div class="inline-flex items-center gap-2 eyebrow text-warning">
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-warning animate-pulse"></span>
+          等待支付完成
+        </div>
+        <h2 class="font-display text-[26px] mt-4 text-foreground font-medium">前往支付以完成订单</h2>
+        <p class="mt-3 text-[13.5px] text-muted-fg">支付完成后本页面会自动刷新。</p>
+        <a href="{{.Order.PayURL}}" target="_blank" rel="noopener" class="mt-7 inline-flex btn-primary px-7 py-3.5">
+          <span>前往支付通道</span>
+          <span class="arrow">↗</span>
+        </a>
+        <div class="mt-6 font-mono text-[11px] text-muted-fg opacity-80 num live-indicator">
+          live · 自动轮询中
+        </div>
+      </div>
+      <script>
+        async function poll() {
+          try {
+            const r = await fetch('/api/order/{{.Order.OutTradeNo}}');
+            if (!r.ok) return;
+            const d = await r.json();
+            if (d.status !== 'pending') location.reload();
+          } catch (e) {}
+        }
+        setInterval(poll, 4000);
+      </script>
+
+    {{else if eq .Order.Status "paid"}}
+      <div class="section-meta mb-4">
+        <span class="eyebrow text-primary">兑换内容 · Delivered</span>
+      </div>
+      <pre class="code-frame">{{.Order.Fulfillment}}</pre>
+      <p class="mt-5 text-[12.5px] text-muted-fg opacity-80 flex items-center gap-2">
+        {{if .Order.EmailSent}}
+        <span class="inline-block w-1 h-1 rounded-full bg-primary"></span>
+        已同步发送至 <span class="font-mono text-muted-fg">{{.Order.Email}}</span>
+        {{else}}
+        <span class="inline-block w-1 h-1 rounded-full bg-warning animate-pulse"></span>
+        邮件正在送达，未收到时刷新页面即可查看。
+        {{end}}
+      </p>
+
+    {{else if eq .Order.Status "await_manual"}}
+      <div class="bg-destructive-soft border border-destructive-soft rounded-md p-5">
+        <div class="eyebrow text-destructive mb-2">人工处理中</div>
+        <p class="text-[14px] text-foreground leading-relaxed">
+          款项已收到，但商品库存暂时不足，正在人工补发。
+          如 24 小时内仍未收到，请保留本订单号联系客服。
+        </p>
+      </div>
+
+    {{else if eq .Order.Status "expired"}}
+      <div class="bg-secondary border border-border-strong rounded-md p-5 text-center">
+        <p class="font-display text-[24px] text-muted-fg italic">已过期</p>
+        <p class="mt-2 text-[13px] text-muted-fg opacity-80">订单超时未支付，如需购买请重新下单。</p>
+        <a href="/" class="mt-5 inline-flex btn-ghost">返回目录</a>
+      </div>
+    {{end}}
+
+    </div>
+  </div>
+
+  <p class="mt-8 text-center eyebrow">— end of receipt —</p>
+</div>
+
+{{end}}

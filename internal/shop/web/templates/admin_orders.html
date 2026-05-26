@@ -1,0 +1,70 @@
+{{define "title"}}订单管理 · {{.SiteName}}{{end}}
+{{define "content"}}
+
+<div class="reveal">
+  <div class="mb-10 hairline-b pb-6">
+    <a href="/admin" class="eyebrow hover:text-primary">← 返回管理台</a>
+    <div class="eyebrow mt-3 mb-1">Ledger · 流水</div>
+    <h1 class="font-display text-[40px] leading-tight text-foreground font-medium">订单管理</h1>
+  </div>
+
+  <!-- Filter chips -->
+  <div class="flex flex-wrap gap-2 mb-8">
+    {{$f := .StatusFilter}}
+    <a href="/admin/orders" class="pill {{if eq $f ""}}bg-foreground text-background border-foreground{{else}}text-muted-fg border-border hover:border-foreground{{end}} transition">全部</a>
+    <a href="/admin/orders?status=pending" class="pill {{if eq $f "pending"}}bg-warning text-background border-warning{{else}}text-muted-fg border-border hover:border-warning{{end}} transition">待支付</a>
+    <a href="/admin/orders?status=paid" class="pill {{if eq $f "paid"}}bg-primary text-background border-primary{{else}}text-muted-fg border-border hover:border-primary{{end}} transition">已完成</a>
+    <a href="/admin/orders?status=await_manual" class="pill {{if eq $f "await_manual"}}bg-destructive text-background border-destructive{{else}}text-muted-fg border-border hover:border-destructive{{end}} transition">人工处理</a>
+    <a href="/admin/orders?status=expired" class="pill {{if eq $f "expired"}}bg-muted-fg text-background border-muted-fg{{else}}text-muted-fg border-border hover:border-muted-fg{{end}} transition">已过期</a>
+  </div>
+
+  <section class="bg-card hairline rounded-lg overflow-hidden ">
+    <table class="w-full text-[13.5px]">
+      <thead>
+        <tr class="hairline-b bg-secondary/40">
+          <th class="text-left px-5 py-3 eyebrow font-medium">订单号</th>
+          <th class="text-left px-5 py-3 eyebrow font-medium">商品</th>
+          <th class="text-left px-5 py-3 eyebrow font-medium">邮箱</th>
+          <th class="text-right px-5 py-3 eyebrow font-medium">金额</th>
+          <th class="text-left px-5 py-3 eyebrow font-medium">状态</th>
+          <th class="text-right px-5 py-3 eyebrow font-medium">下单时间</th>
+          <th class="px-5 py-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Orders}}
+        <tr class="hairline-b last:border-b-0 hover:bg-secondary/50 transition-colors">
+          <td class="px-5 py-3.5 font-mono text-[12px]">
+            <a href="/admin/orders/{{.OutTradeNo}}" class="text-primary hover:underline underline-offset-2">{{.OutTradeNo}}</a>
+          </td>
+          <td class="px-5 py-3.5 text-foreground">{{.ProductName}}</td>
+          <td class="px-5 py-3.5 text-muted-fg font-mono text-[12px]">{{.Email}}</td>
+          <td class="px-5 py-3.5 text-right font-mono num text-foreground">¥{{printf "%.2f" .AmountCNY}}</td>
+          <td class="px-5 py-3.5">
+            {{if eq .Status "paid"}}
+              <span class="pill text-primary border-primary-soft">已完成</span>
+            {{else if eq .Status "pending"}}
+              <span class="pill text-warning border-warning-soft">待支付</span>
+            {{else if eq .Status "await_manual"}}
+              <span class="pill text-destructive border-destructive-soft">人工</span>
+            {{else if eq .Status "expired"}}
+              <span class="pill text-muted-fg opacity-80 border-border-strong">过期</span>
+            {{end}}
+          </td>
+          <td class="px-5 py-3.5 text-right eyebrow num">{{fmtTime .CreatedAt}}</td>
+          <td class="px-5 py-3.5 text-right">
+            <a href="/admin/orders/{{.OutTradeNo}}" class="eyebrow text-primary hover:underline underline-offset-2">详情 →</a>
+          </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="7" class="px-5 py-16 text-center">
+          <div class="font-display text-[28px] italic text-muted-fg opacity-80">no records</div>
+          <p class="mt-1 eyebrow">没有匹配的订单</p>
+        </td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+</div>
+
+{{end}}

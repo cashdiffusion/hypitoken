@@ -1,0 +1,108 @@
+{{define "title"}}商品目录 · {{.SiteName}}{{end}}
+{{define "content"}}
+
+<section class="mb-20 reveal">
+  <div class="grid grid-cols-12 gap-6">
+    <div class="col-span-12 md:col-span-7">
+      <div class="section-meta mb-6">
+        <span class="eyebrow">001 / Atelier</span>
+      </div>
+      <h1 class="font-display text-[56px] md:text-[68px] leading-[1.02] tracking-tight text-foreground font-light">
+        精选数字商品<br>
+        <span class="italic font-normal text-primary">即时</span>送达。
+      </h1>
+      <p class="mt-7 text-[15.5px] leading-[1.7] text-muted-fg max-w-lg">
+        选一件 — 留下邮箱与查询密码 — 完成支付，卡密在数秒内送抵您的收件箱。
+        所有订单可凭查询密码随时调阅，永久保留。
+      </p>
+    </div>
+    <aside class="col-span-12 md:col-span-5 md:pl-8 md:border-l border-border">
+      <div class="eyebrow mb-4">三步交付</div>
+      <ol class="space-y-4 text-[14px] text-muted-fg">
+        <li class="flex gap-4">
+          <span class="font-mono text-muted-fg opacity-80 text-xs pt-0.5 num">01</span>
+          <span><span class="text-foreground font-medium">选</span> · 浏览目录，挑选商品</span>
+        </li>
+        <li class="flex gap-4">
+          <span class="font-mono text-muted-fg opacity-80 text-xs pt-0.5 num">02</span>
+          <span><span class="text-foreground font-medium">付</span> · 通过支付宝 / 微信完成结算</span>
+        </li>
+        <li class="flex gap-4">
+          <span class="font-mono text-muted-fg opacity-80 text-xs pt-0.5 num">03</span>
+          <span><span class="text-foreground font-medium">收</span> · 卡密自动入库，邮件同步送达</span>
+        </li>
+      </ol>
+    </aside>
+  </div>
+</section>
+
+<section>
+  <div class="flex items-end justify-between mb-8">
+    <h2 class="font-display text-[28px] tracking-tight text-foreground font-medium">在售目录</h2>
+    <span class="eyebrow">{{len .Products}} 件在售</span>
+  </div>
+
+  {{if .Products}}
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 stagger">
+    {{range $i, $p := .Products}}
+    <article class="group relative bg-card hairline rounded-lg overflow-hidden transition-all duration-300 hover:-translate-y-1 hover: hover:border-primary">
+      <div class="absolute top-4 right-4 eyebrow text-muted-fg opacity-80/70 num">{{printf "%03d" (add $i 1)}}</div>
+
+      <div class="p-7 pb-5">
+        <div class="eyebrow mb-3 text-primary/80">{{deliveryLabel $p.DeliveryType}}</div>
+        <h3 class="font-display text-[22px] leading-tight text-foreground font-medium tracking-tight pr-8">{{$p.Name}}</h3>
+        {{if $p.Description}}
+        <p class="mt-3 text-[13.5px] leading-relaxed text-muted-fg whitespace-pre-line line-clamp-3">{{$p.Description}}</p>
+        {{end}}
+      </div>
+
+      <div class="px-7 hairline-t pt-5 pb-5">
+        <div class="flex items-baseline justify-between">
+          <div>
+            <div class="eyebrow text-muted-fg opacity-80 mb-1">售价</div>
+            <div class="font-display text-[32px] leading-none text-foreground num tracking-tight">
+              <span class="text-[18px] text-muted-fg align-top mr-0.5">¥</span>{{printf "%.2f" $p.PriceCNY}}
+            </div>
+          </div>
+          {{if eq $p.DeliveryType "card"}}
+          <div class="text-right">
+            <div class="eyebrow text-muted-fg opacity-80 mb-1">库存</div>
+            {{if gt $p.StockAvailable 0}}
+            <div class="text-[13px] text-primary font-medium num">{{$p.StockAvailable}} 份</div>
+            {{else}}
+            <div class="text-[13px] text-destructive font-medium">售罄</div>
+            {{end}}
+          </div>
+          {{else}}
+          <div class="text-right">
+            <div class="eyebrow text-muted-fg opacity-80 mb-1">交付</div>
+            <div class="text-[13px] text-muted-fg font-medium">即时</div>
+          </div>
+          {{end}}
+        </div>
+      </div>
+
+      <div class="px-7 pb-7">
+        {{if and (eq $p.DeliveryType "card") (le $p.StockAvailable 0)}}
+        <button disabled class="w-full flex items-center justify-center gap-2 py-3 rounded-md border border-border bg-secondary text-muted-fg opacity-80 text-[13px] font-medium cursor-not-allowed">
+          暂时售罄
+        </button>
+        {{else}}
+        <a href="/buy/{{$p.ID}}" class="w-full btn-primary group/btn">
+          <span>立即购买</span>
+          <span class="arrow">→</span>
+        </a>
+        {{end}}
+      </div>
+    </article>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="border border-dashed border-border-strong rounded-lg p-16 text-center bg-secondary/40">
+    <div class="font-display text-[36px] text-muted-fg opacity-80 italic">vacant</div>
+    <p class="mt-2 text-[13.5px] text-muted-fg opacity-80">目录正在筹备中，请稍后再访。</p>
+  </div>
+  {{end}}
+</section>
+
+{{end}}

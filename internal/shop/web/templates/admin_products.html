@@ -1,0 +1,116 @@
+{{define "title"}}商品管理 · {{.SiteName}}{{end}}
+{{define "content"}}
+
+<div class="reveal">
+  <div class="flex items-end justify-between mb-10 hairline-b pb-6">
+    <div>
+      <a href="/admin" class="eyebrow hover:text-primary">← 返回管理台</a>
+      <div class="eyebrow mt-3 mb-1">Catalogue · 编目</div>
+      <h1 class="font-display text-[40px] leading-tight text-foreground font-medium">商品管理</h1>
+    </div>
+    <span class="eyebrow">{{len .Products}} 件</span>
+  </div>
+
+  {{if .Notice}}
+  <div class="mb-6 bg-primary-soft border border-primary-soft rounded-md px-4 py-3 text-[13px] text-primary flex items-center gap-2">
+    <span class="inline-block w-1.5 h-1.5 rounded-full bg-primary"></span>
+    {{.Notice}}
+  </div>
+  {{end}}
+  {{if .Error}}
+  <div class="mb-6 bg-destructive-soft border border-destructive-soft rounded-md px-4 py-3 text-[13px] text-destructive">{{.Error}}</div>
+  {{end}}
+
+  <!-- Product table -->
+  <section class="bg-card hairline rounded-lg overflow-hidden  mb-14">
+    <table class="w-full text-[13.5px]">
+      <thead>
+        <tr class="hairline-b bg-secondary/40">
+          <th class="text-left px-5 py-3 eyebrow font-medium">名称</th>
+          <th class="text-right px-5 py-3 eyebrow font-medium">价格</th>
+          <th class="text-left px-5 py-3 eyebrow font-medium">类型</th>
+          <th class="text-right px-5 py-3 eyebrow font-medium">库存</th>
+          <th class="text-left px-5 py-3 eyebrow font-medium">状态</th>
+          <th class="px-5 py-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Products}}
+        <tr class="hairline-b last:border-b-0 hover:bg-secondary/50 transition-colors">
+          <td class="px-5 py-4 text-foreground font-medium">{{.Name}}</td>
+          <td class="px-5 py-4 text-right font-mono num text-foreground">¥{{printf "%.2f" .PriceCNY}}</td>
+          <td class="px-5 py-4 text-muted-fg eyebrow">{{deliveryLabel .DeliveryType}}</td>
+          <td class="px-5 py-4 text-right font-mono num text-muted-fg">{{if eq .DeliveryType "card"}}{{.StockAvailable}}{{else}}—{{end}}</td>
+          <td class="px-5 py-4">
+            {{if .Active}}
+              <span class="pill text-primary border-primary-soft">在售</span>
+            {{else}}
+              <span class="pill text-muted-fg opacity-80 border-border-strong">下架</span>
+            {{end}}
+          </td>
+          <td class="px-5 py-4 text-right">
+            <a href="/admin/products/{{.ID}}" class="eyebrow text-primary hover:underline underline-offset-2">编辑 →</a>
+          </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="6" class="px-5 py-16 text-center">
+          <div class="font-display text-[28px] italic text-muted-fg opacity-80">empty</div>
+          <p class="mt-1 eyebrow">还没有商品，下方表单新建第一件</p>
+        </td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Create form -->
+  <section class="bg-card hairline rounded-lg ">
+    <div class="p-7 hairline-b">
+      <div class="eyebrow mb-2">New Entry · 新建</div>
+      <h2 class="font-display text-[24px] text-foreground font-medium">新建商品</h2>
+    </div>
+    <form method="POST" action="/admin/products" class="p-7 grid grid-cols-1 md:grid-cols-2 gap-6">
+      <label class="space-y-2 md:col-span-2">
+        <div class="flex items-baseline justify-between">
+          <span class="text-[13px] font-medium text-foreground">名称</span>
+          <span class="eyebrow">required</span>
+        </div>
+        <input type="text" name="name" required class="field">
+      </label>
+      <label class="space-y-2">
+        <span class="text-[13px] font-medium text-foreground block">价格（元）</span>
+        <input type="number" name="price_cny" min="0.01" step="0.01" required class="field font-mono">
+      </label>
+      <label class="space-y-2">
+        <span class="text-[13px] font-medium text-foreground block">排序权重</span>
+        <input type="number" name="sort_order" value="0" class="field font-mono">
+      </label>
+      <label class="space-y-2 md:col-span-2">
+        <span class="text-[13px] font-medium text-foreground block">描述</span>
+        <textarea name="description" rows="3" class="field"></textarea>
+      </label>
+      <label class="space-y-2">
+        <span class="text-[13px] font-medium text-foreground block">发货类型</span>
+        <select name="delivery_type" class="field bg-card">
+          <option value="auto">自动消息（固定模板）</option>
+          <option value="card">卡密池（每订单弹一条）</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-3 pt-7">
+        <input type="checkbox" name="active" value="1" checked class="w-4 h-4 accent-primary">
+        <span class="text-[14px] text-foreground">立即上架</span>
+      </label>
+      <label class="space-y-2 md:col-span-2">
+        <span class="text-[13px] font-medium text-foreground block">自动发货模板</span>
+        <textarea name="delivery_template" rows="3" placeholder="自动消息模式下，此内容将原样发送给买家" class="field font-mono text-[12.5px]"></textarea>
+      </label>
+      <div class="md:col-span-2 pt-2">
+        <button type="submit" class="btn-primary">
+          <span>新建商品</span>
+          <span class="arrow">→</span>
+        </button>
+      </div>
+    </form>
+  </section>
+</div>
+
+{{end}}

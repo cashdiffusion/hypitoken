@@ -38,7 +38,7 @@ func NewPKCESessions() *PKCESessions { return &PKCESessions{sessions: make(map[s
 // Start generates a fresh PKCE pair, registers it, and returns the sign-in URL
 // + state token. redirectURI is the URL the user's browser will land on after
 // they authorize — typically the admin panel's own callback endpoint, e.g.
-// https://your-host/mgmt-console/api/kiro/oauth-callback.
+// https://your-host/admin/api/kiro/oauth-callback.
 //
 // label is stored on the session so FinishLogin can apply it to the new entry.
 func (p *PKCESessions) Start(redirectURI, label string) (signInURL, state string, err error) {

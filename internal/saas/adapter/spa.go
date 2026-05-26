@@ -12,7 +12,7 @@ import (
 )
 
 // MountSPA serves the embedded SaaS SPA at the root path. The Go process
-// keeps full control over /v1/*, /api/v2/*, /healthz, /mgmt-console/*, etc.;
+// keeps full control over /v1/*, /api/v2/*, /admin/api/*, /healthz, etc.;
 // every other path falls through to the React app's HTML shell so that
 // client-side routing works on hard-refresh.
 //
@@ -54,7 +54,7 @@ func MountSPA(engine *gin.Engine, dist fs.FS) {
 		// Don't intercept anything that looks like an API namespace —
 		// /api/v2 already has its own routes; reaching this branch with that
 		// prefix means a typo, which deserves a 404.
-		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/v1/") {
+		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/v1/") || strings.HasPrefix(path, "/admin/") {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}

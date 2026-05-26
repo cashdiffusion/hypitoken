@@ -24,7 +24,7 @@ import (
 // + billing notify) sit outside RequireUser. credH may be nil — when set,
 // /api/v2/admin/credentials/* is exposed. legacyH may be nil — when set, the
 // /api/v2/admin/* group also exposes request-log queries + Anthropic OAuth
-// quota probe (handlers reused from the legacy /mgmt-console panel).
+// quota probe (handlers reused from the legacy operator API).
 func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog) {
 	v2 := engine.Group("/api/v2")
 
