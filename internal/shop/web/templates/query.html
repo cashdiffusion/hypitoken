@@ -1,0 +1,51 @@
+{{define "title"}}订单查询 · {{.SiteName}}{{end}}
+{{define "content"}}
+
+<div class="max-w-md mx-auto reveal">
+  <div class="section-meta mb-6">
+    <span class="eyebrow">Locate</span>
+  </div>
+  <h1 class="font-display text-[40px] leading-[1.08] tracking-tight text-foreground font-medium">
+    查阅<span class="italic font-normal text-primary"> 一份订单</span>
+  </h1>
+  <p class="mt-4 text-[14.5px] leading-relaxed text-muted-fg">
+    输入下单时获得的订单号、邮箱与查询密码，调取订单详情与卡密。
+  </p>
+
+  {{if .Error}}
+  <div class="mt-6 bg-destructive-soft border border-destructive-soft rounded-md px-4 py-3 text-[13px] text-destructive">
+    {{.Error}}
+  </div>
+  {{end}}
+
+  <form method="POST" action="/order" class="mt-10 bg-card hairline rounded-lg  p-7 space-y-6">
+    <div>
+      <div class="flex items-baseline justify-between mb-2">
+        <label class="text-[13px] font-medium text-foreground">订单号</label>
+        <span class="eyebrow">no.</span>
+      </div>
+      <input type="text" name="trade_no" required value="{{.TradeNo}}" class="field font-mono text-[13px]" placeholder="Sxxxxxxxxxxxxxxxx">
+    </div>
+
+    <div>
+      <label class="text-[13px] font-medium text-foreground mb-2 block">邮箱</label>
+      <input type="email" name="email" required value="{{.Email}}" class="field" autocomplete="email">
+    </div>
+
+    <div>
+      <label class="text-[13px] font-medium text-foreground mb-2 block">查询密码</label>
+      <input type="password" name="query_pass" required class="field" autocomplete="current-password">
+    </div>
+
+    <button type="submit" class="w-full btn-primary py-3">
+      <span>查阅订单</span>
+      <span class="arrow">→</span>
+    </button>
+  </form>
+
+  <p class="mt-6 text-center text-[12px] text-muted-fg opacity-80">
+    尚未下单？<a href="/" class="text-foreground underline underline-offset-2 hover:text-primary">浏览商品目录</a>
+  </p>
+</div>
+
+{{end}}

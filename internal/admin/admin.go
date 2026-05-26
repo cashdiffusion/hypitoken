@@ -121,30 +121,19 @@ func aggToCounts(a requestlog.Aggregate) usage.Counts {
 	}
 }
 
-// Register attaches the admin SPA and API routes.
-// If cfg.AdminToken is empty the admin surface is disabled.
-// The mount prefix is cfg.AdminPath (default /mgmt-console); changing it
-// per deployment hides the panel from trivial /admin scans.
+// Register attaches the legacy admin JSON API at /admin/api/*. The SPA
+// shell that used to live at a separate /mgmt-console/ path has been removed — the SaaS
+// frontend (mounted at /) is the only operator UI now.
+//
+// If cfg.AdminToken is empty the API is disabled.
 func (h *Handler) Register(r *gin.Engine) {
 	if strings.TrimSpace(h.cfg.AdminToken) == "" {
 		log.Info("admin: disabled (admin_token not set)")
 		return
 	}
-	base := h.cfg.AdminPath
-	log.Infof("admin: panel enabled at %s/", base)
+	log.Infof("admin: legacy JSON API enabled at /admin/api/")
 
-	// Serve the SPA (no auth required for the HTML shell itself; the API
-	// underneath is protected). dist/ is the Vite build output; before
-	// `make web` has run it contains only .gitkeep and the panel 404s.
-	sub, err := fs.Sub(webFS, "web/dist")
-	if err != nil {
-		log.Errorf("admin: failed to scope embed FS: %v", err)
-		return
-	}
-	// API group must be registered BEFORE the static catch-all — gin's
-	// radix tree won't accept fixed-path routes underneath a wildcard
-	// sibling at the same prefix.
-	api := r.Group(base + "/api")
+	api := r.Group("/admin/api")
 	api.Use(h.adminAuth())
 	h.apiGroup = api
 	{
@@ -174,25 +163,6 @@ func (h *Handler) Register(r *gin.Engine) {
 		// called yet — late wiring re-attaches them).
 		h.RegisterKiro(api)
 	}
-
-	// Static SPA. Vite emits a single entry HTML plus hashed chunks under
-	// /assets/. We expose /assets/* explicitly so the catch-all never eats
-	// requests destined for /api or unrelated Gin routes registered at a
-	// different prefix.
-	r.GET(base, func(c *gin.Context) {
-		c.Redirect(http.StatusFound, base+"/")
-	})
-	r.GET(base+"/", func(c *gin.Context) {
-		serveAsset(c, sub, "index.html")
-	})
-	r.GET(base+"/assets/*filepath", func(c *gin.Context) {
-		p := strings.TrimPrefix(c.Param("filepath"), "/")
-		if p == "" {
-			c.AbortWithStatus(http.StatusNotFound)
-			return
-		}
-		serveAsset(c, sub, "assets/"+p)
-	})
 }
 
 func serveAsset(c *gin.Context, root fs.FS, name string) {
@@ -238,7 +208,7 @@ func guessMime(name string) string {
 }
 
 // SSOAuth is an optional hook that lets the SaaS layer turn a SaaS JWT
-// into a legacy /mgmt-console authorization. main.go wires it up after the
+// into a legacy /admin/api/* authorization. main.go wires it up after the
 // SaaS issuer is constructed; nil = SSO disabled (legacy token only).
 //
 // Returns (allowed, isAdmin):

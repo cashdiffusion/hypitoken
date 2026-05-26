@@ -32,6 +32,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/mail"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	"github.com/wjsoj/CPA-Claude/internal/server"
+	"github.com/wjsoj/CPA-Claude/internal/shop"
 	"github.com/wjsoj/cc-core/usage"
 )
 
@@ -223,7 +224,7 @@ func main() {
 			spaFS = f
 		}
 		legacyAdmin := s.LegacyAdmin()
-		// SSO bridge: a logged-in SaaS user can hit /mgmt-console/api/*
+		// SSO bridge: a logged-in SaaS user can hit /admin/api/*
 		// with their JWT instead of the legacy operator token. GETs are
 		// allowed for any authenticated user (so the Overview / charts /
 		// Pricing tabs work for everyone signed in); mutations require
@@ -253,6 +254,43 @@ func main() {
 
 		saasShutdown = append(saasShutdown, func() { _ = saasDB.Close() })
 		log.Info("SaaS: enabled")
+	}
+
+	// Shop (发卡网) standalone storefront. Independent of SaaS — wires its
+	// own SQLite + Z-Pay gateway + SMTP mailer onto its own gin engine,
+	// attached to the server's endpoint list so Start()/Shutdown() see it.
+	if cfg.Shop.Enabled && cfg.Endpoints.Shop.IsEnabled() {
+		shopGw, err := billing.NewZPayGateway(billing.ZPayParams{
+			BaseURL:   cfg.Shop.ZPay.BaseURL,
+			PID:       cfg.Shop.ZPay.PID,
+			Key:       cfg.Shop.ZPay.Key,
+			NotifyURL: cfg.Shop.NotifyURL,
+			ReturnURL: cfg.Shop.SiteURL, // generic return; per-order URL is the buyer-facing page
+		})
+		if err != nil {
+			log.Fatalf("shop zpay: %v", err)
+		}
+		shopDB, err := shop.Open(cfg.Shop.DBPath)
+		if err != nil {
+			log.Fatalf("shop db: %v", err)
+		}
+		shopMailer := shop.NewMailer(cfg.Shop.SMTP, cfg.Shop.SiteName)
+		shopInst, err := shop.New(cfg.Shop, shopDB, shopGw, shopMailer, cfg.AdminToken)
+		if err != nil {
+			log.Fatalf("shop init: %v", err)
+		}
+		shopEng := gin.New()
+		shopEng.Use(gin.Recovery())
+		shopEng.Use(func(c *gin.Context) {
+			start := time.Now()
+			c.Next()
+			log.Infof("[shop] %s %s %d %s", c.Request.Method, c.Request.URL.Path, c.Writer.Status(), time.Since(start))
+		})
+		shopInst.RegisterRoutes(shopEng)
+		addr := fmt.Sprintf("%s:%d", cfg.Endpoints.Shop.Host, cfg.Endpoints.Shop.Port)
+		s.AttachExtraEndpoint("shop", addr, shopEng)
+		saasShutdown = append(saasShutdown, func() { _ = shopDB.Close() })
+		log.Infof("shop: enabled at %s (site=%q notify=%q)", addr, cfg.Shop.SiteName, cfg.Shop.NotifyURL)
 	}
 
 	for _, ep := range s.Endpoints() {

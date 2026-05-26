@@ -1,0 +1,38 @@
+{{define "title"}}订单 {{.TradeNo}} · {{.SiteName}}{{end}}
+{{define "content"}}
+
+<div class="max-w-md mx-auto reveal">
+  <div class="section-meta mb-6">
+    <span class="eyebrow">Verify</span>
+  </div>
+  <h1 class="font-display text-[36px] leading-[1.1] tracking-tight text-foreground font-medium">
+    凭密码<span class="italic font-normal text-primary"> 解锁</span>
+  </h1>
+
+  <div class="mt-6 bg-secondary hairline rounded-md p-4 flex items-baseline justify-between">
+    <span class="eyebrow">订单号</span>
+    <span class="font-mono text-[13px] text-muted-fg num">{{.TradeNo}}</span>
+  </div>
+  <p class="mt-3 text-[13.5px] leading-relaxed text-muted-fg">
+    该订单已绑定 <span class="font-mono text-foreground">{{.Email}}</span>。
+    请输入下单时设置的查询密码以查看完整详情。
+  </p>
+
+  <form method="POST" action="/order" class="mt-8 bg-card hairline rounded-lg  p-7 space-y-6">
+    <input type="hidden" name="trade_no" value="{{.TradeNo}}">
+    <div>
+      <label class="text-[13px] font-medium text-foreground mb-2 block">邮箱 · 完整地址</label>
+      <input type="email" name="email" required class="field" autocomplete="email">
+    </div>
+    <div>
+      <label class="text-[13px] font-medium text-foreground mb-2 block">查询密码</label>
+      <input type="password" name="query_pass" required autofocus class="field" autocomplete="current-password">
+    </div>
+    <button type="submit" class="w-full btn-primary py-3">
+      <span>查看订单</span>
+      <span class="arrow">→</span>
+    </button>
+  </form>
+</div>
+
+{{end}}

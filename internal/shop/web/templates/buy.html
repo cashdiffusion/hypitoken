@@ -1,0 +1,130 @@
+{{define "title"}}购买 {{.Product.Name}} · {{.SiteName}}{{end}}
+{{define "content"}}
+
+<div class="mb-10 reveal">
+  <a href="/" class="eyebrow hover:text-primary inline-flex items-center gap-2 transition-colors">
+    <span>←</span> 返回目录
+  </a>
+</div>
+
+<div class="grid grid-cols-12 gap-10 lg:gap-16">
+
+  <!-- Product detail — sticky on desktop -->
+  <aside class="col-span-12 lg:col-span-5 reveal">
+    <div class="lg:sticky lg:top-28">
+      <div class="section-meta mb-5">
+        <span class="eyebrow">单品 · 收据预览</span>
+      </div>
+      <h1 class="font-display text-[42px] leading-[1.05] tracking-tight text-foreground font-medium">
+        {{.Product.Name}}
+      </h1>
+      {{if .Product.Description}}
+      <p class="mt-5 text-[14.5px] leading-[1.75] text-muted-fg whitespace-pre-line">{{.Product.Description}}</p>
+      {{end}}
+
+      <dl class="mt-10 space-y-4 hairline-t pt-6">
+        <div class="flex items-baseline justify-between">
+          <dt class="eyebrow">售价</dt>
+          <dd class="font-display text-[44px] leading-none text-foreground num tracking-tight">
+            <span class="text-[20px] text-muted-fg align-top">¥</span>{{printf "%.2f" .Product.PriceCNY}}
+          </dd>
+        </div>
+        <div class="flex items-baseline justify-between hairline-t pt-4">
+          <dt class="eyebrow">交付方式</dt>
+          <dd class="text-[13px] text-muted-fg font-mono">{{deliveryLabel .Product.DeliveryType}}</dd>
+        </div>
+        {{if eq .Product.DeliveryType "card"}}
+        <div class="flex items-baseline justify-between hairline-t pt-4">
+          <dt class="eyebrow">现货库存</dt>
+          <dd class="text-[13px] font-mono num {{if gt .Product.StockAvailable 0}}text-primary{{else}}text-destructive{{end}}">
+            {{.Product.StockAvailable}} 份
+          </dd>
+        </div>
+        {{end}}
+      </dl>
+    </div>
+  </aside>
+
+  <!-- Form -->
+  <section class="col-span-12 lg:col-span-7 reveal" style="animation-delay:0.1s">
+    {{if .OutOfStock}}
+    <div class="bg-destructive-soft border border-destructive-soft rounded-lg p-6">
+      <div class="eyebrow text-destructive mb-2">售罄</div>
+      <p class="text-[14.5px] text-foreground">该商品暂时缺货，请稍后再访目录。</p>
+      <a href="/" class="mt-5 inline-flex btn-ghost">返回目录</a>
+    </div>
+    {{else}}
+
+    <div class="bg-card hairline rounded-lg ">
+      <div class="p-7 lg:p-9 hairline-b">
+        <div class="eyebrow mb-2">结算 · 三个字段</div>
+        <h2 class="font-display text-[26px] leading-tight text-foreground font-medium">
+          填写收件方式
+        </h2>
+      </div>
+
+      {{if .FormError}}
+      <div class="mx-7 lg:mx-9 mt-6 bg-destructive-soft border border-destructive-soft rounded-md px-4 py-3 text-[13px] text-destructive">
+        {{.FormError}}
+      </div>
+      {{end}}
+
+      <form method="POST" action="/buy/{{.Product.ID}}" class="p-7 lg:p-9 space-y-7">
+        <div>
+          <div class="flex items-baseline justify-between mb-2">
+            <label class="text-[13px] font-medium text-foreground">邮箱 · 收件地址</label>
+            <span class="eyebrow">required</span>
+          </div>
+          <input type="email" name="email" required autocomplete="email" class="field" placeholder="you@example.com">
+          <p class="mt-2 text-[12px] text-muted-fg opacity-80 leading-relaxed">订单详情、卡密内容将自动送达此邮箱。</p>
+        </div>
+
+        <div>
+          <div class="flex items-baseline justify-between mb-2">
+            <label class="text-[13px] font-medium text-foreground">查询密码 · 4–64 位</label>
+            <span class="eyebrow">required</span>
+          </div>
+          <input type="password" name="query_pass" required minlength="4" maxlength="64" class="field" placeholder="设置一个仅自己知晓的密码">
+          <p class="mt-2 text-[12px] text-muted-fg opacity-80 leading-relaxed">
+            用于此后查阅订单详情，请勿使用与邮箱相同的密码。
+          </p>
+        </div>
+
+        <div>
+          <div class="flex items-baseline justify-between mb-3">
+            <label class="text-[13px] font-medium text-foreground">支付方式</label>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="pay-pick">
+              <input type="radio" name="pay_method" value="alipay" checked>
+              <div class="flex-1">
+                <div class="text-[14px] font-medium text-foreground">支付宝</div>
+                <div class="eyebrow mt-0.5 text-muted-fg opacity-80">alipay</div>
+              </div>
+            </label>
+            <label class="pay-pick">
+              <input type="radio" name="pay_method" value="wxpay">
+              <div class="flex-1">
+                <div class="text-[14px] font-medium text-foreground">微信支付</div>
+                <div class="eyebrow mt-0.5 text-muted-fg opacity-80">wxpay</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="hairline-t pt-7">
+          <button type="submit" class="w-full btn-primary text-[14px] py-3.5">
+            <span>创建订单 · 应付 ¥{{printf "%.2f" .Product.PriceCNY}}</span>
+            <span class="arrow">→</span>
+          </button>
+          <p class="mt-4 text-center text-[12px] text-muted-fg opacity-80">
+            支付成功后，<a href="/order" class="underline underline-offset-2 hover:text-primary">订单查询页</a>可凭密码随时调阅。
+          </p>
+        </div>
+      </form>
+    </div>
+    {{end}}
+  </section>
+</div>
+
+{{end}}

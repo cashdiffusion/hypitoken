@@ -3,6 +3,13 @@
 /state.json.tmp
 /config.yaml
 /tokens.json
+/saas.db
+/saas.db-wal
+/saas.db-shm
+/shop.db
+/shop.db-wal
+/shop.db-shm
+/kiro_auths/
 /logs/
 /bin/
 *.log

@@ -22,7 +22,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/mgmt-console/api": {
+      "/admin/api": {
         target: "http://localhost:8317",
         changeOrigin: false,
       },

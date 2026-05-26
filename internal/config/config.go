@@ -8,6 +8,7 @@ import (
 
 	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/CPA-Claude/internal/saas"
+	"github.com/wjsoj/CPA-Claude/internal/shop"
 	"gopkg.in/yaml.v3"
 )
 
@@ -37,13 +38,15 @@ type EndpointConfig struct {
 // IsEnabled reports whether this endpoint should be bound on startup.
 func (e EndpointConfig) IsEnabled() bool { return !e.Disabled && e.Port > 0 }
 
-// EndpointsConfig groups the per-provider endpoint configs. Both endpoints
-// share the same upstream credential pool, client token store, usage store,
-// and request log. They differ only in the routes they expose and the
-// credential subset they route to.
+// EndpointsConfig groups the per-provider endpoint configs. Claude and
+// Codex share the same upstream credential pool, client token store,
+// usage store, and request log — they differ only in the routes they
+// expose and the credential subset they route to. Shop is an independent
+// storefront (发卡网) that doesn't touch any of the proxy state.
 type EndpointsConfig struct {
 	Claude EndpointConfig `yaml:"claude"`
 	Codex  EndpointConfig `yaml:"codex"`
+	Shop   EndpointConfig `yaml:"shop"`
 }
 
 type Config struct {
@@ -67,11 +70,6 @@ type Config struct {
 	// Token required to access the management panel and APIs.
 	// Empty = panel disabled. Send as X-Admin-Token header (or Authorization: Bearer).
 	AdminToken string `yaml:"admin_token,omitempty"`
-
-	// URL prefix for the management panel. Changing this from the default
-	// makes trivial `/admin`-style dictionary scans miss the panel. Must
-	// start with "/" and must not end with "/". Default: /mgmt-console.
-	AdminPath string `yaml:"admin_path,omitempty"`
 
 	// API-key fallback pool. No concurrency limit.
 	APIKeys []APIKey `yaml:"api_keys"`
@@ -137,6 +135,11 @@ type Config struct {
 	// SaaS multi-tenant layer (commercial mode). Disabled by default; the
 	// proxy behaves exactly like the OSS build when SaaS.Enabled is false.
 	SaaS saas.Config `yaml:"saas"`
+
+	// Shop is the standalone 发卡网 storefront — independent of SaaS. When
+	// Shop.Enabled is false and endpoints.shop is disabled, no shop code
+	// runs and no extra listener binds.
+	Shop shop.Config `yaml:"shop"`
 }
 
 // TokenGroup defines one named credential group + its upstream channel +
@@ -214,6 +217,16 @@ func applyDefaults(c *Config, path string) {
 	if c.Endpoints.Codex.Host == "" {
 		c.Endpoints.Codex.Host = "0.0.0.0"
 	}
+	if c.Endpoints.Shop.Port == 0 {
+		// Shop defaults to configured-but-disabled so existing deployments
+		// don't bind an extra listener on upgrade. Enable explicitly via
+		// endpoints.shop.disabled=false + shop.enabled=true.
+		c.Endpoints.Shop.Port = 8319
+		c.Endpoints.Shop.Disabled = true
+	}
+	if c.Endpoints.Shop.Host == "" {
+		c.Endpoints.Shop.Host = "0.0.0.0"
+	}
 	if c.LogLevel == "" {
 		c.LogLevel = "info"
 	}
@@ -252,19 +265,11 @@ func applyDefaults(c *Config, path string) {
 	if c.LogRetentionDays == 0 {
 		c.LogRetentionDays = 90
 	}
-	p := strings.TrimSpace(c.AdminPath)
-	if p == "" {
-		p = "/mgmt-console"
-	}
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	p = strings.TrimRight(p, "/")
-	if p == "" {
-		p = "/mgmt-console"
-	}
-	c.AdminPath = p
 	c.SaaS.ApplyDefaults(filepath.Dir(path))
+	c.Shop.ApplyDefaults(filepath.Dir(path))
+	if c.Shop.DBPath != "" && !filepath.IsAbs(c.Shop.DBPath) {
+		c.Shop.DBPath = filepath.Join(filepath.Dir(path), c.Shop.DBPath)
+	}
 
 	if c.KiroAuthDir == "" {
 		c.KiroAuthDir = filepath.Join(dir, "kiro_auths")

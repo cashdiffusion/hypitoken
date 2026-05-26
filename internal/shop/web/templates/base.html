@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{block "title" .}}{{.SiteName}}{{end}}</title>
+
+<!-- Pre-render theme bootstrap: avoid a light→dark flash on hard refresh. -->
+<script>
+  (function(){
+    try {
+      var stored = localStorage.getItem('hypishop.theme');
+      var sys = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var dark = stored ? stored === 'dark' : sys;
+      if (dark) document.documentElement.classList.add('dark');
+    } catch(e) {}
+  })();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,500;12..96,600;12..96,700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  // Class-based dark mode + tokens bound to CSS variables, so both modes
+  // share one Tailwind class set.
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          background:       'var(--background)',
+          foreground:       'var(--foreground)',
+          card:             'var(--card)',
+          'card-fg':        'var(--card-foreground)',
+          popover:          'var(--popover)',
+          primary:          'var(--primary)',
+          'primary-fg':     'var(--primary-foreground)',
+          secondary:        'var(--secondary)',
+          'secondary-fg':   'var(--secondary-foreground)',
+          muted:            'var(--muted)',
+          'muted-fg':       'var(--muted-foreground)',
+          accent:           'var(--accent)',
+          'accent-fg':      'var(--accent-foreground)',
+          destructive:      'var(--destructive)',
+          'destructive-fg': 'var(--destructive-foreground)',
+          success:          'var(--success)',
+          warning:          'var(--warning)',
+          info:             'var(--info)',
+          border:           'var(--border)',
+          'border-strong':  'var(--border-strong)',
+          ring:             'var(--ring)',
+        },
+        fontFamily: {
+          display: ['"Bricolage Grotesque"', 'ui-sans-serif', 'system-ui'],
+          sans:    ['"Bricolage Grotesque"', 'ui-sans-serif', 'system-ui'],
+          mono:    ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        },
+        letterSpacing: { 'meta': '0.18em' },
+      }
+    }
+  }
+</script>
+
+<style>
+  /* === Color tokens, mirroring internal/admin/web/src/styles/globals.css === */
+  :root {
+    --background: oklch(0.985 0.006 160);
+    --foreground: oklch(0.16 0.018 60);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.16 0.018 60);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.16 0.018 60);
+    --primary: oklch(0.38 0.09 215);
+    --primary-foreground: oklch(0.99 0.005 85);
+    --secondary: oklch(0.96 0.008 85);
+    --secondary-foreground: oklch(0.22 0.018 60);
+    --muted: oklch(0.955 0.008 85);
+    --muted-foreground: oklch(0.38 0.014 70);
+    --accent: oklch(0.94 0.012 85);
+    --accent-foreground: oklch(0.22 0.018 60);
+    --destructive: oklch(0.52 0.18 25);
+    --destructive-foreground: oklch(0.99 0.005 85);
+    --success: oklch(0.58 0.12 150);
+    --warning: oklch(0.68 0.15 70);
+    --info: oklch(0.48 0.1 215);
+    --border: oklch(0.9 0.008 85);
+    --border-strong: oklch(0.82 0.01 85);
+    --ring: oklch(0.38 0.09 215);
+  }
+  .dark {
+    --background: oklch(0.17 0.03 215);
+    --foreground: oklch(0.94 0.008 85);
+    --card: oklch(0.19 0.013 260);
+    --card-foreground: oklch(0.94 0.008 85);
+    --popover: oklch(0.2 0.013 260);
+    --popover-foreground: oklch(0.94 0.008 85);
+    --primary: oklch(0.82 0.16 145);
+    --primary-foreground: oklch(0.14 0.012 260);
+    --secondary: oklch(0.25 0.014 260);
+    --secondary-foreground: oklch(0.94 0.008 85);
+    --muted: oklch(0.24 0.014 260);
+    --muted-foreground: oklch(0.76 0.014 80);
+    --accent: oklch(0.27 0.02 260);
+    --accent-foreground: oklch(0.94 0.008 85);
+    --destructive: oklch(0.68 0.2 25);
+    --destructive-foreground: oklch(0.14 0.012 260);
+    --success: oklch(0.78 0.16 145);
+    --warning: oklch(0.82 0.16 72);
+    --info: oklch(0.72 0.14 215);
+    --border: oklch(0.26 0.015 260);
+    --border-strong: oklch(0.36 0.02 260);
+    --ring: oklch(0.82 0.16 145);
+  }
+
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-feature-settings: "ss01", "cv11", "tnum";
+    min-height: 100vh;
+    background-attachment: fixed;
+  }
+  /* Aurora mesh — dark mode (multi-source) */
+  html.dark body {
+    background-image:
+      radial-gradient(ellipse 70% 50% at 8% 0%,  color-mix(in oklch, var(--primary) 22%, transparent) 0%, transparent 60%),
+      radial-gradient(ellipse 55% 45% at 95% 5%, color-mix(in oklch, var(--info) 16%, transparent) 0%, transparent 65%),
+      radial-gradient(ellipse 65% 50% at 0% 100%, color-mix(in oklch, var(--info) 14%, transparent) 0%, transparent 70%),
+      radial-gradient(ellipse 60% 45% at 100% 95%, color-mix(in oklch, var(--warning) 10%, transparent) 0%, transparent 70%);
+  }
+  /* Light mode mesh: green-only soft */
+  html:not(.dark) body {
+    background-image:
+      radial-gradient(ellipse 55% 45% at 10% 5%, color-mix(in oklch, var(--success) 14%, transparent) 0%, transparent 65%),
+      radial-gradient(ellipse 45% 40% at 95% 10%, color-mix(in oklch, var(--success) 8%, transparent) 0%, transparent 70%),
+      radial-gradient(ellipse 60% 45% at 15% 100%, color-mix(in oklch, var(--success) 10%, transparent) 0%, transparent 70%),
+      radial-gradient(ellipse 50% 40% at 95% 95%, color-mix(in oklch, var(--success) 7%, transparent) 0%, transparent 70%);
+  }
+  /* Subtle 48px grid overlay */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      linear-gradient(to right, color-mix(in oklch, var(--border) 35%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in oklch, var(--border) 35%, transparent) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 90% 90% at 50% 35%, black 20%, transparent 90%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 90% at 50% 35%, black 20%, transparent 90%);
+    opacity: 0.55;
+  }
+  html.dark body::before { opacity: 0.35; }
+  body > * { position: relative; z-index: 1; }
+
+  ::selection { background-color: color-mix(in oklch, var(--primary) 25%, transparent); }
+
+  /* Typography: Bricolage uses opsz axis — small for body, big for display */
+  body { font-family: 'Bricolage Grotesque', ui-sans-serif, system-ui; font-variation-settings: "opsz" 14, "wdth" 100; }
+  h1,h2,h3,h4, .font-display { letter-spacing: -0.025em; font-variation-settings: "opsz" 96, "wdth" 100; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: "zero", "ss01"; }
+  .num  { font-variant-numeric: tabular-nums; font-feature-settings: "tnum", "zero"; }
+
+  /* Section eyebrow — mono caps */
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px; line-height: 1;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--muted-foreground);
+    font-feature-settings: "tnum", "zero";
+  }
+  .section-meta { display: flex; align-items: center; gap: 10px; }
+  .section-meta::before { content: ''; width: 24px; height: 1px; background: var(--border-strong); }
+  .section-meta::after  { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  /* Hairlines bound to theme border */
+  .hairline-b { border-bottom: 1px solid var(--border); }
+  .hairline-t { border-top: 1px solid var(--border); }
+  .hairline   { border: 1px solid var(--border); }
+
+  /* Reveal animations */
+  @keyframes riseIn { from { opacity: 0; transform: translateY(8px);} to { opacity: 1; transform: translateY(0);} }
+  .reveal { animation: riseIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+  .stagger > * { animation: riseIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+  .stagger > *:nth-child(1){animation-delay:.04s}
+  .stagger > *:nth-child(2){animation-delay:.10s}
+  .stagger > *:nth-child(3){animation-delay:.16s}
+  .stagger > *:nth-child(4){animation-delay:.22s}
+  .stagger > *:nth-child(5){animation-delay:.28s}
+  .stagger > *:nth-child(6){animation-delay:.34s}
+  .stagger > *:nth-child(n+7){animation-delay:.40s}
+
+  /* Inputs */
+  .field {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 11px 14px;
+    font-size: 14px;
+    color: var(--foreground);
+    width: 100%;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 18%, transparent);
+  }
+  .field::placeholder { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+
+  /* Buttons */
+  .btn-primary {
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    background: var(--primary); color: var(--primary-foreground);
+    padding: 12px 22px; border-radius: 8px;
+    font-weight: 500; font-size: 14px;
+    transition: filter 0.2s, transform 0.15s, box-shadow 0.2s;
+    border: 1px solid color-mix(in oklch, var(--primary) 90%, black);
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--primary) 60%, black) inset, 0 4px 14px -6px color-mix(in oklch, var(--primary) 50%, transparent);
+  }
+  .btn-primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-primary .arrow { transition: transform 0.2s; }
+  .btn-primary:hover .arrow { transform: translateX(3px); }
+  .btn-ghost {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    background: transparent; color: var(--foreground);
+    border: 1px solid var(--border-strong);
+    padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    transition: all 0.2s;
+  }
+  .btn-ghost:hover { border-color: var(--primary); color: var(--primary); background: color-mix(in oklch, var(--primary) 6%, transparent); }
+  .btn-danger {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: transparent; color: var(--destructive);
+    border: 1px solid color-mix(in oklch, var(--destructive) 40%, transparent);
+    padding: 10px 14px; border-radius: 8px; font-size: 13px;
+    transition: all 0.2s;
+  }
+  .btn-danger:hover { background: var(--destructive); color: var(--destructive-foreground); border-color: var(--destructive); }
+
+  /* Tint helpers — Tailwind v3 + CSS-var colors don't support /alpha syntax
+     in arbitrary values, so these named utilities back the "soft" variants
+     used by alert blocks and stat tiles. */
+  .bg-primary-soft     { background: color-mix(in oklch, var(--primary) 12%, transparent); }
+  .bg-success-soft     { background: color-mix(in oklch, var(--success) 12%, transparent); }
+  .bg-warning-soft     { background: color-mix(in oklch, var(--warning) 16%, transparent); }
+  .bg-destructive-soft { background: color-mix(in oklch, var(--destructive) 12%, transparent); }
+  .bg-info-soft        { background: color-mix(in oklch, var(--info) 12%, transparent); }
+  .border-primary-soft     { border-color: color-mix(in oklch, var(--primary) 35%, transparent); }
+  .border-success-soft     { border-color: color-mix(in oklch, var(--success) 35%, transparent); }
+  .border-warning-soft     { border-color: color-mix(in oklch, var(--warning) 40%, transparent); }
+  .border-destructive-soft { border-color: color-mix(in oklch, var(--destructive) 35%, transparent); }
+
+  /* Pill badges */
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    padding: 4px 10px; border-radius: 999px;
+    border: 1px solid currentColor;
+    background: color-mix(in oklch, currentColor 8%, transparent);
+  }
+  .pulse::before {
+    content: ''; display: inline-block; width: 7px; height: 7px;
+    border-radius: 999px; background: currentColor;
+    margin-right: 6px; vertical-align: middle;
+    animation: pulseDot 1.6s ease-in-out infinite;
+  }
+  @keyframes pulseDot { 0%,100%{opacity:1; transform:scale(1);} 50%{opacity:0.35; transform:scale(0.85);} }
+
+  /* Pay-method radio cards */
+  .pay-pick {
+    cursor: pointer; padding: 14px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card);
+    display: flex; align-items: center; gap: 12px;
+    transition: all 0.2s;
+  }
+  .pay-pick:hover { border-color: var(--border-strong); }
+  .pay-pick:has(:checked) {
+    border-color: var(--primary);
+    background: color-mix(in oklch, var(--primary) 6%, var(--card));
+    box-shadow: 0 0 0 1px var(--primary);
+  }
+  .pay-pick input { accent-color: var(--primary); }
+
+  /* Terminal-style code frame */
+  .code-frame {
+    background: color-mix(in oklch, var(--foreground) 92%, var(--background));
+    color: color-mix(in oklch, var(--background) 70%, var(--foreground));
+    border-radius: 10px; padding: 18px 20px;
+    font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7;
+    white-space: pre-wrap; word-break: break-all;
+    border: 1px solid color-mix(in oklch, var(--foreground) 60%, transparent);
+    position: relative;
+  }
+  html.dark .code-frame {
+    background: oklch(0.13 0.02 215);
+    color: oklch(0.88 0.04 145);
+    border-color: oklch(0.28 0.02 215);
+  }
+  /* Header dots for the code frame — terminal-window cue */
+  .code-frame::before {
+    content: ''; position: absolute; top: 12px; right: 14px;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: color-mix(in oklch, var(--primary) 80%, transparent);
+    box-shadow:
+      -10px 0 0 color-mix(in oklch, var(--warning) 70%, transparent),
+      -20px 0 0 color-mix(in oklch, var(--destructive) 70%, transparent);
+  }
+</style>
+</head>
+<body class="font-sans antialiased">
+
+<header class="hairline-b backdrop-blur sticky top-0 z-20" style="background: color-mix(in oklch, var(--background) 85%, transparent);">
+  <div class="mx-auto max-w-6xl px-6 lg:px-10 py-5 flex items-center justify-between">
+    <a href="/" class="flex items-center gap-3 group">
+      <!-- Mark: terminal cursor / phosphor dot -->
+      <span class="relative inline-flex items-center justify-center w-9 h-9 rounded-lg overflow-hidden" style="background: color-mix(in oklch, var(--primary) 12%, var(--card)); border: 1px solid var(--border);">
+        <span class="absolute inset-0 opacity-60" style="background: radial-gradient(circle at 50% 50%, color-mix(in oklch, var(--primary) 50%, transparent) 0%, transparent 70%);"></span>
+        <span class="font-mono text-[15px] font-bold relative" style="color: var(--primary);">$_</span>
+      </span>
+      <span class="font-display text-[22px] leading-none tracking-tight font-medium text-foreground">{{.SiteName}}</span>
+    </a>
+    <nav class="flex items-center gap-7 text-[13.5px]">
+      <a href="/" class="text-muted-fg hover:text-foreground transition-colors">商品</a>
+      <a href="/order" class="text-muted-fg hover:text-foreground transition-colors">订单查询</a>
+      {{if .IsAdmin}}
+      <a href="/admin" class="text-muted-fg hover:text-foreground transition-colors flex items-center gap-1.5">
+        <span class="inline-block w-1.5 h-1.5 rounded-full" style="background: var(--primary);"></span>管理
+      </a>
+      {{end}}
+      <button type="button" id="theme-toggle" class="ml-2 inline-flex items-center justify-center w-9 h-9 rounded-md hairline hover:border-primary transition-colors group" title="切换主题" aria-label="切换主题">
+        <!-- sun -->
+        <svg class="w-4 h-4 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <!-- moon -->
+        <svg class="w-4 h-4 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main class="mx-auto max-w-6xl px-6 lg:px-10 py-12 lg:py-16">
+{{block "content" .}}{{end}}
+</main>
+
+<footer class="hairline-t mt-20">
+  <div class="mx-auto max-w-6xl px-6 lg:px-10 py-8 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+    <div class="eyebrow">© {{.SiteName}} · digital atelier</div>
+    <div class="eyebrow flex items-center gap-2">
+      <span class="inline-block w-1.5 h-1.5 rounded-full" style="background: var(--success);"></span>
+      secure handover
+    </div>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('theme-toggle').addEventListener('click', function() {
+    var dark = document.documentElement.classList.toggle('dark');
+    try { localStorage.setItem('hypishop.theme', dark ? 'dark' : 'light'); } catch(e) {}
+  });
+</script>
+
+</body>
+</html>

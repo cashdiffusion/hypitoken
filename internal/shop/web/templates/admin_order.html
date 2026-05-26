@@ -1,0 +1,118 @@
+{{define "title"}}订单 {{.Order.OutTradeNo}} · 管理{{end}}
+{{define "content"}}
+
+<div class="reveal">
+  <div class="mb-10 hairline-b pb-6">
+    <a href="/admin/orders" class="eyebrow hover:text-primary">← 订单列表</a>
+    <div class="eyebrow mt-3 mb-1">Order · 详情</div>
+    <div class="flex items-baseline justify-between gap-4">
+      <h1 class="font-display text-[34px] leading-tight text-foreground font-medium">{{.Order.ProductName}}</h1>
+      {{if eq .Order.Status "paid"}}
+        <span class="pill text-primary bg-primary-soft border-primary-soft">已完成</span>
+      {{else if eq .Order.Status "pending"}}
+        <span class="pill text-warning bg-warning-soft border-warning-soft pulse">待支付</span>
+      {{else if eq .Order.Status "await_manual"}}
+        <span class="pill text-destructive bg-destructive-soft border-destructive-soft">人工处理</span>
+      {{else if eq .Order.Status "expired"}}
+        <span class="pill text-muted-fg opacity-80 bg-secondary border-border-strong">已过期</span>
+      {{end}}
+    </div>
+    <div class="mt-3 font-mono text-[12px] text-muted-fg opacity-80">{{.Order.OutTradeNo}}</div>
+  </div>
+
+  {{if .Notice}}
+  <div class="mb-6 bg-primary-soft border border-primary-soft rounded-md px-4 py-3 text-[13px] text-primary">{{.Notice}}</div>
+  {{end}}
+  {{if .Error}}
+  <div class="mb-6 bg-destructive-soft border border-destructive-soft rounded-md px-4 py-3 text-[13px] text-destructive">{{.Error}}</div>
+  {{end}}
+
+  <!-- Facts grid -->
+  <section class="bg-card hairline rounded-lg overflow-hidden  mb-10">
+    <dl class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-border">
+      <div class="bg-card p-5">
+        <dt class="eyebrow mb-2">金额</dt>
+        <dd class="font-display text-[22px] text-foreground num leading-none">
+          <span class="text-[12px] text-muted-fg align-top">¥</span>{{printf "%.2f" .Order.AmountCNY}}
+        </dd>
+      </div>
+      <div class="bg-card p-5">
+        <dt class="eyebrow mb-2">渠道</dt>
+        <dd class="font-mono text-[13px] text-foreground">{{.Order.PayMethod}}</dd>
+      </div>
+      <div class="bg-card p-5">
+        <dt class="eyebrow mb-2">下单</dt>
+        <dd class="font-mono num text-[12.5px] text-foreground">{{fmtTime .Order.CreatedAt}}</dd>
+      </div>
+      <div class="bg-card p-5">
+        <dt class="eyebrow mb-2">支付</dt>
+        <dd class="font-mono num text-[12.5px] text-foreground">{{if not .Order.PaidAt.IsZero}}{{fmtTime .Order.PaidAt}}{{else}}—{{end}}</dd>
+      </div>
+    </dl>
+    <div class="hairline-t bg-secondary/40 p-5">
+      <dl class="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-8 text-[13px]">
+        <div class="flex items-baseline justify-between">
+          <dt class="eyebrow">邮箱</dt>
+          <dd class="font-mono text-foreground">{{.Order.Email}}</dd>
+        </div>
+        <div class="flex items-baseline justify-between">
+          <dt class="eyebrow">下单 IP</dt>
+          <dd class="font-mono text-muted-fg">{{.Order.RemoteIP}}</dd>
+        </div>
+        {{if .Order.TradeNo}}
+        <div class="flex items-baseline justify-between">
+          <dt class="eyebrow">网关流水</dt>
+          <dd class="font-mono text-muted-fg">{{.Order.TradeNo}}</dd>
+        </div>
+        {{end}}
+        <div class="flex items-baseline justify-between">
+          <dt class="eyebrow">邮件</dt>
+          <dd>
+            {{if .Order.EmailSent}}
+            <span class="eyebrow text-primary">已发送</span>
+            {{else}}
+            <span class="eyebrow text-destructive">未发送</span>
+            {{end}}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  {{if .Order.Fulfillment}}
+  <section class="mb-10">
+    <div class="section-meta mb-4">
+      <span class="eyebrow text-primary">已发货内容</span>
+    </div>
+    <pre class="code-frame">{{.Order.Fulfillment}}</pre>
+    <form method="POST" action="/admin/orders/{{.Order.OutTradeNo}}/resend" class="mt-4">
+      <button type="submit" class="btn-ghost">
+        <span>↻</span> 重新发送邮件
+      </button>
+    </form>
+  </section>
+  {{end}}
+
+  {{if eq .Order.Status "await_manual"}}
+  <section class="bg-card border border-destructive-soft rounded-lg ">
+    <div class="p-7 hairline-b">
+      <div class="eyebrow text-destructive mb-1">Manual · 人工补发</div>
+      <h2 class="font-display text-[22px] text-foreground font-medium">补发兑换内容</h2>
+      <p class="mt-2 text-[13px] text-muted-fg">已收款但库存不足，填写要发给买家的内容后会自动标记为已完成。</p>
+    </div>
+    <form method="POST" action="/admin/orders/{{.Order.OutTradeNo}}/fulfil" class="p-7 space-y-5">
+      <textarea name="fulfillment" rows="6" required placeholder="粘贴此次需手工补发的内容（卡密 / 兑换信息 / 链接 等）" class="field font-mono text-[12.5px]"></textarea>
+      <label class="flex items-center gap-3">
+        <input type="checkbox" name="send_email" value="1" checked class="w-4 h-4 accent-primary">
+        <span class="text-[13.5px] text-foreground">同时给买家发邮件</span>
+      </label>
+      <button type="submit" class="btn-primary">
+        <span>完成发货</span>
+        <span class="arrow">→</span>
+      </button>
+    </form>
+  </section>
+  {{end}}
+</div>
+
+{{end}}

@@ -1,0 +1,95 @@
+{{define "title"}}管理台 · {{.SiteName}}{{end}}
+{{define "content"}}
+
+<div class="reveal">
+  <div class="flex items-end justify-between mb-10 hairline-b pb-6">
+    <div>
+      <div class="eyebrow mb-2">管理控制台 · Console</div>
+      <h1 class="font-display text-[40px] leading-tight tracking-tight text-foreground font-medium">
+        Atelier 管理台
+      </h1>
+    </div>
+    <a href="/admin/logout" class="eyebrow hover:text-destructive transition-colors">退出登录 →</a>
+  </div>
+
+  <!-- KPI tiles -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-border rounded-lg overflow-hidden hairline">
+    <a href="/admin/products" class="group bg-card p-6 hover:bg-secondary transition-colors">
+      <div class="eyebrow mb-3">在售商品</div>
+      <div class="font-display text-[42px] leading-none text-foreground num tracking-tight">{{len .Products}}</div>
+      <div class="mt-4 eyebrow text-primary group-hover:underline underline-offset-4">管理 →</div>
+    </a>
+    <a href="/admin/orders" class="group bg-card p-6 hover:bg-secondary transition-colors">
+      <div class="eyebrow mb-3">近期订单</div>
+      <div class="font-display text-[42px] leading-none text-foreground num tracking-tight">{{len .RecentOrders}}</div>
+      <div class="mt-4 eyebrow text-primary group-hover:underline underline-offset-4">查阅 →</div>
+    </a>
+    <a href="/admin/orders?status=pending" class="group bg-card p-6 hover:bg-secondary transition-colors">
+      <div class="eyebrow mb-3 text-warning">待支付</div>
+      <div class="font-display text-[42px] leading-none text-foreground num tracking-tight">
+        {{$pending := 0}}{{range .RecentOrders}}{{if eq .Status "pending"}}{{$pending = add $pending 1}}{{end}}{{end}}{{$pending}}
+      </div>
+      <div class="mt-4 eyebrow text-warning group-hover:underline underline-offset-4">筛选 →</div>
+    </a>
+    <a href="/admin/orders?status=await_manual" class="group bg-card p-6 hover:bg-secondary transition-colors">
+      <div class="eyebrow mb-3 text-destructive">人工处理</div>
+      <div class="font-display text-[42px] leading-none text-foreground num tracking-tight">
+        {{$manual := 0}}{{range .RecentOrders}}{{if eq .Status "await_manual"}}{{$manual = add $manual 1}}{{end}}{{end}}{{$manual}}
+      </div>
+      <div class="mt-4 eyebrow text-destructive group-hover:underline underline-offset-4">处理 →</div>
+    </a>
+  </div>
+
+  {{if .RecentOrders}}
+  <section class="mt-14">
+    <div class="flex items-end justify-between mb-6">
+      <div>
+        <div class="eyebrow mb-1">最近订单 · Recent</div>
+        <h2 class="font-display text-[24px] text-foreground font-medium">实时流水</h2>
+      </div>
+      <a href="/admin/orders" class="eyebrow hover:text-primary">查看全部 →</a>
+    </div>
+
+    <div class="bg-card hairline rounded-lg overflow-hidden ">
+      <table class="w-full text-[13.5px]">
+        <thead>
+          <tr class="hairline-b">
+            <th class="text-left px-5 py-3 eyebrow font-medium">订单号</th>
+            <th class="text-left px-5 py-3 eyebrow font-medium">商品</th>
+            <th class="text-left px-5 py-3 eyebrow font-medium">邮箱</th>
+            <th class="text-right px-5 py-3 eyebrow font-medium">金额</th>
+            <th class="text-left px-5 py-3 eyebrow font-medium">状态</th>
+            <th class="text-right px-5 py-3 eyebrow font-medium">时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .RecentOrders}}
+          <tr class="hairline-b last:border-b-0 hover:bg-secondary/50 transition-colors">
+            <td class="px-5 py-3 font-mono text-[12px]">
+              <a href="/admin/orders/{{.OutTradeNo}}" class="text-primary hover:underline underline-offset-2">{{.OutTradeNo}}</a>
+            </td>
+            <td class="px-5 py-3 text-foreground">{{.ProductName}}</td>
+            <td class="px-5 py-3 text-muted-fg font-mono text-[12px]">{{.Email}}</td>
+            <td class="px-5 py-3 text-right num font-mono text-foreground">¥{{printf "%.2f" .AmountCNY}}</td>
+            <td class="px-5 py-3">
+              {{if eq .Status "paid"}}
+                <span class="pill text-primary border-primary-soft">已完成</span>
+              {{else if eq .Status "pending"}}
+                <span class="pill text-warning border-warning-soft">待支付</span>
+              {{else if eq .Status "await_manual"}}
+                <span class="pill text-destructive border-destructive-soft">人工</span>
+              {{else if eq .Status "expired"}}
+                <span class="pill text-muted-fg opacity-80 border-border-strong">过期</span>
+              {{end}}
+            </td>
+            <td class="px-5 py-3 text-right eyebrow num">{{fmtTime .CreatedAt}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {{end}}
+</div>
+
+{{end}}

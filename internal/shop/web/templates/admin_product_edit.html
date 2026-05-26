@@ -1,0 +1,148 @@
+{{define "title"}}编辑 {{.Product.Name}} · {{.SiteName}}{{end}}
+{{define "content"}}
+
+<div class="reveal">
+  <div class="mb-10 hairline-b pb-6">
+    <a href="/admin/products" class="eyebrow hover:text-primary">← 商品列表</a>
+    <div class="eyebrow mt-3 mb-1">Edit · 编辑</div>
+    <div class="flex items-baseline justify-between">
+      <h1 class="font-display text-[36px] leading-tight text-foreground font-medium">{{.Product.Name}}</h1>
+      {{if .Product.Active}}
+        <span class="pill text-primary border-primary-soft">在售</span>
+      {{else}}
+        <span class="pill text-muted-fg opacity-80 border-border-strong">下架</span>
+      {{end}}
+    </div>
+  </div>
+
+  {{if .Notice}}
+  <div class="mb-6 bg-primary-soft border border-primary-soft rounded-md px-4 py-3 text-[13px] text-primary">{{.Notice}}</div>
+  {{end}}
+  {{if .Error}}
+  <div class="mb-6 bg-destructive-soft border border-destructive-soft rounded-md px-4 py-3 text-[13px] text-destructive">{{.Error}}</div>
+  {{end}}
+
+  <!-- Basic info -->
+  <section class="bg-card hairline rounded-lg  mb-10">
+    <div class="p-7 hairline-b flex items-baseline justify-between">
+      <div>
+        <div class="eyebrow mb-1">Basics · 基础信息</div>
+        <h2 class="font-display text-[22px] text-foreground font-medium">商品资料</h2>
+      </div>
+    </div>
+    <form method="POST" action="/admin/products/{{.Product.ID}}" class="p-7 grid grid-cols-1 md:grid-cols-2 gap-6">
+      <label class="space-y-2 md:col-span-2">
+        <span class="text-[13px] font-medium text-foreground block">名称</span>
+        <input type="text" name="name" required value="{{.Product.Name}}" class="field">
+      </label>
+      <label class="space-y-2">
+        <span class="text-[13px] font-medium text-foreground block">价格（元）</span>
+        <input type="number" name="price_cny" step="0.01" min="0.01" required value="{{.Product.PriceCNY}}" class="field font-mono">
+      </label>
+      <label class="space-y-2">
+        <span class="text-[13px] font-medium text-foreground block">排序权重</span>
+        <input type="number" name="sort_order" value="{{.Product.SortOrder}}" class="field font-mono">
+      </label>
+      <label class="space-y-2 md:col-span-2">
+        <span class="text-[13px] font-medium text-foreground block">描述</span>
+        <textarea name="description" rows="3" class="field">{{.Product.Description}}</textarea>
+      </label>
+      <label class="space-y-2">
+        <span class="text-[13px] font-medium text-foreground block">发货类型</span>
+        <select name="delivery_type" class="field bg-card">
+          <option value="auto" {{if eq .Product.DeliveryType "auto"}}selected{{end}}>自动消息</option>
+          <option value="card" {{if eq .Product.DeliveryType "card"}}selected{{end}}>卡密池</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-3 pt-7">
+        <input type="checkbox" name="active" value="1" {{if .Product.Active}}checked{{end}} class="w-4 h-4 accent-primary">
+        <span class="text-[14px] text-foreground">在售</span>
+      </label>
+      <label class="space-y-2 md:col-span-2">
+        <span class="text-[13px] font-medium text-foreground block">自动发货模板</span>
+        <textarea name="delivery_template" rows="4" class="field font-mono text-[12.5px]">{{.Product.DeliveryTemplate}}</textarea>
+      </label>
+      <div class="md:col-span-2 flex items-center justify-between pt-2">
+        <button type="submit" class="btn-primary">
+          <span>保存修改</span>
+          <span class="arrow">→</span>
+        </button>
+      </div>
+    </form>
+    <div class="px-7 pb-7">
+      <form method="POST" action="/admin/products/{{.Product.ID}}/delete" onsubmit="return confirm('确定删除该商品？已有订单将不受影响，但所有卡密会一并删除。')" class="hairline-t pt-5">
+        <button type="submit" class="btn-danger">删除该商品</button>
+      </form>
+    </div>
+  </section>
+
+  {{if eq .Product.DeliveryType "card"}}
+  <section class="bg-card hairline rounded-lg ">
+    <div class="p-7 hairline-b">
+      <div class="flex items-baseline justify-between mb-1">
+        <div class="eyebrow">Vault · 卡密池</div>
+        <div class="eyebrow num">现存 <span class="text-primary">{{.Product.StockAvailable}}</span> 份</div>
+      </div>
+      <h2 class="font-display text-[22px] text-foreground font-medium">卡密库存</h2>
+      <p class="mt-2 text-[13px] text-muted-fg">每次订单支付成功时，最早入库的卡密会被自动消耗。</p>
+    </div>
+
+    <form method="POST" action="/admin/products/{{.Product.ID}}/cards" class="p-7 hairline-b">
+      <label class="space-y-2 block">
+        <span class="text-[13px] font-medium text-foreground block">批量导入（每行一条，空行忽略）</span>
+        <textarea name="cards" rows="6" placeholder="ABC-1234-XYZ&#10;DEF-5678-LMN" class="field font-mono text-[12.5px]"></textarea>
+      </label>
+      <button type="submit" class="mt-4 btn-primary">
+        <span>导入</span>
+        <span class="arrow">↓</span>
+      </button>
+    </form>
+
+    {{if .Cards}}
+    <div class="overflow-x-auto">
+      <table class="w-full text-[12.5px]">
+        <thead>
+          <tr class="hairline-b bg-secondary/40">
+            <th class="text-left px-5 py-3 eyebrow font-medium">ID</th>
+            <th class="text-left px-5 py-3 eyebrow font-medium">内容</th>
+            <th class="text-left px-5 py-3 eyebrow font-medium">状态</th>
+            <th class="text-left px-5 py-3 eyebrow font-medium">所属订单</th>
+            <th class="px-5 py-3"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Cards}}
+          <tr class="hairline-b last:border-b-0 hover:bg-secondary/50">
+            <td class="px-5 py-3 font-mono text-muted-fg opacity-80 num">#{{.ID}}</td>
+            <td class="px-5 py-3 font-mono text-foreground break-all">{{.Content}}</td>
+            <td class="px-5 py-3">
+              {{if .Consumed}}
+                <span class="eyebrow text-muted-fg opacity-80">已消费</span>
+              {{else}}
+                <span class="eyebrow text-primary">可售</span>
+              {{end}}
+            </td>
+            <td class="px-5 py-3 font-mono text-muted-fg opacity-80">{{.ConsumedByOrder}}</td>
+            <td class="px-5 py-3 text-right">
+              {{if not .Consumed}}
+              <form method="POST" action="/admin/products/{{$.Product.ID}}/cards/{{.ID}}/delete" onsubmit="return confirm('删除这条卡密？')">
+                <button type="submit" class="eyebrow text-destructive hover:underline underline-offset-2">删除</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="p-12 text-center">
+      <div class="font-display text-[24px] italic text-muted-fg opacity-80">vault empty</div>
+      <p class="mt-1 eyebrow">使用上方表单导入第一批卡密</p>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+</div>
+
+{{end}}

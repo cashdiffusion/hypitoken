@@ -220,7 +220,6 @@ Once logged in as an admin (`role=admin`):
 | `/app/admin/groups` | Pricing-group CRUD (peg, multiplier, credential-group filter) |
 | `/app/admin/credentials` | Add API keys, list pool credentials, remove |
 | `/app/admin/payments` | All Alipay orders, status, manual reconcile |
-| `/mgmt-console/` | Legacy operator panel — OAuth uploads, advanced credential editing |
 
 ---
 
@@ -234,7 +233,7 @@ The full annotated config lives in [`config.example.yaml`](config.example.yaml).
 | `auth_dir`, `api_keys` | Upstream credential sources (OAuth files + inline API keys). |
 | `pricing` | Per-1M-token rates per (provider, model). |
 | `saas` | Multi-tenant layer — DB path, JWT, SMTP, Alipay, exchange rate, health-check cadence. |
-| `admin_token`, `admin_path` | Legacy panel auth. |
+| `admin_token` | Legacy operator JSON API auth (mounted at `/admin/api/*`). |
 
 ---
 

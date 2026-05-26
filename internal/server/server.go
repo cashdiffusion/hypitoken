@@ -62,9 +62,9 @@ type Server struct {
 	// the proxy behaves exactly like the OSS build.
 	saas SaaSAdapter
 
-	// adminH is the legacy /mgmt-console handler. Stored so the SaaS layer
-	// can borrow its requests-log + Anthropic-usage handlers under the
-	// /api/v2/admin/* path with SaaS-side auth.
+	// adminH is the legacy operator JSON API handler (now mounted at
+	// /admin/api/*). Stored so the SaaS layer can borrow its requests-log
+	// + Anthropic-usage handlers under /api/v2/admin/* with SaaS-side auth.
 	adminH *admin.Handler
 
 	// switchTracker detects when a conversation rotates mid-stream from
@@ -130,6 +130,18 @@ func New(cfg *config.Config, pool *auth.Pool, store *usage.Store, reqLog *reques
 		})
 	}
 	return s
+}
+
+// AttachExtraEndpoint registers an additional HTTP listener that's
+// independent of the proxy state. Used by the SaaS-free `shop` package
+// (and any future side-services) to mount on a dedicated port without
+// touching the credential pool / SaaS adapter wiring. Must be called
+// before Start().
+func (s *Server) AttachExtraEndpoint(name, addr string, handler http.Handler) {
+	s.endpoints = append(s.endpoints, &endpoint{
+		name: name,
+		http: &http.Server{Addr: addr, Handler: handler},
+	})
 }
 
 // pickPrimary returns the name of the endpoint that will host the admin

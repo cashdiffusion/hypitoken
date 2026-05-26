@@ -71,15 +71,10 @@ anthropic_base_url:        "https://api.anthropic.com"
 openai_base_url:           "https://api.openai.com"          # BYOK Codex API-key path
 chatgpt_backend_base_url:  "https://chatgpt.com/backend-api" # Codex OAuth path
 
-# Admin panel token. If set, the SPA is served under admin_path and
-# protected by this token (X-Admin-Token header or Authorization: Bearer).
-# Leave empty to disable the panel.
+# Admin panel token. Protects the legacy operator API at /admin/api/*
+# (used by the SaaS frontend for ops actions; also accepts X-Admin-Token
+# or Authorization: Bearer). Leave empty to disable the legacy API.
 admin_token: "change-me-long-random-string"
-
-# URL prefix for the management panel. Changing this from the default
-# makes trivial /admin-style dictionary scans miss the panel. Must start
-# with "/" and not end with "/".
-admin_path: /mgmt-console
 
 # Pricing table. Keyed by "<provider>/<model>". Built-in defaults cover:
 #   Anthropic: claude-haiku-4-5, claude-opus-4-6, claude-opus-4-7,
@@ -218,3 +213,49 @@ saas:
 
   # Background API-key health checker cadence.
   health_check_interval: 30m
+
+# -----------------------------------------------------------------------
+# Shop — standalone 发卡网 storefront on its own listener.
+# Independent of SaaS: buyers identify by email + a self-chosen query
+# password (no accounts). Set endpoints.shop.disabled=false to bind the
+# listener and shop.enabled=true to wire the routes.
+# -----------------------------------------------------------------------
+shop:
+  enabled: false
+
+  # SQLite file holding products + card pools + orders. Relative to the
+  # dir of this config. Default: shop.db.
+  db_path: shop.db
+
+  # Site identity — shown in emails and the page header.
+  site_name: "Nova 发卡"
+  site_url: "https://shop.example.com"
+
+  # Public URL that Z-Pay will hit on payment success. Must be reachable
+  # from Z-Pay's servers — typically your Caddy / nginx → 127.0.0.1:8319.
+  notify_url: "https://shop.example.com/notify"
+
+  # Prefix the buyer's browser lands on after paying. The shop appends
+  # /<out_trade_no>. Defaults to <site_url>/order if empty.
+  return_url_prefix: "https://shop.example.com/order"
+
+  # Pending orders older than this are marked expired by a background
+  # sweeper. Late notifications against expired orders are rejected.
+  order_ttl: 30m
+
+  # Z-Pay merchant. Reuses the same protocol as saas.zpay but with its
+  # own credentials so the shop can be billed under its own merchant.
+  zpay:
+    base_url: "https://zpayz.cn"
+    pid: ""
+    key: ""
+
+  # Outbound SMTP for order delivery emails. Pointing host at
+  # smtp.resend.com effectively makes this a Resend setup.
+  smtp:
+    host: ""
+    port: 587
+    username: ""
+    password: ""
+    from: "shop@example.com"
+    use_tls: true

@@ -21,7 +21,7 @@ import (
 
 // CredHandler is the SaaS-admin's view onto the credential pool. It does not
 // own the pool — it is a thin façade so the new operator panel doesn't have
-// to talk to the legacy /mgmt-console API surface.
+// to talk to the legacy /admin/api/* surface.
 type CredHandler struct {
 	Pool    *auth.Pool
 	AuthDir string

@@ -1,7 +1,7 @@
-// Legacy /mgmt-console API client. Originally took an X-Admin-Token; we
-// now SSO via the SaaS JWT (`hypi.jwt`) when present, so a logged-in
-// SaaS user can hit the legacy panel without learning the operator
-// password. Falls back to the legacy token if it's set explicitly.
+// Legacy /admin/api client. Originally took an X-Admin-Token; we now
+// SSO via the SaaS JWT (`hypi.jwt`) when present, so a logged-in SaaS
+// user can hit the legacy panel without learning the operator password.
+// Falls back to the legacy token if it's set explicitly.
 const LEGACY_TOKEN_KEY = "cpa.admin.token";
 const SAAS_TOKEN_KEY = "hypi.jwt";
 
@@ -18,10 +18,10 @@ export const setToken = (t: string): void => {
   else localStorage.removeItem(LEGACY_TOKEN_KEY);
 };
 
-// Always hit the live admin path under /mgmt-console. We don't need the
-// dynamic ADMIN_BASE inference the standalone legacy SPA had — the SaaS
-// shell only ever serves at the same origin as the backend.
-export const ADMIN_BASE = "/mgmt-console";
+// Always hit the backend at /admin. We don't need the dynamic ADMIN_BASE
+// inference the standalone legacy SPA had — the SaaS shell only ever
+// serves at the same origin as the backend.
+export const ADMIN_BASE = "/admin";
 
 export class ApiError extends Error {
   status: number;
