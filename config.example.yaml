@@ -257,5 +257,5 @@ shop:
     port: 587
     username: ""
     password: ""
-    from: "shop@example.com"
+    from: "support@example.com"
     use_tls: true
