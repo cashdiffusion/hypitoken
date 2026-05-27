@@ -87,7 +87,7 @@ func (s *Shop) handleCreateOrder(c *gin.Context) {
 		c.Redirect(http.StatusFound, fmt.Sprintf("/buy/%d?err=%s", id, url.QueryEscape("请输入有效的邮箱地址")))
 		return
 	}
-	if payMethod != "alipay" && payMethod != "wxpay" {
+	if payMethod != "alipay" {
 		payMethod = "alipay"
 	}
 	hash, err := hashQueryPass(queryPass)

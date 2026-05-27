@@ -215,7 +215,7 @@ saas:
   health_check_interval: 30m
 
 # -----------------------------------------------------------------------
-# Shop — standalone 发卡网 storefront on its own listener.
+# Shop — standalone storefront on its own listener.
 # Independent of SaaS: buyers identify by email + a self-chosen query
 # password (no accounts). Set endpoints.shop.disabled=false to bind the
 # listener and shop.enabled=true to wire the routes.
@@ -228,7 +228,7 @@ shop:
   db_path: shop.db
 
   # Site identity — shown in emails and the page header.
-  site_name: "Nova 发卡"
+  site_name: "Nova Shop"
   site_url: "https://shop.example.com"
 
   # Public URL that Z-Pay will hit on payment success. Must be reachable

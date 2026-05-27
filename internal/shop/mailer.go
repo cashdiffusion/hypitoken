@@ -37,7 +37,7 @@ func OrderEmail(siteName, productName, status, fulfilment, queryLink string) (st
 	switch status {
 	case OrderPaid:
 		subject = fmt.Sprintf("%s — 订单已发货", siteName)
-		headline = "已收款，下面是你的卡密 / 兑换信息"
+		headline = "已收款，订单详情如下"
 		intro = "感谢购买。"
 	case OrderAwaitManual:
 		subject = fmt.Sprintf("%s — 订单已支付，正在人工处理", siteName)
