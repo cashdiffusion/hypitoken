@@ -144,7 +144,7 @@ func (s *Shop) runExpirySweeper() {
 
 const (
 	adminCookie    = "hypishop_admin"
-	adminCookieTTL = 12 * time.Hour
+	adminCookieTTL = 30 * 24 * time.Hour
 )
 
 func (s *Shop) adminAuth() gin.HandlerFunc {
