@@ -30,8 +30,7 @@ func (s *Shop) handleAdminLogin(c *gin.Context) {
 		return
 	}
 	// SameSite=Lax + httponly. The cookie is the operator token itself —
-	// fine because anyone with the token already has full access. TTL =
-	// adminCookieTTL so sessions don't outlive a workday.
+	// fine because anyone with the token already has full access.
 	c.SetCookie(adminCookie, s.adminToken, int(adminCookieTTL.Seconds()), "/", "", false, true)
 	c.Redirect(http.StatusFound, "/admin")
 }

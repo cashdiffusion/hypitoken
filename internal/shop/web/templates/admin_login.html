@@ -9,7 +9,7 @@
     管理员入口
   </h1>
   <p class="mt-4 text-[14px] text-muted-fg leading-relaxed">
-    输入 <code class="font-mono text-[12.5px] bg-secondary px-1.5 py-0.5 rounded border border-border">admin_token</code> 以进入控制台。
+    输入管理员密码以进入控制台。
   </p>
 
   {{if .Error}}
@@ -20,7 +20,7 @@
 
   <form method="POST" action="/admin/login" class="mt-8 bg-card hairline rounded-lg  p-7 space-y-5">
     <div>
-      <label class="text-[13px] font-medium text-foreground mb-2 block">操作员密令</label>
+      <label class="text-[13px] font-medium text-foreground mb-2 block">管理员密码</label>
       <input type="password" name="password" required autofocus class="field font-mono">
     </div>
     <button type="submit" class="w-full btn-primary py-3">
