@@ -17,7 +17,7 @@ func testID() SimIdentity {
 // TestMimicrySmoke exercises the body rewriter on the shapes /v1/messages
 // requests actually take. It doesn't assert byte-equality against a golden
 // payload (the cch hash and session UUID change with body content) — it
-// asserts the structural invariants real Claude Code 2.1.146 requests carry.
+// asserts the structural invariants real Claude Code 2.1.156 requests carry.
 func TestMimicrySmoke(t *testing.T) {
 	cases := []struct {
 		name              string
@@ -61,7 +61,7 @@ func TestMimicrySmoke(t *testing.T) {
 				t.Fatalf("output not valid JSON: %v\n%s", err, out)
 			}
 
-			// 2. system must be the right number of blocks for CC 2.1.146:
+			// 2. system must be the right number of blocks for CC 2.1.156:
 			//    [billing, "You are Claude Code...", ...originalBlocks].
 			var sys []map[string]any
 			if err := json.Unmarshal(parsed["system"], &sys); err != nil {
@@ -74,8 +74,8 @@ func TestMimicrySmoke(t *testing.T) {
 			if !strings.HasPrefix(billing, "x-anthropic-billing-header:") {
 				t.Errorf("system[0] missing billing prefix: %q", billing)
 			}
-			if !strings.Contains(billing, "cc_version=2.1.146.") {
-				t.Errorf("system[0] missing cc_version=2.1.146: %q", billing)
+			if !strings.Contains(billing, "cc_version=2.1.156.") {
+				t.Errorf("system[0] missing cc_version=2.1.156: %q", billing)
 			}
 			if strings.Contains(billing, "cch=00000") {
 				t.Errorf("system[0] cch placeholder still present: %q", billing)
@@ -89,12 +89,13 @@ func TestMimicrySmoke(t *testing.T) {
 				t.Errorf("system[1] missing CC prompt: %q", ccPrompt)
 			}
 			if _, hasCC := sys[1]["cache_control"]; hasCC {
-				t.Errorf("system[1] (CC intro) must NOT carry cache_control — real 2.1.146 leaves it bare")
+				t.Errorf("system[1] (CC intro) must NOT carry cache_control — real 2.1.156 leaves it bare")
 			}
 
-			// 3. When original system was supplied, the LAST system block must
-			//    carry cache_control with ttl=1h scope=global, matching real
-			//    CC 2.1.146.
+			// 3. When original system was supplied, real CC 2.1.156 puts a
+			//    PLAIN ephemeral 1h breakpoint on the LAST system block and
+			//    scope:global on the SECOND-TO-LAST (when >=2 original blocks).
+			//    Verified across all 18 /v1/messages in crack/cc2156.
 			if tc.expectSystemCount > 2 {
 				last := sys[len(sys)-1]
 				cc, ok := last["cache_control"].(map[string]any)
@@ -104,8 +105,21 @@ func TestMimicrySmoke(t *testing.T) {
 				if cc["ttl"] != "1h" {
 					t.Errorf("last system cache_control ttl: want 1h got %v", cc["ttl"])
 				}
+				if _, hasScope := cc["scope"]; hasScope {
+					t.Errorf("last system block must be plain ephemeral (no scope), got %v", cc)
+				}
+			}
+			if tc.expectSystemCount >= 4 {
+				secondLast := sys[len(sys)-2]
+				cc, ok := secondLast["cache_control"].(map[string]any)
+				if !ok {
+					t.Fatalf("second-to-last system block missing cache_control")
+				}
+				if cc["ttl"] != "1h" {
+					t.Errorf("second-to-last system cache_control ttl: want 1h got %v", cc["ttl"])
+				}
 				if cc["scope"] != "global" {
-					t.Errorf("last system cache_control scope: want global got %v", cc["scope"])
+					t.Errorf("second-to-last system cache_control scope: want global got %v", cc["scope"])
 				}
 			}
 
