@@ -1,0 +1,371 @@
+{
+  "class": "v1_messages",
+  "url": "https://api.anthropic.com/v1/messages?beta=true",
+  "method": "POST",
+  "status": 200,
+  "reqSize": 481053,
+  "resSize": 11844,
+  "reqHeaders": {
+    "accept": "application/json",
+    "authorization": "<masked>",
+    "content-type": "application/json",
+    "user-agent": "claude-cli/2.1.156 (external, cli)",
+    "x-claude-code-session-id": "<masked>",
+    "x-stainless-arch": "x64",
+    "x-stainless-lang": "js",
+    "x-stainless-os": "Linux",
+    "x-stainless-package-version": "0.94.0",
+    "x-stainless-retry-count": "0",
+    "x-stainless-runtime": "node",
+    "x-stainless-runtime-version": "v24.3.0",
+    "x-stainless-timeout": "600",
+    "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07",
+    "anthropic-dangerous-direct-browser-access": "true",
+    "anthropic-version": "2023-06-01",
+    "x-app": "cli",
+    "x-client-request-id": "<masked>",
+    "connection": "keep-alive",
+    "host": "api.anthropic.com",
+    "accept-encoding": "gzip, br",
+    "content-length": "481053"
+  },
+  "resHeaders": {
+    "date": "Fri, 29 May 2026 06:33:06 GMT",
+    "content-type": "text/event-stream; charset=utf-8",
+    "transfer-encoding": "chunked",
+    "connection": "keep-alive",
+    "cache-control": "no-cache",
+    "anthropic-ratelimit-unified-status": "allowed",
+    "anthropic-ratelimit-unified-5h-status": "allowed",
+    "anthropic-ratelimit-unified-5h-reset": "1780039800",
+    "anthropic-ratelimit-unified-5h-utilization": "0.07",
+    "anthropic-ratelimit-unified-7d-status": "allowed",
+    "anthropic-ratelimit-unified-7d-reset": "1780495200",
+    "anthropic-ratelimit-unified-7d-utilization": "0.01",
+    "anthropic-ratelimit-unified-representative-claim": "five_hour",
+    "anthropic-ratelimit-unified-fallback-percentage": "0.5",
+    "anthropic-ratelimit-unified-reset": "1780039800",
+    "anthropic-ratelimit-unified-overage-disabled-reason": "org_level_disabled",
+    "anthropic-ratelimit-unified-overage-status": "rejected",
+    "request-id": "<masked>",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "anthropic-organization-id": "2f49bffa-5cc6-4fbb-9dee-5e81284cfb93",
+    "traceresponse": "00-f4b4d2f9e944f1e174202be2a3302721-0ef90be3b4f04009-01",
+    "server": "cloudflare",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding",
+    "cf-cache-status": "DYNAMIC",
+    "set-cookie": "<masked>",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "x-robots-tag": "none",
+    "cf-ray": "a033772a898b932c-EWR"
+  },
+  "reqBody": {
+    "body": {
+      "model": "claude-opus-4-8",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "<text:16484 chars>"
+            },
+            {
+              "type": "text",
+              "text": "<text:128 chars>"
+            }
+          ]
+        },
+        {
+          "role": "system",
+          "content": "<text:2378 chars>"
+        },
+        "<… 224 more items redacted …>",
+        {
+          "role": "user",
+          "content": [
+            {
+              "tool_use_id": "toolu_01S2WMkuHUxppXMRAJtSYrnH",
+              "type": "tool_result",
+              "content": "<text:366 chars>",
+              "is_error": false
+            },
+            {
+              "type": "text",
+              "text": "<text:5978 chars>"
+            }
+          ]
+        }
+      ],
+      "system": [
+        {
+          "type": "text",
+          "text": "x-anthropic-billing-header: cc_version=2.1.156.297; cc_entrypoint=cli; cch=4156c;"
+        },
+        {
+          "type": "text",
+          "text": "You are Claude Code, Anthropic's official CLI for Claude."
+        },
+        {
+          "type": "text",
+          "text": "<text:1152 chars>",
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "1h",
+            "scope": "global"
+          }
+        },
+        {
+          "type": "text",
+          "text": "<text:9797 chars>",
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "1h"
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "Agent",
+          "description": "<text:3495 chars>",
+          "input_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "description": {
+                "description": "A short (3-5 word) description of the task",
+                "type": "string"
+              },
+              "prompt": {
+                "description": "The task for the agent to perform",
+                "type": "string"
+              },
+              "subagent_type": {
+                "description": "The type of specialized agent to use for this task",
+                "type": "string"
+              },
+              "model": {
+                "description": "<text:179 chars>",
+                "type": "string",
+                "enum": [
+                  "sonnet",
+                  "opus",
+                  "haiku"
+                ]
+              },
+              "run_in_background": {
+                "description": "<text:88 chars>",
+                "type": "boolean"
+              },
+              "isolation": {
+                "description": "<text:111 chars>",
+                "type": "string",
+                "enum": [
+                  "worktree"
+                ]
+              }
+            },
+            "required": [
+              "description",
+              "prompt"
+            ],
+            "additionalProperties": false
+          },
+          "eager_input_streaming": true
+        },
+        {
+          "name": "AskUserQuestion",
+          "description": "<text:1786 chars>",
+          "input_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "questions": {
+                "description": "Questions to ask the user (1-4 questions)",
+                "minItems": 1,
+                "maxItems": 4,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "question": {
+                      "description": "<text:247 chars>",
+                      "type": "string"
+                    },
+                    "header": {
+                      "description": "<text:104 chars>",
+                      "type": "string"
+                    },
+                    "options": {
+                      "description": "<text:228 chars>",
+                      "minItems": 2,
+                      "maxItems": 4,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "description": "<text:130 chars>",
+                            "type": "string"
+                          },
+                          "description": {
+                            "description": "<text:131 chars>",
+                            "type": "string"
+                          },
+                          "preview": {
+                            "description": "<text:207 chars>",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "multiSelect": {
+                      "description": "<text:122 chars>",
+                      "default": false,
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "question",
+                    "header",
+                    "options",
+                    "multiSelect"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "answers": {
+                "description": "User answers collected by the permission component",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "annotations": {
+                "description": "<text:108 chars>",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "preview": {
+                      "description": "The preview content of the selected option, if the question used previews.",
+                      "type": "string"
+                    },
+                    "notes": {
+                      "description": "Free-text notes the user added to their selection.",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "metadata": {
+                "description": "Optional metadata for tracking and analytics purposes. Not displayed to user.",
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "description": "<text:122 chars>",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "questions"
+            ],
+            "additionalProperties": false
+          },
+          "eager_input_streaming": true
+        },
+        "<… 9 more items redacted …>",
+        {
+          "name": "Write",
+          "description": "<text:240 chars>",
+          "input_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "description": "The absolute path to the file to write (must be absolute, not relative)",
+                "type": "string"
+              },
+              "content": {
+                "description": "The content to write to the file",
+                "type": "string"
+              }
+            },
+            "required": [
+              "file_path",
+              "content"
+            ],
+            "additionalProperties": false
+          },
+          "eager_input_streaming": true
+        }
+      ],
+      "metadata": {
+        "user_id": "<masked:user_id>"
+      },
+      "max_tokens": 20000,
+      "thinking": {
+        "type": "adaptive"
+      },
+      "context_management": {
+        "edits": [
+          {
+            "type": "clear_thinking_20251015",
+            "keep": "all"
+          }
+        ]
+      },
+      "output_config": {
+        "effort": "high"
+      },
+      "stream": true
+    },
+    "_notes": {
+      "message_count": 227,
+      "roles": {
+        "user": 104,
+        "system": 20,
+        "assistant": 103
+      },
+      "system_cache_pattern": [
+        null,
+        null,
+        true,
+        false
+      ],
+      "tool_names": [
+        "Agent",
+        "AskUserQuestion",
+        "Bash",
+        "Edit",
+        "Read",
+        "ScheduleWakeup",
+        "Skill",
+        "TaskCreate",
+        "TaskUpdate",
+        "ToolSearch",
+        "Workflow",
+        "Write"
+      ]
+    }
+  },
+  "resBody": {
+    "_raw": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"m"
+  }
+}

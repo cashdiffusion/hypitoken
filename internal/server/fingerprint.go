@@ -8,15 +8,15 @@ import (
 	"strings"
 )
 
-// Header values pinned to Claude Code 2.1.146 / @anthropic-ai/sdk 0.94.0.
-// Values verified against a live CC 2.1.146 OAuth session capture
-// (whistle dump 2026-05-21, rows 018/028/037/044).
+// Header values pinned to Claude Code 2.1.156 / @anthropic-ai/sdk 0.94.0.
+// Values verified against a live CC 2.1.156 OAuth session capture
+// (whistle dump 2026-05-29 — see crack/cc2156/SPEC.md).
 // CLICurrentVersion below MUST match the version baked into claudeCLIUserAgent;
 // any drift will cause the cc_version=X.Y.Z.{fp} billing block to disagree
 // with the User-Agent and trigger Anthropic's third-party detection.
 const (
-	CLICurrentVersion       = "2.1.146"
-	claudeCLIUserAgent      = "claude-cli/2.1.146 (external, cli)"
+	CLICurrentVersion       = "2.1.156"
+	claudeCLIUserAgent      = "claude-cli/2.1.156 (external, cli)"
 	claudeStainlessLang     = "js"
 	claudeStainlessRuntime  = "node"
 	claudeStainlessRuntimeV = "v24.3.0"
@@ -26,28 +26,42 @@ const (
 	claudeStainlessTimeout  = "600"
 	claudeStainlessRetryCnt = "0"
 	claudeAnthropicVersion  = "2023-06-01"
-	// Beta list captured from real CC 2.1.146 — exact value, exact order.
-	// Any beta we drop that real CLI sends will downgrade us to "extra usage"
-	// billing; any extra beta we add that real CLI does not send is also a
-	// fingerprint signal Anthropic edges look for.
+	// claudeAnthropicBetaFull is the Anthropic-Beta REQUEST HEADER captured
+	// from real CC 2.1.156 — exact value, exact order (14 items). Any beta we
+	// drop that real CLI sends will downgrade us to "extra usage" billing; any
+	// extra beta we add that real CLI does not send is also a fingerprint
+	// signal Anthropic edges look for.
 	//
 	// OAuth path (subscription accounts hitting api.anthropic.com):
-	// captured live from CC 2.1.146 on 2026-05-21.
-	// 2.1.141→2.1.146 diff: re-added context-1m-2025-08-07 (positioned
-	// immediately after oauth-2025-04-20).
-	claudeAnthropicBetaFull = "claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07"
+	// captured live from CC 2.1.156 on 2026-05-29.
+	// 2.1.146→2.1.156 diff: inserted thinking-token-count-2026-05-13 (after
+	// redact-thinking) and mid-conversation-system-2026-04-07 (after
+	// prompt-caching-scope).
+	claudeAnthropicBetaFull = "claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07"
+
+	// claudeReportedBetas is the SHORTER beta list real CC 2.1.156 reports in
+	// its telemetry bodies (event_logging `betas`, datadog `betas`/ddtags) —
+	// the first 9 items of claudeAnthropicBetaFull, stopping at
+	// mid-conversation-system. It deliberately omits advisor-tool,
+	// advanced-tool-use, effort, extended-cache-ttl, cache-diagnosis. This is
+	// the list real CC reports in event_logging / datadog 'betas' — NOT the
+	// request header. Reusing the full header list in telemetry is itself a
+	// fingerprint mismatch.
+	claudeReportedBetas = "claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07"
 
 	// API-key path (real CC pointed at a 3rd-party gateway with x-api-key):
 	// captured from crack/apikey/rows/*-POST-…v1_messages.json. Strict
 	// gateways (fucheers, etc.) reject any unknown beta token — notably they
 	// reject advanced-tool-use-* and cache-diagnosis-*, which real CC does
 	// NOT send on the apikey path. Keep this list verbatim from capture.
+	// No 2.1.156 api-key capture exists; left verbatim from the 2.1.146 set.
 	claudeAnthropicBetaApikey = "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01,context-1m-2025-08-07,effort-2025-11-24"
 )
 
-// Default cache_control TTL for cache breakpoints we inject. Real CC 2.1.126
-// uses "1h" with scope=global on the heavy system blocks — match it so prefix
-// caching works the same way and the request shape is byte-identical.
+// Default cache_control TTL for cache breakpoints we inject. Real CC 2.1.156
+// uses "1h" with scope=global on the second-to-last system block (the last
+// block is plain ephemeral) — match it so prefix caching works the same way
+// and the request shape is byte-identical.
 const claudeDefaultCacheTTL = "1h"
 const claudeDefaultCacheScope = "global"
 
