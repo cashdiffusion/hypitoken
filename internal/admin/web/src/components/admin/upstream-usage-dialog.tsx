@@ -102,6 +102,23 @@ function pctColor(raw: number | undefined | null): { pct: number | null; color: 
   return { pct, color };
 }
 
+// pctColorPct is for values that are ALREADY a 0–100 percentage (Codex
+// wham/usage `used_percent`, e.g. 1 = 1%). Unlike pctColor it does NOT apply
+// the "<=1 ? *100" fraction heuristic — that heuristic turned a real 1% into
+// 100% and made the Codex 5h window read as fully exhausted when it wasn't.
+function pctColorPct(raw: number | undefined | null): { pct: number | null; color: string } {
+  const pct = typeof raw === "number" ? Math.round(Math.max(0, Math.min(100, raw))) : null;
+  const color =
+    pct == null
+      ? "bg-muted"
+      : pct >= 90
+      ? "bg-red-500"
+      : pct >= 70
+      ? "bg-amber-500"
+      : "bg-emerald-500";
+  return { pct, color };
+}
+
 function fmtCountdown(at?: string | number): string {
   if (!at) return "—";
   const ts = typeof at === "number" ? at * 1000 : new Date(at).getTime();
@@ -265,8 +282,8 @@ function CodexUsageBody({
   const spend = u?.spend_control;
   const primary = rl?.primary_window;
   const secondary = rl?.secondary_window;
-  const primaryPct = pctColor(primary?.used_percent);
-  const secondaryPct = pctColor(secondary?.used_percent);
+  const primaryPct = pctColorPct(primary?.used_percent);
+  const secondaryPct = pctColorPct(secondary?.used_percent);
 
   return (
     <div className="space-y-3">
