@@ -20,16 +20,19 @@ import (
 )
 
 // The ChatGPT Codex backend expects the OpenAI /v1/responses schema with a
-// handful of upstream-private fields stripped. These mirror the headers
-// the Rust Codex CLI sends today — aligned with sub2api, which is the
-// fingerprint Cloudflare's edge currently passes through. The earlier
-// codex-tui/iTerm.app combo gets challenged by CF under uTLS and returns
-// 4xx fast (the symptom: a burst of 503s as the retry loop burns every
-// credential in <300ms).
+// handful of upstream-private fields stripped. The upstream request headers
+// below mimic the Codex CLI fingerprint, pinned to codex-tui/0.135.0 and
+// verified against a live ChatGPT Pro capture (CPA-Claude crack/codex/SPEC.md).
+// We forward over the legacy HTTP POST /codex/responses path (OpenAI-Beta:
+// responses=experimental); real 0.135.0 streams over a WebSocket, but the HTTP
+// path still works and is what an HTTP-API proxy needs. We mimic the 0.135.0
+// identity (Originator codex-tui / UA / Version) over it. (hypitoken vendors
+// its fingerprint code, so this stays inline rather than importing cc-core's
+// mimicry.ApplyCodexCLIHeaders.)
 const (
-	codexCLIVersion        = "0.125.0"
-	codexBackendUserAgent  = "codex_cli_rs/" + codexCLIVersion
-	codexBackendOriginator = "codex_cli_rs"
+	codexCLIVersion        = "0.135.0"
+	codexBackendUserAgent  = "codex-tui/0.135.0 (Arch Linux Rolling Release; x86_64) Konsole/260401 (codex-tui; 0.135.0)"
+	codexBackendOriginator = "codex-tui"
 )
 
 // codexOAuthPath maps a client-facing path under /v1 to the corresponding
@@ -314,14 +317,14 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	upReq.Header.Set("Content-Type", "application/json")
 	isCompactPath := path == "/v1/responses/compact"
 	// /codex/responses streams SSE; /codex/responses/compact returns JSON.
-	// Match sub2api: distinct Accept per endpoint, plus the `version` header
-	// the compact endpoint reads.
 	if isCompactPath {
 		upReq.Header.Set("Accept", "application/json")
-		upReq.Header.Set("Version", codexCLIVersion)
 	} else {
 		upReq.Header.Set("Accept", "text/event-stream")
 	}
+	// Version is part of the 0.135.0 identity — sent on every request now,
+	// not just the compact endpoint.
+	upReq.Header.Set("Version", codexCLIVersion)
 	upReq.Header.Set("OpenAI-Beta", "responses=experimental")
 	// Force plaintext upstream bodies. Otherwise CF may respond with br/gzip
 	// which (a) breaks SSE streaming and (b) makes 4xx error bodies unreadable
