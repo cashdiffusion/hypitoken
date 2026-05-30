@@ -809,16 +809,16 @@ function EditCredentialDialog({
       };
       if (isAPIKey) {
         body.base_url = base;
-        if (modelMap.trim() === "") {
-          body.model_map = {};
-        } else {
-          try {
-            body.model_map = JSON.parse(modelMap);
-          } catch (e: any) {
-            toast.error("model_map JSON 解析失败：" + e.message);
-            setBusy(false);
-            return;
-          }
+      }
+      if (modelMap.trim() === "") {
+        body.model_map = {};
+      } else {
+        try {
+          body.model_map = JSON.parse(modelMap);
+        } catch (e: any) {
+          toast.error("model_map JSON 解析失败：" + e.message);
+          setBusy(false);
+          return;
         }
       }
       await apiPatch(`/admin/credentials/${encodeURIComponent(cred.id)}`, body);
@@ -873,20 +873,23 @@ function EditCredentialDialog({
               />
             </div>
           )}
-          {isAPIKey && (
-            <div className="space-y-2">
-              <Label>Model map（JSON，仅 API key）</Label>
-              <Textarea
-                value={modelMap}
-                onChange={(e) => setModelMap(e.target.value)}
-                className="font-mono text-xs h-32"
-                placeholder={'{\n  "claude-sonnet-4-5": "claude-3-5-sonnet-latest"\n}'}
-              />
+          <div className="space-y-2">
+            <Label>Model map（JSON）</Label>
+            <Textarea
+              value={modelMap}
+              onChange={(e) => setModelMap(e.target.value)}
+              className="font-mono text-xs h-32"
+              placeholder={'{\n  "claude-opus-4-7": "claude-opus-4-8"\n}'}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              仅改写：列出的模型把请求体 model 改写为右值；空值（如 <code className="font-mono">{`"opus": ""`}</code>）或未列出的键 = 不改写直接放行。不会限制可用模型。
+            </p>
+            {!isAPIKey && (
               <p className="text-[11px] text-muted-foreground">
-                空值（如 <code className="font-mono">{`"opus": ""`}</code>）= 不改写直接放行；省略键 = 走默认路由。
+                Claude OAuth 默认：<code className="font-mono">claude-opus-4-6</code> 和 <code className="font-mono">claude-opus-4-7</code> → <code className="font-mono">claude-opus-4-8</code>（已显示在上方，可编辑覆盖；清空则全部走默认）。
               </p>
-            </div>
-          )}
+            )}
+          </div>
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"

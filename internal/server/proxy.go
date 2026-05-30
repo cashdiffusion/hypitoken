@@ -313,6 +313,23 @@ func maskClientToken(t string) string {
 	return t[:6] + "…" + t[len(t)-4:]
 }
 
+// flagStripThinking persists the strip-thinking decision on a credential after a
+// thinking-signature recovery succeeds, so future requests on it sanitize prior
+// thinking signatures proactively (ahead of the forward) instead of failing once
+// per request and replaying. Generic across all credentials/providers (any relay
+// that rotates backend accounts and rejects echoed signatures gets flagged on its
+// first signature recovery). Idempotent + best-effort.
+func flagStripThinking(a *auth.Auth) {
+	if a.StripThinkingEnabled() {
+		return
+	}
+	if err := a.MarkStripThinking(); err != nil {
+		log.Warnf("proxy: %s strip-thinking persist failed: %v", a.ID, err)
+		return
+	}
+	log.Infof("proxy: %s flagged strip-thinking (persisted) — prior thinking signatures will be sanitized proactively on future requests", a.ID)
+}
+
 // doForward sends the request with one credential. Returns (retry, done):
 //
 //	retry=true  → caller should try another credential
@@ -324,10 +341,19 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	// thinking signatures to the issuing account, so this runs ahead
 	// of the API-key branch. Scoped to /v1/messages — no other path
 	// carries multi-turn assistant history.
-	if path == "/v1/messages" && s.switchTracker.Check(clientToken, body, a.ID) {
-		log.Infof("auth switch detected: clientToken=%s now on auth=%s — sanitizing prior thinking signatures",
-			maskClientToken(clientToken), a.ID)
-		body = thinkingsig.SanitizeForSwitch(body)
+	if path == "/v1/messages" {
+		switched := s.switchTracker.Check(clientToken, body, a.ID)
+		// StripThinkingEnabled credentials (relays that rotate backend accounts
+		// per request) reject every echoed thinking signature, so sanitize ahead
+		// of the forward instead of failing once and replaying. The flag is set +
+		// persisted automatically on the first signature recovery (any provider).
+		if switched || a.StripThinkingEnabled() {
+			if switched {
+				log.Infof("auth switch detected: clientToken=%s now on auth=%s — sanitizing prior thinking signatures",
+					maskClientToken(clientToken), a.ID)
+			}
+			body = thinkingsig.SanitizeForSwitch(body)
+		}
 	}
 
 	if a.Kind == auth.KindAPIKey {
@@ -469,7 +495,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		// the request and replay on the same credential. If it still
 		// fails, fall through to normal error handling.
 		recovered := false
-		if resp.StatusCode == 400 && path == "/v1/messages" && thinkingsig.IsSignatureError(errBody) {
+		if path == "/v1/messages" && thinkingsig.IsSignatureError(errBody) {
 			sanitized := thinkingsig.SanitizeForSwitch(body)
 			if !bytes.Equal(sanitized, body) {
 				retryUpstream := sanitized
@@ -490,6 +516,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 							log.Infof("proxy: %s signature retry succeeded", a.ID)
 							resp = retryResp
 							recovered = true
+							flagStripThinking(a)
 						} else {
 							_ = retryResp.Body.Close()
 							log.Warnf("proxy: %s signature retry still %d — surfacing original error", a.ID, retryResp.StatusCode)
@@ -787,6 +814,53 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	// 4xx error pages even when the request didn't advertise an
 	// Accept-Encoding; without this the captured snippet is binary.
 	maybeDecompressResponse(resp)
+
+	// Reactive thinking-signature recovery for API-key relays. Relays that pool
+	// and rotate backend accounts per request reject the echoed `thinking`
+	// signatures from prior turns ("Invalid signature in thinking block",
+	// returned as 400 or relay-rewrapped 500). Sanitize + replay once on the
+	// same key; on success, persist strip-thinking so future requests on this
+	// credential sanitize proactively (no failing first attempt). Generic across
+	// every API-key provider.
+	if resp.StatusCode >= 400 && path == "/v1/messages" {
+		errBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		recovered := false
+		if thinkingsig.IsSignatureError(errBody) {
+			sanitized := thinkingsig.SanitizeForSwitch(body)
+			if !bytes.Equal(sanitized, body) {
+				retryUpstream := sanitized
+				if um, ok := a.ResolveUpstreamModel(model); ok && um != model && um != "" {
+					if rw, e := rewriteModelField(retryUpstream, um); e == nil {
+						retryUpstream = rw
+					}
+				}
+				log.Warnf("proxy(apikey): %s returned %d signature-in-thinking — sanitizing and retrying once on same credential", a.ID, resp.StatusCode)
+				if rreq, e := http.NewRequestWithContext(ctx, http.MethodPost, upURL, bytes.NewReader(retryUpstream)); e == nil {
+					copyForwardableHeaders(c.Request.Header, rreq.Header)
+					stripIngressHeaders(rreq.Header)
+					rreq.Header.Set("x-api-key", token)
+					if rresp, de := client.Do(rreq); de == nil {
+						maybeDecompressResponse(rresp)
+						if rresp.StatusCode < 400 {
+							log.Infof("proxy(apikey): %s signature retry succeeded", a.ID)
+							resp = rresp
+							recovered = true
+							flagStripThinking(a)
+						} else {
+							_ = rresp.Body.Close()
+							log.Warnf("proxy(apikey): %s signature retry still %d — surfacing original error", a.ID, rresp.StatusCode)
+						}
+					} else {
+						log.Warnf("proxy(apikey): %s signature retry transport error: %v", a.ID, de)
+					}
+				}
+			}
+		}
+		if !recovered {
+			resp.Body = io.NopCloser(bytes.NewReader(errBody))
+		}
+	}
 
 	writeResponseHeaders(c, resp)
 	var counts usage.Counts
