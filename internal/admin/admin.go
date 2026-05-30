@@ -690,12 +690,9 @@ func (h *Handler) handlePatchAuth(c *gin.Context) {
 		a.SetGroup(*body.Group)
 	}
 	if body.ModelMap != nil {
-		// Only meaningful for API-key credentials; for OAuth it's stored but
-		// ignored at routing time. Reject explicitly to avoid silent confusion.
-		if a.Kind != auth.KindAPIKey {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "model_map is only supported on API-key credentials"})
-			return
-		}
+		// Rewrite table for both kinds. API-key relays remap vendor model names;
+		// Claude OAuth uses it for the default opus-4-6/4-7 → 4-8 upgrade (and any
+		// operator overrides). Applied at routing time via ResolveUpstreamModel.
 		a.SetModelMap(*body.ModelMap)
 	}
 	if err := a.Persist(); err != nil {
