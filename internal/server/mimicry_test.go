@@ -17,7 +17,7 @@ func testID() SimIdentity {
 // TestMimicrySmoke exercises the body rewriter on the shapes /v1/messages
 // requests actually take. It doesn't assert byte-equality against a golden
 // payload (the cch hash and session UUID change with body content) — it
-// asserts the structural invariants real Claude Code 2.1.156 requests carry.
+// asserts the structural invariants real Claude Code 2.1.158 requests carry.
 func TestMimicrySmoke(t *testing.T) {
 	cases := []struct {
 		name              string
@@ -61,7 +61,7 @@ func TestMimicrySmoke(t *testing.T) {
 				t.Fatalf("output not valid JSON: %v\n%s", err, out)
 			}
 
-			// 2. system must be the right number of blocks for CC 2.1.156:
+			// 2. system must be the right number of blocks for CC 2.1.158:
 			//    [billing, "You are Claude Code...", ...originalBlocks].
 			var sys []map[string]any
 			if err := json.Unmarshal(parsed["system"], &sys); err != nil {
@@ -74,8 +74,8 @@ func TestMimicrySmoke(t *testing.T) {
 			if !strings.HasPrefix(billing, "x-anthropic-billing-header:") {
 				t.Errorf("system[0] missing billing prefix: %q", billing)
 			}
-			if !strings.Contains(billing, "cc_version=2.1.156.") {
-				t.Errorf("system[0] missing cc_version=2.1.156: %q", billing)
+			if !strings.Contains(billing, "cc_version=2.1.158.") {
+				t.Errorf("system[0] missing cc_version=2.1.158: %q", billing)
 			}
 			if strings.Contains(billing, "cch=00000") {
 				t.Errorf("system[0] cch placeholder still present: %q", billing)
@@ -89,10 +89,10 @@ func TestMimicrySmoke(t *testing.T) {
 				t.Errorf("system[1] missing CC prompt: %q", ccPrompt)
 			}
 			if _, hasCC := sys[1]["cache_control"]; hasCC {
-				t.Errorf("system[1] (CC intro) must NOT carry cache_control — real 2.1.156 leaves it bare")
+				t.Errorf("system[1] (CC intro) must NOT carry cache_control — real 2.1.158 leaves it bare")
 			}
 
-			// 3. When original system was supplied, real CC 2.1.156 puts a
+			// 3. When original system was supplied, real CC 2.1.158 puts a
 			//    PLAIN ephemeral 1h breakpoint on the LAST system block and
 			//    scope:global on the SECOND-TO-LAST (when >=2 original blocks).
 			//    Verified across all 18 /v1/messages in crack/cc2156.

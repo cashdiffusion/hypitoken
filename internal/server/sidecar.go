@@ -20,7 +20,7 @@ import (
 	"github.com/wjsoj/cc-core/auth"
 )
 
-// Sidecar emulates the auxiliary traffic real Claude Code 2.1.156 fires
+// Sidecar emulates the auxiliary traffic real Claude Code 2.1.158 fires
 // alongside /v1/messages. Three phases:
 //
 //   - Phase A (always): quota probe (Haiku "quota") at session start.
@@ -38,7 +38,7 @@ import (
 //   - Phase C (heartbeat): a goroutine that POSTs
 //     /api/event_logging/v2/batch every ~18s ±40% with a realistic
 //     ClaudeCodeInternalEvent payload (env block matches our pinned
-//     2.1.156 / Linux / x64 / Node v24.3.0 fingerprint). Stops 5 min
+//     2.1.158 / Linux / x64 / Node v24.3.0 fingerprint). Stops 5 min
 //     after the session goes idle — mirrors a real CLI process exit.
 //
 // A virtual session is identified by accountKey alone. Multiple downstream
@@ -130,7 +130,7 @@ const (
 	quotaProbeModel = "claude-haiku-4-5-20251001"
 )
 
-// User-Agent strings used across sidecar endpoints. Real CC 2.1.156 uses
+// User-Agent strings used across sidecar endpoints. Real CC 2.1.158 uses
 // FOUR distinct HTTP clients: Bun fetch (GrowthBook only), axios 1.15.2
 // (penguin / mcp-registry / mcp_servers / downloads), claude-code/<ver>
 // (oauth/account/settings, bootstrap, event_logging), and the main
@@ -142,13 +142,13 @@ const (
 	uaClaudeCLI  = claudeCLIUserAgent // shared with the chat path
 )
 
-// Telemetry env profile — the pinned 2.1.156 client-machine fingerprint shared
+// Telemetry env profile — the pinned 2.1.158 client-machine fingerprint shared
 // by the event_logging and datadog heartbeat bodies. Values captured from real
-// CC 2.1.156 (crack/cc2156 SPEC.md §6). The block is a single plausible-host
+// CC 2.1.158 (crack/claude SPEC.md §6). The block is a single plausible-host
 // profile (it already pins konsole / zsh / x64), so distro + kernel are pinned
 // to match rather than probed from the proxy's own host.
 const (
-	ccBuildTime      = "2026-05-28T18:30:33Z"
+	ccBuildTime      = "2026-05-29T23:26:17Z"
 	ccLinuxDistroID  = "arch"
 	ccLinuxKernel    = "7.0.10-arch1-1"
 	ccTelemetryModel = "claude-opus-4-8[1m]" // event_logging event_data.model
@@ -871,7 +871,7 @@ func (m *sidecarMgr) sendHeartbeat(parent context.Context, a *auth.Auth, session
 
 // buildHeartbeatBody constructs a single-event batch shaped like row 14.
 // Volatile fields (timestamps, event_id, process metric) are refreshed
-// each tick; the env block stays fixed at our pinned 2.1.156 / Linux /
+// each tick; the env block stays fixed at our pinned 2.1.158 / Linux /
 // x64 / Node v24.3.0 fingerprint so it matches the X-Stainless headers.
 //
 // Event name `tengu_dir_search` is what real CC emits most frequently
@@ -1115,7 +1115,7 @@ func jitteredDatadogInterval() time.Duration {
 }
 
 // sendDatadogHeartbeat POSTs one tengu_feature_ok event to the Datadog
-// intake. Headers and body match crack/cc2156 (SPEC.md §5) — note that the
+// intake. Headers and body match crack/claude (SPEC.md §5) — note that the
 // Authorization header is NOT set (the dd-api-key header carries auth)
 // and User-Agent is axios/1.15.2 (the Datadog client lib in CC). Real CC's
 // datadog stream only carries tengu_feature_ok / tengu_api_success /
@@ -1172,7 +1172,7 @@ func userBucketFor(accountKey string) int {
 }
 
 // buildDatadogHeartbeatBody returns a JSON array of one event matching
-// the crack/cc2156 shape — all the per-event "env" fields are flattened
+// the crack/claude shape — all the per-event "env" fields are flattened
 // into the top level (Datadog's preferred indexing layout), and ddtags
 // is a comma-joined string of indexed dimensions.
 func buildDatadogHeartbeatBody(a *auth.Auth, sessionID string) ([]byte, error) {

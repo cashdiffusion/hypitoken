@@ -19,7 +19,7 @@ import (
 //     cc_version=X.Y.Z.{3hex}, cc_entrypoint=cli, and cch={5hex}
 //     (xxhash64 of the body with a fixed seed).
 //  2. system[1] is "You are Claude Code, Anthropic's official CLI for Claude."
-//     (bare — no cache_control, matches real 2.1.156).
+//     (bare — no cache_control, matches real 2.1.158).
 //  3. messages carry a stable cache breakpoint on the last block + (optionally)
 //     the second-to-last user turn.
 //  4. metadata.user_id is JSON: {"device_id":..., "account_uuid":..., "session_id":...}
@@ -62,7 +62,7 @@ type SimIdentity struct {
 }
 
 // applyClaudeCodeBodyMimicry rewrites the JSON request body to match the
-// shape of a real Claude Code 2.1.156 CLI request. Returns the original body
+// shape of a real Claude Code 2.1.158 CLI request. Returns the original body
 // unchanged if any step fails (best-effort — the request still ships).
 //
 // id binds the request to the per-account device fingerprint and to the
@@ -93,7 +93,7 @@ func applyClaudeCodeBodyMimicry(body []byte, model string, id SimIdentity) []byt
 		return signBillingHeaderCCH(body)
 	}
 
-	// Step 1: rebuild system to match the CC 2.1.156 4-block layout.
+	// Step 1: rebuild system to match the CC 2.1.158 4-block layout.
 	out, err := rewriteSystemForOAuth(obj, body)
 	if err != nil {
 		return body
@@ -106,7 +106,7 @@ func applyClaudeCodeBodyMimicry(body []byte, model string, id SimIdentity) []byt
 	// Step 3: metadata.user_id (JSON shape, CC 2.1.78+).
 	out = ensureMetadataUserID(out, id)
 
-	// NOTE: real CC 2.1.156 also carries `thinking` ({"type":"adaptive"}),
+	// NOTE: real CC 2.1.158 also carries `thinking` ({"type":"adaptive"}),
 	// `output_config` ({"effort":...}), `context_management` ({"edits":[...]}),
 	// and `diagnostics` ({"previous_message_id":...}) on every non-Haiku
 	// /v1/messages. We deliberately do NOT inject them — each is gated by a
@@ -161,8 +161,8 @@ func matchesClaudeCodePrefix(text string) bool {
 	return false
 }
 
-// rewriteSystemForOAuth rebuilds the system field to match the real CC 2.1.156
-// 4-block layout captured in crack/cc2156 (SPEC.md §2):
+// rewriteSystemForOAuth rebuilds the system field to match the real CC 2.1.158
+// 4-block layout captured in crack/claude (SPEC.md §2):
 //
 //	system[0] = billing block (no cache_control)
 //	system[1] = "You are Claude Code, Anthropic's official CLI for Claude."
@@ -241,12 +241,12 @@ func stripCacheControlFromBlocks(blocks []json.RawMessage) {
 
 // applySystemCacheBreakpoints adds cache_control to the second-to-last block
 // (1h + scope=global) and to the last block (1h, no scope) when present.
-// Mirrors the real CC 2.1.156 capture exactly.
+// Mirrors the real CC 2.1.158 capture exactly.
 func applySystemCacheBreakpoints(blocks []json.RawMessage) {
 	if len(blocks) == 0 {
 		return
 	}
-	// Real CC 2.1.156 puts scope:global on the SECOND-TO-LAST system block
+	// Real CC 2.1.158 puts scope:global on the SECOND-TO-LAST system block
 	// (the heavy, stable prefix) and a plain ephemeral 1h breakpoint on the
 	// LAST block. Verified across all 18 /v1/messages in the 2026-05-29
 	// capture (sysCC = ['-','-','S1h','e1h']). Earlier code had these swapped.
@@ -425,10 +425,10 @@ func stripMessageCacheControl(body []byte) []byte {
 }
 
 // addMessageCacheBreakpoints injects an ephemeral 1h cache_control on the
-// last block of the last message — exactly what real CC 2.1.156 does
-// (verified in crack/cc2156, SPEC.md §2). The second-to-last user breakpoint
+// last block of the last message — exactly what real CC 2.1.158 does
+// (verified in crack/claude, SPEC.md §2). The second-to-last user breakpoint
 // that older sub2api/Parrot snapshots place is no longer present in the
-// 2.1.156 capture, so we don't add it.
+// 2.1.158 capture, so we don't add it.
 func addMessageCacheBreakpoints(body []byte) []byte {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(body, &obj); err != nil {
