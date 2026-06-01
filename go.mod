@@ -9,7 +9,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/sirupsen/logrus v1.9.4
 	github.com/smartwalle/alipay/v3 v3.2.29
-	github.com/wjsoj/cc-core v0.8.10
+	github.com/wjsoj/cc-core v0.8.12
 	golang.org/x/crypto v0.51.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.0
