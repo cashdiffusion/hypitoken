@@ -1505,7 +1505,7 @@ func (h *Handler) handlePatchToken(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.tokens.Update(tok, body.Name, body.WeeklyUSD, body.MaxConcurrent, body.RPM, body.Group, body.Groups); err != nil {
+	if err := h.tokens.Update(tok, body.Name, body.WeeklyUSD, body.MaxConcurrent, body.RPM, body.Group, body.Groups, nil); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
