@@ -55,7 +55,7 @@ func TestStoreCRUDRoundTrip(t *testing.T) {
 	newLabel := "bob"
 	newGroup := "kiro-anthropic"
 	disabled := true
-	_, err = s2.Update(e.ID, &newLabel, &newGroup, &disabled)
+	_, err = s2.Update(e.ID, &newLabel, &newGroup, &disabled, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

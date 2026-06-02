@@ -90,6 +90,10 @@ func (d *Dispatcher) PickCredential(ctx context.Context, excludeIDs map[string]b
 			// Cached / probed quota = 0 → skip; will recheck after TTL.
 			continue
 		}
+		if !d.Store.Acquire(refreshed.ID) {
+			// Per-credential concurrency cap saturated → try the next one.
+			continue
+		}
 		return &ChosenCred{Entry: refreshed}, nil
 	}
 	if firstErr != nil {

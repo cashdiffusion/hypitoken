@@ -123,6 +123,9 @@ func (s *Server) tryKiro(
 		log.Warnf("kiro: pick credential failed (will fall through): %v", err)
 		return false
 	}
+	// PickCredential acquired a per-credential concurrency slot — release it
+	// when the request finishes (success OR mid-stream failure).
+	defer s.kiro.store.Release(chosen.Entry.ID)
 
 	// Parse the Anthropic-format body into the typed struct kirobridge expects.
 	var areq kirobridge.AnthropicRequest

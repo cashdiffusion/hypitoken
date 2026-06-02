@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wjsoj/cc-core/kiroauth"
@@ -33,6 +34,10 @@ type Entry struct {
 	Label      string                `json:"label,omitempty"`
 	Group      string                `json:"group,omitempty"` // for future per-credential group scoping
 	Disabled   bool                  `json:"disabled,omitempty"`
+	// MaxConcurrent is the per-credential in-flight request cap. 0 = unlimited.
+	// Enforced by Store.Acquire/Release; the live active counter lives in
+	// Store.active (process-local, not persisted).
+	MaxConcurrent int                `json:"max_concurrent,omitempty"`
 	CreatedAt  time.Time             `json:"created_at"`
 	UpdatedAt  time.Time             `json:"updated_at,omitempty"`
 	Cred       kiroauth.Credentials  `json:"credentials"`
@@ -57,6 +62,10 @@ type Store struct {
 	mu      sync.RWMutex
 	dir     string
 	entries map[string]*Entry // keyed by ID
+	// active tracks the in-flight request count per entry. Process-local —
+	// never persisted to disk. Pointer so Acquire/Release use atomics
+	// without holding the store mutex.
+	active map[string]*int64
 }
 
 // Open scans dir for *.json credential files. dir is created if missing.
@@ -68,7 +77,7 @@ func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("kirocreds: mkdir %s: %w", dir, err)
 	}
-	s := &Store{dir: dir, entries: make(map[string]*Entry)}
+	s := &Store{dir: dir, entries: make(map[string]*Entry), active: make(map[string]*int64)}
 	matches, err := filepath.Glob(filepath.Join(dir, "*.json"))
 	if err != nil {
 		return nil, fmt.Errorf("kirocreds: glob: %w", err)
@@ -168,7 +177,7 @@ func (s *Store) Add(label string, cred kiroauth.Credentials) (*Entry, error) {
 }
 
 // Update patches mutable metadata fields. nil fields leave them unchanged.
-func (s *Store) Update(id string, label *string, group *string, disabled *bool) (*Entry, error) {
+func (s *Store) Update(id string, label *string, group *string, disabled *bool, maxConcurrent *int) (*Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.entries[id]
@@ -184,12 +193,82 @@ func (s *Store) Update(id string, label *string, group *string, disabled *bool) 
 	if disabled != nil {
 		e.Disabled = *disabled
 	}
+	if maxConcurrent != nil {
+		if *maxConcurrent < 0 {
+			e.MaxConcurrent = 0
+		} else {
+			e.MaxConcurrent = *maxConcurrent
+		}
+	}
 	e.UpdatedAt = time.Now().UTC()
 	if err := s.saveEntryLocked(e); err != nil {
 		return nil, err
 	}
 	copy := *e
 	return &copy, nil
+}
+
+// Acquire reserves an in-flight slot on the given entry. Returns false when
+// the entry already has Entry.MaxConcurrent requests in flight (0 = unlimited
+// always succeeds). Caller MUST pair with Release on success.
+func (s *Store) Acquire(id string) bool {
+	s.mu.RLock()
+	e, ok := s.entries[id]
+	if !ok {
+		s.mu.RUnlock()
+		return false
+	}
+	cap := e.MaxConcurrent
+	counter := s.active[id]
+	s.mu.RUnlock()
+	if counter == nil {
+		s.mu.Lock()
+		counter = s.active[id]
+		if counter == nil {
+			var n int64
+			counter = &n
+			s.active[id] = counter
+		}
+		s.mu.Unlock()
+	}
+	if cap <= 0 {
+		atomic.AddInt64(counter, 1)
+		return true
+	}
+	for {
+		cur := atomic.LoadInt64(counter)
+		if cur >= int64(cap) {
+			return false
+		}
+		if atomic.CompareAndSwapInt64(counter, cur, cur+1) {
+			return true
+		}
+	}
+}
+
+// Release returns an in-flight slot. No-op when the entry is unknown.
+func (s *Store) Release(id string) {
+	s.mu.RLock()
+	counter := s.active[id]
+	s.mu.RUnlock()
+	if counter == nil {
+		return
+	}
+	if v := atomic.AddInt64(counter, -1); v < 0 {
+		// Defensive: should never go negative; reset to 0.
+		atomic.StoreInt64(counter, 0)
+	}
+}
+
+// Active reports the current in-flight count for the entry. 0 when unknown.
+func (s *Store) Active(id string) int64 {
+	s.mu.RLock()
+	counter := s.active[id]
+	s.mu.RUnlock()
+	if counter == nil {
+		return 0
+	}
+	return atomic.LoadInt64(counter)
 }
 
 // UpdateCredentials replaces the embedded Credentials (typically after a

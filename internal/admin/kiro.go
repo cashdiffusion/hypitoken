@@ -53,41 +53,46 @@ func (h *Handler) RegisterKiro(api *gin.RouterGroup) {
 // Public DTOs
 
 type kiroCredView struct {
-	ID         string    `json:"id"`
-	Label      string    `json:"label,omitempty"`
-	Group      string    `json:"group,omitempty"`
-	Disabled   bool      `json:"disabled"`
-	CreatedAt  time.Time `json:"created_at"`
-	ProfileARN string    `json:"profile_arn,omitempty"`
-	Email      string    `json:"email,omitempty"`
-	Plan       string    `json:"plan,omitempty"`
-	MaskedToken string   `json:"masked_token,omitempty"`
-	ExpiresAt  string    `json:"expires_at,omitempty"`
+	ID            string    `json:"id"`
+	Label         string    `json:"label,omitempty"`
+	Group         string    `json:"group,omitempty"`
+	Disabled      bool      `json:"disabled"`
+	MaxConcurrent int       `json:"max_concurrent"`
+	Active        int64     `json:"active"`
+	CreatedAt     time.Time `json:"created_at"`
+	ProfileARN    string    `json:"profile_arn,omitempty"`
+	Email         string    `json:"email,omitempty"`
+	Plan          string    `json:"plan,omitempty"`
+	MaskedToken   string    `json:"masked_token,omitempty"`
+	ExpiresAt     string    `json:"expires_at,omitempty"`
 }
 
 func (h *Handler) handleKiroList(c *gin.Context) {
 	out := make([]kiroCredView, 0)
 	for _, e := range h.kiro.Store().List() {
 		out = append(out, kiroCredView{
-			ID:          e.ID,
-			Label:       e.Label,
-			Group:       e.Group,
-			Disabled:    e.Disabled,
-			CreatedAt:   e.CreatedAt,
-			ProfileARN:  e.Cred.ProfileARN,
-			Email:       e.Cred.Email,
-			Plan:        e.Cred.SubscriptionTier,
-			MaskedToken: e.MaskedToken(),
-			ExpiresAt:   e.Cred.ExpiresAt,
+			ID:            e.ID,
+			Label:         e.Label,
+			Group:         e.Group,
+			Disabled:      e.Disabled,
+			MaxConcurrent: e.MaxConcurrent,
+			Active:        h.kiro.Store().Active(e.ID),
+			CreatedAt:     e.CreatedAt,
+			ProfileARN:    e.Cred.ProfileARN,
+			Email:         e.Cred.Email,
+			Plan:          e.Cred.SubscriptionTier,
+			MaskedToken:   e.MaskedToken(),
+			ExpiresAt:     e.Cred.ExpiresAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"credentials": out})
 }
 
 type kiroPatchBody struct {
-	Label    *string `json:"label"`
-	Group    *string `json:"group"`
-	Disabled *bool   `json:"disabled"`
+	Label         *string `json:"label"`
+	Group         *string `json:"group"`
+	Disabled      *bool   `json:"disabled"`
+	MaxConcurrent *int    `json:"max_concurrent"`
 }
 
 func (h *Handler) handleKiroPatch(c *gin.Context) {
@@ -97,7 +102,7 @@ func (h *Handler) handleKiroPatch(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	e, err := h.kiro.Store().Update(id, body.Label, body.Group, body.Disabled)
+	e, err := h.kiro.Store().Update(id, body.Label, body.Group, body.Disabled, body.MaxConcurrent)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -179,11 +184,12 @@ func (h *Handler) handleKiroLoginStart(c *gin.Context) {
 type kiroLoginFinishBody struct {
 	// Either supply the raw callback URL (preferred — mirrors the Claude
 	// OAuth flow) or fill code/state/login_option explicitly.
-	Callback    string `json:"callback"`
-	Code        string `json:"code"`
-	State       string `json:"state"`
-	LoginOption string `json:"login_option"`
-	Group       string `json:"group"`
+	Callback      string `json:"callback"`
+	Code          string `json:"code"`
+	State         string `json:"state"`
+	LoginOption   string `json:"login_option"`
+	Group         string `json:"group"`
+	MaxConcurrent int    `json:"max_concurrent"`
 }
 
 func (h *Handler) handleKiroLoginFinish(c *gin.Context) {
@@ -225,8 +231,17 @@ func (h *Handler) handleKiroLoginFinish(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if grp := strings.TrimSpace(body.Group); grp != "" {
-		if updated, err := h.kiro.Store().Update(entry.ID, nil, &grp, nil); err == nil {
+	grp := strings.TrimSpace(body.Group)
+	var grpPtr *string
+	if grp != "" {
+		grpPtr = &grp
+	}
+	var maxPtr *int
+	if body.MaxConcurrent > 0 {
+		maxPtr = &body.MaxConcurrent
+	}
+	if grpPtr != nil || maxPtr != nil {
+		if updated, err := h.kiro.Store().Update(entry.ID, nil, grpPtr, nil, maxPtr); err == nil {
 			entry = updated
 		}
 	}
