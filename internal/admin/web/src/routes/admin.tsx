@@ -1248,6 +1248,8 @@ function KiroCredentialsPanel() {
     label: string;
     group?: string;
     disabled: boolean;
+    max_concurrent?: number;
+    active?: number;
     created_at: string;
     profile_arn?: string;
     email?: string;
@@ -1309,6 +1311,7 @@ function KiroCredentialsPanel() {
                   <TableHead>标签</TableHead>
                   <TableHead>ID</TableHead>
                   <TableHead>计划</TableHead>
+                  <TableHead className="text-right">并发</TableHead>
                   <TableHead className="text-right">使用 / 配额</TableHead>
                   <TableHead>过期</TableHead>
                   <TableHead className="text-right">操作</TableHead>
@@ -1334,6 +1337,9 @@ function KiroCredentialsPanel() {
                         <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
                           {bal?.plan ?? c.plan ?? "—"}
                         </span>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-mono text-xs">
+                        {c.active ?? 0} / {c.max_concurrent && c.max_concurrent > 0 ? c.max_concurrent : "∞"}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {bal ? (
@@ -1406,11 +1412,12 @@ function KiroAddDialog({
   const [label, setLabel] = useState("");
   const [proxy, setProxy] = useState("");
   const [group, setGroup] = useState("");
+  const [maxC, setMaxC] = useState("5");
   const [sess, setSess] = useState<{ signin_url: string; state: string; redirect_uri: string } | null>(null);
   const [callback, setCallback] = useState("");
   const [busy, setBusy] = useState(false);
   const reset = () => {
-    setStep(1); setLabel(""); setProxy(""); setGroup(""); setSess(null); setCallback("");
+    setStep(1); setLabel(""); setProxy(""); setGroup(""); setMaxC("5"); setSess(null); setCallback("");
   };
   useEffect(() => {
     if (open) reset();
@@ -1446,6 +1453,7 @@ function KiroAddDialog({
         callback: callback.trim(),
         state: sess.state,
         group,
+        max_concurrent: Number(maxC) || 0,
       });
       toast.success("Kiro 凭证已添加");
       onAdded();
@@ -1483,14 +1491,19 @@ function KiroAddDialog({
                 <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="alice@example.com" />
               </div>
               <div className="space-y-2">
-                <Label>Group (optional)</Label>
-                <Input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="empty = default" />
+                <Label>Max concurrent</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={maxC}
+                  onChange={(e) => setMaxC(e.target.value)}
+                />
               </div>
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              注：Kiro 调度器按账户池轮询、无 per-credential 并发上限,
-              因此不像 Claude / Codex 有「Max concurrent」配置。
-            </p>
+            <div className="space-y-2">
+              <Label>Group (optional)</Label>
+              <Input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="empty = default" />
+            </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
               <Button disabled={busy} onClick={start}>
