@@ -183,6 +183,7 @@ type kiroLoginFinishBody struct {
 	Code        string `json:"code"`
 	State       string `json:"state"`
 	LoginOption string `json:"login_option"`
+	Group       string `json:"group"`
 }
 
 func (h *Handler) handleKiroLoginFinish(c *gin.Context) {
@@ -223,6 +224,11 @@ func (h *Handler) handleKiroLoginFinish(c *gin.Context) {
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if grp := strings.TrimSpace(body.Group); grp != "" {
+		if updated, err := h.kiro.Store().Update(entry.ID, nil, &grp, nil); err == nil {
+			entry = updated
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"status":      "ok",

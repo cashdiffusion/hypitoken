@@ -87,13 +87,13 @@ func (p *PKCESessions) Finish(ctx context.Context, code, state, loginOption stri
 		return kiroauth.Credentials{}, "", errors.New("kirocreds: PKCE state not found or expired")
 	}
 
-	echo := s.RedirectURI
+	// Kiro echoes back redirect_uri with the /oauth/callback path appended —
+	// not the bare base URL the SignInURL uses. Verified against the captured
+	// real-CLI flow in crack/kiro/login/docs/04: body sends
+	// "http://localhost:3128/oauth/callback?login_option=github".
+	echo := strings.TrimRight(s.RedirectURI, "/") + "/oauth/callback"
 	if loginOption != "" {
-		if strings.Contains(echo, "?") {
-			echo += "&login_option=" + loginOption
-		} else {
-			echo += "?login_option=" + loginOption
-		}
+		echo += "?login_option=" + loginOption
 	}
 	client := &kiroauth.Client{HTTP: httpClientFor(s.ProxyURL)}
 	tr, err := client.ExchangeCode(ctx, code, s.Verifier, echo)

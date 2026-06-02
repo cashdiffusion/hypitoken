@@ -1405,11 +1405,12 @@ function KiroAddDialog({
   const [step, setStep] = useState<1 | 2>(1);
   const [label, setLabel] = useState("");
   const [proxy, setProxy] = useState("");
+  const [group, setGroup] = useState("");
   const [sess, setSess] = useState<{ signin_url: string; state: string; redirect_uri: string } | null>(null);
   const [callback, setCallback] = useState("");
   const [busy, setBusy] = useState(false);
   const reset = () => {
-    setStep(1); setLabel(""); setProxy(""); setSess(null); setCallback("");
+    setStep(1); setLabel(""); setProxy(""); setGroup(""); setSess(null); setCallback("");
   };
   useEffect(() => {
     if (open) reset();
@@ -1444,6 +1445,7 @@ function KiroAddDialog({
       await apiPost<any>("/admin/kiro/login/finish", {
         callback: callback.trim(),
         state: sess.state,
+        group,
       });
       toast.success("Kiro 凭证已添加");
       onAdded();
@@ -1475,10 +1477,20 @@ function KiroAddDialog({
                 className="font-mono"
               />
             </div>
-            <div className="space-y-2">
-              <Label>Label (optional)</Label>
-              <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="alice@example.com" />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Label</Label>
+                <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="alice@example.com" />
+              </div>
+              <div className="space-y-2">
+                <Label>Group (optional)</Label>
+                <Input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="empty = default" />
+              </div>
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              注：Kiro 调度器按账户池轮询、无 per-credential 并发上限,
+              因此不像 Claude / Codex 有「Max concurrent」配置。
+            </p>
             <DialogFooter>
               <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
               <Button disabled={busy} onClick={start}>
