@@ -186,16 +186,17 @@ func (d *Dispatcher) Forward(c *gin.Context, ctx context.Context, areq *kirobrid
 	defer kstream.Close()
 
 	messageID := newMessageID()
-	tr := kirobridge.NewStreamTranslator(kstream, areq.Model, messageID)
-	nameMap := out.ToolNameMap
+	// cc-core ≥ v0.8.13: pass the (short→original) tool-name map so
+	// long-name tools are restored in content_block_start events.
+	tr := kirobridge.NewStreamTranslatorWithMap(kstream, areq.Model, messageID, out.ToolNameMap)
 
 	if stream {
-		return d.writeSSE(c, tr, nameMap, messageID)
+		return d.writeSSE(c, tr, messageID)
 	}
-	return d.writeOneShot(c, tr, nameMap, areq.Model, messageID)
+	return d.writeOneShot(c, tr, areq.Model, messageID)
 }
 
-func (d *Dispatcher) writeSSE(c *gin.Context, tr *kirobridge.StreamTranslator, nameMap kirobridge.ToolNameMap, messageID string) (usage.Counts, string, error) {
+func (d *Dispatcher) writeSSE(c *gin.Context, tr *kirobridge.StreamTranslator, messageID string) (usage.Counts, string, error) {
 	c.Status(200)
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -205,7 +206,7 @@ func (d *Dispatcher) writeSSE(c *gin.Context, tr *kirobridge.StreamTranslator, n
 
 	var u usage.Counts
 	for tr.Next() {
-		ev := fixupSSEEvent(tr.Event(), nameMap)
+		ev := tr.Event()
 		// Accumulate usage from message_delta + message_start events on the way out.
 		accumulateUsage(&u, ev)
 		if _, err := c.Writer.Write(ev.Marshal()); err != nil {
@@ -221,7 +222,7 @@ func (d *Dispatcher) writeSSE(c *gin.Context, tr *kirobridge.StreamTranslator, n
 	return u, messageID, nil
 }
 
-func (d *Dispatcher) writeOneShot(c *gin.Context, tr *kirobridge.StreamTranslator, nameMap kirobridge.ToolNameMap, model, messageID string) (usage.Counts, string, error) {
+func (d *Dispatcher) writeOneShot(c *gin.Context, tr *kirobridge.StreamTranslator, model, messageID string) (usage.Counts, string, error) {
 	// Collect all text deltas + tool_use blocks into an Anthropic non-streaming response.
 	type block struct {
 		Type  string          `json:"type"`
@@ -256,7 +257,7 @@ func (d *Dispatcher) writeOneShot(c *gin.Context, tr *kirobridge.StreamTranslato
 	var toolOrder []int
 
 	for tr.Next() {
-		ev := fixupSSEEvent(tr.Event(), nameMap)
+		ev := tr.Event()
 		accumulateUsage(&u, ev)
 		switch ev.Name {
 		case "content_block_start":
