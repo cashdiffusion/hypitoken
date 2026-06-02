@@ -1402,95 +1402,135 @@ function KiroCredentialsPanel() {
 function KiroAddDialog({
   open, onOpenChange, onAdded,
 }: { open: boolean; onOpenChange: (b: boolean) => void; onAdded: () => void }) {
-  const [step, setStep] = useState<"start" | "waiting" | "done">("start");
+  const [step, setStep] = useState<1 | 2>(1);
   const [label, setLabel] = useState("");
-  const [signInURL, setSignInURL] = useState("");
-  const [state, setState] = useState("");
-  const [code, setCode] = useState("");
-  const [loginOption, setLoginOption] = useState("");
+  const [proxy, setProxy] = useState("");
+  const [sess, setSess] = useState<{ signin_url: string; state: string; redirect_uri: string } | null>(null);
+  const [callback, setCallback] = useState("");
+  const [busy, setBusy] = useState(false);
   const reset = () => {
-    setStep("start"); setLabel(""); setSignInURL(""); setState("");
-    setCode(""); setLoginOption("");
+    setStep(1); setLabel(""); setProxy(""); setSess(null); setCallback("");
   };
+  useEffect(() => {
+    if (open) reset();
+  }, [open]);
   const start = async () => {
+    setBusy(true);
     try {
       const r = await apiPost<any>("/admin/kiro/login/start", {
         label,
+        proxy_url: proxy,
         redirect_uri: "http://localhost:3128",
       });
-      setSignInURL(r.signin_url);
-      setState(r.state);
-      setStep("waiting");
+      setSess({ signin_url: r.signin_url, state: r.state, redirect_uri: r.redirect_uri });
+      setStep(2);
     } catch (e: any) {
       toast.error(e?.message || String(e));
+    } finally {
+      setBusy(false);
     }
   };
+  const copyURL = async () => {
+    if (!sess) return;
+    try {
+      await navigator.clipboard.writeText(sess.signin_url);
+      toast.success("Login URL copied");
+    } catch { /* ignore */ }
+  };
   const finish = async () => {
+    if (!sess) return;
+    setBusy(true);
     try {
       await apiPost<any>("/admin/kiro/login/finish", {
-        code, state, login_option: loginOption,
+        callback: callback.trim(),
+        state: sess.state,
       });
       toast.success("Kiro 凭证已添加");
-      setStep("done");
       onAdded();
-      setTimeout(() => { onOpenChange(false); reset(); }, 800);
+      onOpenChange(false);
     } catch (e: any) {
       toast.error(e?.message || String(e));
+    } finally {
+      setBusy(false);
     }
   };
   return (
     <Dialog open={open} onOpenChange={(b) => { onOpenChange(b); if (!b) reset(); }}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>添加 Kiro 凭证(PKCE 登录)</DialogTitle>
         </DialogHeader>
-        {step === "start" && (
-          <div className="space-y-3">
-            <div>
-              <Label>标签(可选,便于识别)</Label>
+        {step === 1 && (
+          <div className="grid gap-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              将生成一个 app.kiro.dev 登录链接。如果服务器无法直连 kiro.dev / amazonaws.com，
+              请填代理 — 这条代理同时用于本次令牌交换以及后续刷新该凭证时的出站请求。
+            </p>
+            <div className="space-y-2">
+              <Label>Proxy URL (optional)</Label>
+              <Input
+                placeholder="http:// or socks5://"
+                value={proxy}
+                onChange={(e) => setProxy(e.target.value)}
+                className="font-mono"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Label (optional)</Label>
               <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="alice@example.com" />
             </div>
-            <p className="text-sm text-muted-foreground">
-              点击「生成登录链接」后会得到一个 https://app.kiro.dev/signin?... 链接。
-              在浏览器中打开并完成 IdP 授权,Kiro 会重定向到 http://localhost:3128/oauth/callback?code=...&amp;state=...&amp;login_option=...,
-              请将 URL 中的 code / state / login_option 三个参数复制粘贴回来。
-            </p>
             <DialogFooter>
-              <Button onClick={start}>生成登录链接</Button>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button disabled={busy} onClick={start}>
+                {busy ? "Starting…" : "Generate login URL"}
+              </Button>
             </DialogFooter>
           </div>
         )}
-        {step === "waiting" && (
-          <div className="space-y-3">
-            <div>
-              <Label>登录链接</Label>
+        {step === 2 && sess && (
+          <div className="grid gap-3 py-2">
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p><b>1.</b> 复制下方登录链接，在浏览器中打开并完成授权：</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Login URL</Label>
               <div className="flex gap-2">
-                <Input value={signInURL} readOnly className="font-mono text-xs" />
-                <Button variant="outline" onClick={() => window.open(signInURL, "_blank")}>打开</Button>
+                <Input
+                  readOnly
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="flex-1 font-mono text-xs bg-muted"
+                  value={sess.signin_url}
+                />
+                <Button variant="outline" onClick={copyURL}>Copy</Button>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Label>code</Label>
-                <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="callback URL 中的 code= 值" />
-              </div>
-              <div>
-                <Label>login_option</Label>
-                <Input value={loginOption} onChange={(e) => setLoginOption(e.target.value)} placeholder="github / google / builder-id" />
-              </div>
+            <div className="text-sm text-muted-foreground space-y-2 pt-2">
+              <p>
+                <b>2.</b> 授权完成后，浏览器会跳转到{" "}
+                <code className="font-mono break-all">{sess.redirect_uri}/oauth/callback?code=…&amp;state=…&amp;login_option=…</code>。
+                页面通常加载失败 — 没关系。
+              </p>
+              <p>
+                <b>3.</b> 从地址栏复制完整 URL 粘贴到下面，提交后由服务器内部完成
+                token 交换 + 刷新链路写入。
+              </p>
             </div>
-            <div>
-              <Label>state (必须与生成时一致 = {state})</Label>
-              <Input value={state} readOnly className="font-mono text-xs" />
+            <div className="space-y-2">
+              <Label>Callback URL</Label>
+              <Textarea
+                className="font-mono text-xs h-28"
+                placeholder={`${sess.redirect_uri}/oauth/callback?code=…&state=…&login_option=github`}
+                value={callback}
+                onChange={(e) => setCallback(e.target.value)}
+              />
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setStep("start")}>返回</Button>
-              <Button onClick={finish} disabled={!code}>完成添加</Button>
+              <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
+              <Button disabled={busy || !callback.trim()} onClick={finish}>
+                {busy ? "Exchanging…" : "Finish"}
+              </Button>
             </DialogFooter>
           </div>
-        )}
-        {step === "done" && (
-          <div className="py-6 text-center text-sm">已成功添加 Kiro 凭证 ✓</div>
         )}
       </DialogContent>
     </Dialog>

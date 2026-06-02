@@ -26,7 +26,7 @@ func (s *Store) EnsureFresh(ctx context.Context, id string, skew time.Duration) 
 	if got.Cred.RefreshToken == "" {
 		return nil, fmt.Errorf("kirocreds: id %q has no refresh token", id)
 	}
-	client := &kiroauth.Client{}
+	client := &kiroauth.Client{HTTP: httpClientFor(got.Cred.ProxyURL)}
 	tr, err := client.RefreshSocial(ctx, got.Cred.RefreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("kirocreds: refresh: %w", err)
