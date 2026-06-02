@@ -187,14 +187,15 @@ func (d *Dispatcher) Forward(c *gin.Context, ctx context.Context, areq *kirobrid
 
 	messageID := newMessageID()
 	tr := kirobridge.NewStreamTranslator(kstream, areq.Model, messageID)
+	nameMap := out.ToolNameMap
 
 	if stream {
-		return d.writeSSE(c, tr, messageID)
+		return d.writeSSE(c, tr, nameMap, messageID)
 	}
-	return d.writeOneShot(c, tr, areq.Model, messageID)
+	return d.writeOneShot(c, tr, nameMap, areq.Model, messageID)
 }
 
-func (d *Dispatcher) writeSSE(c *gin.Context, tr *kirobridge.StreamTranslator, messageID string) (usage.Counts, string, error) {
+func (d *Dispatcher) writeSSE(c *gin.Context, tr *kirobridge.StreamTranslator, nameMap kirobridge.ToolNameMap, messageID string) (usage.Counts, string, error) {
 	c.Status(200)
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -204,7 +205,7 @@ func (d *Dispatcher) writeSSE(c *gin.Context, tr *kirobridge.StreamTranslator, m
 
 	var u usage.Counts
 	for tr.Next() {
-		ev := tr.Event()
+		ev := fixupSSEEvent(tr.Event(), nameMap)
 		// Accumulate usage from message_delta + message_start events on the way out.
 		accumulateUsage(&u, ev)
 		if _, err := c.Writer.Write(ev.Marshal()); err != nil {
@@ -220,7 +221,7 @@ func (d *Dispatcher) writeSSE(c *gin.Context, tr *kirobridge.StreamTranslator, m
 	return u, messageID, nil
 }
 
-func (d *Dispatcher) writeOneShot(c *gin.Context, tr *kirobridge.StreamTranslator, model, messageID string) (usage.Counts, string, error) {
+func (d *Dispatcher) writeOneShot(c *gin.Context, tr *kirobridge.StreamTranslator, nameMap kirobridge.ToolNameMap, model, messageID string) (usage.Counts, string, error) {
 	// Collect all text deltas + tool_use blocks into an Anthropic non-streaming response.
 	type block struct {
 		Type  string          `json:"type"`
@@ -244,20 +245,50 @@ func (d *Dispatcher) writeOneShot(c *gin.Context, tr *kirobridge.StreamTranslato
 	var textBuf string
 	var stopReason string
 
+	// Tool-use blocks streamed as content_block_start + N input_json_delta
+	// fragments + content_block_stop. Reconstruct the full input string
+	// per block-index, then parse as JSON for the final response.
+	type toolAcc struct {
+		ID, Name string
+		Buf      string
+	}
+	toolByIdx := map[int]*toolAcc{}
+	var toolOrder []int
+
 	for tr.Next() {
-		ev := tr.Event()
+		ev := fixupSSEEvent(tr.Event(), nameMap)
 		accumulateUsage(&u, ev)
 		switch ev.Name {
+		case "content_block_start":
+			var v struct {
+				Index        int `json:"index"`
+				ContentBlock struct {
+					Type string `json:"type"`
+					ID   string `json:"id"`
+					Name string `json:"name"`
+				} `json:"content_block"`
+			}
+			if json.Unmarshal(ev.Data, &v) == nil && v.ContentBlock.Type == "tool_use" {
+				toolByIdx[v.Index] = &toolAcc{ID: v.ContentBlock.ID, Name: v.ContentBlock.Name}
+				toolOrder = append(toolOrder, v.Index)
+			}
 		case "content_block_delta":
 			var v struct {
+				Index int `json:"index"`
 				Delta struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
+					Type        string `json:"type"`
+					Text        string `json:"text"`
+					PartialJSON string `json:"partial_json"`
 				} `json:"delta"`
 			}
 			_ = json.Unmarshal(ev.Data, &v)
-			if v.Delta.Type == "text_delta" {
+			switch v.Delta.Type {
+			case "text_delta":
 				textBuf += v.Delta.Text
+			case "input_json_delta":
+				if t, ok := toolByIdx[v.Index]; ok {
+					t.Buf += v.Delta.PartialJSON
+				}
 			}
 		case "message_delta":
 			var v struct {
@@ -276,6 +307,26 @@ func (d *Dispatcher) writeOneShot(c *gin.Context, tr *kirobridge.StreamTranslato
 	}
 	if textBuf != "" {
 		out.Content = append(out.Content, block{Type: "text", Text: textBuf})
+	}
+	for _, idx := range toolOrder {
+		t := toolByIdx[idx]
+		var input json.RawMessage
+		buf := strings.TrimSpace(t.Buf)
+		if buf == "" {
+			input = json.RawMessage(`{}`)
+		} else if json.Valid([]byte(buf)) {
+			input = json.RawMessage(buf)
+		} else {
+			// Last-resort: wrap as a string so downstream sees something.
+			b, _ := json.Marshal(buf)
+			input = b
+		}
+		out.Content = append(out.Content, block{
+			Type:  "tool_use",
+			ID:    t.ID,
+			Name:  t.Name,
+			Input: input,
+		})
 	}
 	out.StopReason = stopReason
 	out.Usage = u
