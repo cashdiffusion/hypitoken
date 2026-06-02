@@ -149,11 +149,13 @@ func (h *Handler) handleKiroCredits(c *gin.Context) {
 type kiroLoginStartBody struct {
 	Label       string `json:"label"`
 	RedirectURI string `json:"redirect_uri"` // typically http://localhost:3128
+	ProxyURL    string `json:"proxy_url"`    // optional outbound proxy for token exchange + refresh
 }
 
 type kiroLoginStartResp struct {
-	SignInURL string `json:"signin_url"`
-	State     string `json:"state"`
+	SignInURL   string `json:"signin_url"`
+	State       string `json:"state"`
+	RedirectURI string `json:"redirect_uri"`
 }
 
 func (h *Handler) handleKiroLoginStart(c *gin.Context) {
@@ -166,15 +168,18 @@ func (h *Handler) handleKiroLoginStart(c *gin.Context) {
 	if redirect == "" {
 		redirect = "http://localhost:3128"
 	}
-	signin, state, err := h.kiro.PKCE().Start(redirect, body.Label)
+	signin, state, err := h.kiro.PKCE().Start(redirect, body.Label, body.ProxyURL)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, kiroLoginStartResp{SignInURL: signin, State: state})
+	c.JSON(http.StatusOK, kiroLoginStartResp{SignInURL: signin, State: state, RedirectURI: redirect})
 }
 
 type kiroLoginFinishBody struct {
+	// Either supply the raw callback URL (preferred — mirrors the Claude
+	// OAuth flow) or fill code/state/login_option explicitly.
+	Callback    string `json:"callback"`
 	Code        string `json:"code"`
 	State       string `json:"state"`
 	LoginOption string `json:"login_option"`
@@ -186,9 +191,30 @@ func (h *Handler) handleKiroLoginFinish(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	code := strings.TrimSpace(body.Code)
+	state := strings.TrimSpace(body.State)
+	loginOption := strings.TrimSpace(body.LoginOption)
+	if cb := strings.TrimSpace(body.Callback); cb != "" && code == "" {
+		pc, ps, plo, err := kirocreds.ParseKiroCallback(cb)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		code = pc
+		if state == "" {
+			state = ps
+		}
+		if loginOption == "" {
+			loginOption = plo
+		}
+	}
+	if code == "" || state == "" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing code/state"})
+		return
+	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
-	cred, label, err := h.kiro.PKCE().Finish(ctx, body.Code, body.State, body.LoginOption)
+	cred, label, err := h.kiro.PKCE().Finish(ctx, code, state, loginOption)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
