@@ -14,11 +14,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	ccauth "github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/kiroapi"
 	"github.com/wjsoj/cc-core/kiroauth"
 	"github.com/wjsoj/cc-core/kirobridge"
@@ -27,6 +29,28 @@ import (
 
 	"github.com/wjsoj/CPA-Claude/internal/kirocreds"
 )
+
+// proxyHTTPCache memoizes *http.Client by proxy URL so we don't rebuild the
+// transport for every request. The empty string maps to http.DefaultClient
+// (direct). Concurrent-safe.
+var proxyHTTPCache sync.Map // map[string]*http.Client
+
+// HTTPClientForProxy returns an http.Client routed through proxyURL (empty =
+// direct). Kiro endpoints don't fingerprint-check at the TLS layer, so the
+// plain (non-uTLS) transport is fine — and the same proxy URL string keys
+// reuse the underlying transport.
+func HTTPClientForProxy(proxyURL string) *http.Client {
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL == "" {
+		return http.DefaultClient
+	}
+	if v, ok := proxyHTTPCache.Load(proxyURL); ok {
+		return v.(*http.Client)
+	}
+	c := ccauth.NewPlainHTTPClient(proxyURL, false)
+	actual, _ := proxyHTTPCache.LoadOrStore(proxyURL, c)
+	return actual.(*http.Client)
+}
 
 // Dispatcher selects + forwards Anthropic requests through the Kiro
 // channel. Concurrency-safe.
@@ -142,11 +166,13 @@ func (d *Dispatcher) Forward(c *gin.Context, ctx context.Context, areq *kirobrid
 		IsAPIKey: cred.Cred.IsAPIKey(),
 		Flavor:   kirotransport.FlavorCLI,
 		OptOut:   &optOut,
+		// Kiro geo-fences models by source IP — the CN-IP view of
+		// ListAvailableModels has zero Claude models, so we MUST honor the
+		// per-credential ProxyURL on every upstream call. Dispatcher-level
+		// d.HTTP is a fallback for callers that don't carry a proxy.
+		HTTP: HTTPClientForProxy(cred.Cred.ProxyURL),
 	}
-	if d.HTTP != nil {
-		// only assign when a real client is configured — passing a typed-nil
-		// *http.Client through the HTTPDoer interface would make c.http()
-		// non-nil but panic on Do().
+	if cred.Cred.ProxyURL == "" && d.HTTP != nil {
 		kc.HTTP = d.HTTP
 	}
 	kreq := &kiroapi.GenerateAssistantResponseRequest{

@@ -12,6 +12,7 @@ import (
 	"github.com/wjsoj/cc-core/kirotransport"
 
 	"github.com/wjsoj/CPA-Claude/internal/kirocreds"
+	"github.com/wjsoj/CPA-Claude/internal/kiroupstream"
 )
 
 // KiroAccess is the subset of *server.KiroState the admin Handler needs.
@@ -135,6 +136,7 @@ func (h *Handler) handleKiroCredits(c *gin.Context) {
 		Token:    entry.Cred.AccessToken,
 		IsAPIKey: entry.Cred.IsAPIKey(),
 		Flavor:   kirotransport.FlavorCLI,
+		HTTP:     kiroupstream.HTTPClientForProxy(entry.Cred.ProxyURL),
 	}
 	r, err := kc.GetCredits(ctx, entry.Cred.ProfileARN)
 	if err != nil {
