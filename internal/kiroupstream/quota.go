@@ -57,6 +57,7 @@ func (q *QuotaCache) allowed(ctx context.Context, e *kirocreds.Entry) bool {
 		Token:    e.Cred.AccessToken,
 		IsAPIKey: e.Cred.IsAPIKey(),
 		Flavor:   kirotransport.FlavorCLI,
+		HTTP:     HTTPClientForProxy(e.Cred.ProxyURL),
 	}
 	resp, err := client.GetCredits(pctx, e.Cred.ProfileARN)
 	if err != nil {
