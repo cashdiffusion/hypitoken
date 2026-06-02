@@ -11,6 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/kiroapi"
 	"github.com/wjsoj/cc-core/kirobridge"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/usage"
@@ -140,10 +141,16 @@ func (s *Server) tryKiro(
 
 	counts, _, derr := s.kiro.disp.Forward(c, c.Request.Context(), &areq, chosen.Entry, chosen.Entry.Cred.ProfileARN)
 	if derr != nil {
-		// Mid-stream error: too late to rewrite response. Log and return handled.
-		status := 500
+		// Decide a client-visible status. If kiroapi returned an HTTPError we
+		// surface its upstream status so the client sees 429 as 429 (not 500
+		// + empty body, which made Claude Code blow up parsing usage tokens).
+		status := 502
 		if errors.Is(derr, context.Canceled) {
 			status = 499
+		}
+		var herr *kiroapi.HTTPError
+		if errors.As(derr, &herr) {
+			status = herr.StatusCode
 		}
 		s.emitLog(requestlog.Record{
 			Client: clientName, ClientToken: maskClientToken(clientToken),
@@ -155,6 +162,18 @@ func (s *Server) tryKiro(
 			Status: status, DurationMs: time.Since(start).Milliseconds(),
 			Error:  derr.Error(),
 		})
+		// Only write a response when nothing has been sent yet — Forward
+		// returns errors BEFORE writeSSE/writeOneShot fires, so this is the
+		// common case. Skip when bytes are already on the wire (mid-stream).
+		if !c.Writer.Written() {
+			c.AbortWithStatusJSON(status, gin.H{
+				"type": "error",
+				"error": gin.H{
+					"type":    "upstream_error",
+					"message": derr.Error(),
+				},
+			})
+		}
 		return true
 	}
 
