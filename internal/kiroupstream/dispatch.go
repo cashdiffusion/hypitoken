@@ -115,9 +115,14 @@ func (d *Dispatcher) Forward(c *gin.Context, ctx context.Context, areq *kirobrid
 	stream := areq.Stream
 
 	// Build the typed Kiro request from the Anthropic-format input.
+	// Origin must match the transport flavor — we use kirotransport.FlavorCLI
+	// for the UA, so the body must self-identify as the CLI too. Real Kiro CLI
+	// (verified in crack/kiro/rows/06) sends "KIRO_CLI", and the same string
+	// is echoed into every history entry. Sending "AI_EDITOR" with a CLI UA is
+	// the classic fingerprint-mismatch shape Kiro's abuse layer throttles.
 	convertOpts := kirobridge.ConvertOptions{
 		ProfileARN:  profileARN,
-		Origin:      "AI_EDITOR",
+		Origin:      "KIRO_CLI",
 		AllowImages: true,
 	}
 	out, err := kirobridge.Convert(areq, convertOpts)
