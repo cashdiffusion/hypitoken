@@ -134,10 +134,14 @@ func (d *Dispatcher) Forward(c *gin.Context, ctx context.Context, areq *kirobrid
 		return usage.Counts{}, "", fmt.Errorf("kiroupstream: marshal: %w", err)
 	}
 
+	// Real Kiro CLI sends x-amzn-codewhisperer-optout: false on every call
+	// (verified in crack/kiro/rows/06). Omitting it is a fingerprint signal.
+	optOut := false
 	kc := &kiroapi.Client{
 		Token:    cred.Cred.AccessToken,
 		IsAPIKey: cred.Cred.IsAPIKey(),
 		Flavor:   kirotransport.FlavorCLI,
+		OptOut:   &optOut,
 	}
 	if d.HTTP != nil {
 		// only assign when a real client is configured — passing a typed-nil
