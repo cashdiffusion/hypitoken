@@ -190,7 +190,7 @@ export default {
     requestsBilledTopups: "{{r}} 次请求 · {{t}} 次充值",
     liveRate: "实时汇率: 1 USD = ¥{{rate}}",
     topUpOrders: "充值订单",
-    topUpOrdersSub: "展示待支付和最近完成的支付宝订单，已过期订单会自动隐藏。",
+    topUpOrdersSub: "展示待支付和最近完成的充值订单，已过期订单会自动隐藏。",
     noActiveOrders: "暂无活动订单。",
     walletHistory: "钱包流水",
     walletHistorySub: "仅展示充值、退款和管理员调整。逐笔请求扣费请查看 <logs>日志</logs>，精确到 token 级。",

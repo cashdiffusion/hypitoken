@@ -192,7 +192,7 @@ export default {
     requestsBilledTopups: "{{r}} requests billed · {{t}} top-ups",
     liveRate: "Live rate: 1 USD = ¥{{rate}}",
     topUpOrders: "Top-up orders",
-    topUpOrdersSub: "Pending and recently paid Alipay orders. Expired orders are hidden automatically.",
+    topUpOrdersSub: "Pending and recently paid top-up orders. Expired orders are hidden automatically.",
     noActiveOrders: "No active orders.",
     walletHistory: "Wallet history",
     walletHistorySub: "Top-ups, refunds, and admin adjustments only. Per-request charges are available in <logs>Logs</logs> with token-level detail.",

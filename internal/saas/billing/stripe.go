@@ -140,11 +140,19 @@ func (g *StripeGateway) RetrieveSession(ctx context.Context, id string) (*stripe
 
 // ConstructEvent verifies a webhook payload's signature and returns the parsed
 // event. Errors if no webhook secret is configured.
+//
+// IgnoreAPIVersionMismatch: the Stripe account's default API version (what
+// webhook payloads are serialized with) is newer than the version stripe-go is
+// pinned to, and ConstructEvent rejects the signature on that mismatch by
+// default. The fields we read (metadata, payment_status, amount_total, currency,
+// id) are stable across versions, so we accept the newer payloads rather than
+// dropping every event.
 func (g *StripeGateway) ConstructEvent(payload []byte, sigHeader string) (stripe.Event, error) {
 	if g.webhookSecret == "" {
 		return stripe.Event{}, errors.New("stripe: webhook secret not configured")
 	}
-	return webhook.ConstructEvent(payload, sigHeader, g.webhookSecret)
+	return webhook.ConstructEventWithOptions(payload, sigHeader, g.webhookSecret,
+		webhook.ConstructEventOptions{IgnoreAPIVersionMismatch: true})
 }
 
 // verifySessionForOrder checks a retrieved/parsed Checkout Session against the

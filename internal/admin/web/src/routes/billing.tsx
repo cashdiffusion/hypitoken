@@ -15,7 +15,7 @@ import { PageHeader, CountUp, GlassPanel } from "@/components/app/page-primitive
 import { apiGet, apiPost } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { fmtUSD } from "@/lib/utils";
-import type { AlipayOrder, ExchangeRate, WalletTx } from "@/lib/types";
+import type { AlipayOrder, WalletTx } from "@/lib/types";
 
 const PRESETS = [5, 10, 20, 50, 100, 200];
 
@@ -24,18 +24,19 @@ export default function BillingPage() {
   const { user, refresh } = useAuth();
   const [tx, setTx] = useState<WalletTx[]>([]);
   const [orders, setOrders] = useState<AlipayOrder[]>([]);
-  const [rate, setRate] = useState<ExchangeRate | null>(null);
   const [open, setOpen] = useState(false);
+  // Post-redirect settlement modal — Stripe Alipay/WeChat bounce back to
+  // ?out=<order>; we poll it to paid and show the success animation.
+  const [settleOut, setSettleOut] = useState<string | null>(null);
+  const [settlePaid, setSettlePaid] = useState<number | null>(null);
 
   const reload = async () => {
-    const [t, o, r] = await Promise.all([
+    const [tr, o] = await Promise.all([
       apiGet<{ transactions: WalletTx[] }>("/billing/transactions"),
       apiGet<{ orders: AlipayOrder[] }>("/billing/orders"),
-      apiGet<ExchangeRate>("/billing/rate"),
     ]);
-    setTx(t.transactions || []);
+    setTx(tr.transactions || []);
     setOrders(o.orders || []);
-    setRate(r);
   };
 
   useEffect(() => {
@@ -43,33 +44,38 @@ export default function BillingPage() {
   }, []);
 
   // Post-redirect settle: Alipay / WeChat via Stripe Checkout bounce the browser
-  // to a hosted auth page and back here with ?out=<order> (Stripe also appends
-  // its own session_id / redirect_status). Resume polling that order, clean URL.
+  // to a hosted auth page and back here with ?out=<order>. Show a settling modal,
+  // poll the order to paid, then play the success animation. (Stripe doesn't
+  // always append session_id to a custom-ui return_url, so trigger on ?out alone.)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const out = params.get("out");
-    if (!out || !(params.get("session_id") || params.get("redirect_status"))) return;
+    if (!out) return;
+    // Strip the return params so a refresh doesn't re-trigger.
+    window.history.replaceState({}, "", window.location.pathname);
+    setSettleOut(out);
     let stop = false;
     (async () => {
       for (let i = 0; i < 90 && !stop; i++) {
         try {
           const r = await apiGet<any>(`/billing/orders/${out}`);
           if (r.status === "paid") {
-            toast.success(t("billing.dialog.paid", { n: r.usd_credit }));
+            setSettlePaid(r.usd_credit);
             await reload();
             await refresh();
-            break;
+            setTimeout(() => { if (!stop) { setSettleOut(null); setSettlePaid(null); } }, 2600);
+            return;
           }
           if (r.status === "expired" || r.status === "failed") {
             toast.error(t("billing.stripe.failed"));
-            break;
+            setSettleOut(null);
+            return;
           }
         } catch {}
         await new Promise((res) => setTimeout(res, 2000));
       }
+      setSettleOut(null); // still pending after the poll window — close quietly
     })();
-    // Strip the Stripe return params so a refresh doesn't re-trigger.
-    window.history.replaceState({}, "", window.location.pathname);
     return () => { stop = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -101,7 +107,6 @@ export default function BillingPage() {
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Button onClick={() => setOpen(true)} size="lg" className="gap-2"><Wallet className="h-4 w-4" /> {t("dashboard.topUp")}</Button>
-              {rate && <p className="text-xs text-muted-foreground">{t("billing.liveRate", { rate: rate.cny_per_usd.toFixed(4) })}</p>}
             </div>
           </SpotlightCard>
           <SpotlightCard>
@@ -128,8 +133,6 @@ export default function BillingPage() {
                 <TableRow>
                   <TableHead>{t("billing.columns.order")}</TableHead>
                   <TableHead className="text-right">{t("billing.columns.usd")}</TableHead>
-                  <TableHead className="text-right">{t("billing.columns.cny")}</TableHead>
-                  <TableHead className="text-right">{t("billing.columns.rate")}</TableHead>
                   <TableHead>{t("billing.columns.status")}</TableHead>
                   <TableHead>{t("billing.columns.created")}</TableHead>
                 </TableRow>
@@ -139,8 +142,6 @@ export default function BillingPage() {
                   <TableRow key={o.out_trade_no}>
                     <TableCell className="font-mono text-xs">{o.out_trade_no.slice(0, 16)}…</TableCell>
                     <TableCell className="font-mono tabular-nums text-right">{fmtUSD(o.usd_credit)}</TableCell>
-                    <TableCell className="font-mono tabular-nums text-right">¥{o.cny_amount.toFixed(2)}</TableCell>
-                    <TableCell className="font-mono tabular-nums text-right text-muted-foreground">{o.rate.toFixed(4)}</TableCell>
                     <TableCell><StatusPill status={o.status} /></TableCell>
                     <TableCell className="text-muted-foreground">{new Date(o.created_at * 1000).toLocaleString()}</TableCell>
                   </TableRow>
@@ -193,6 +194,20 @@ export default function BillingPage() {
       </Reveal>
 
       <TopUpDialog open={open} onOpenChange={setOpen} onPaid={async () => { await reload(); await refresh(); }} />
+
+      {/* Post-redirect settlement: confirming spinner → paid animation. */}
+      <Dialog open={settleOut !== null} onOpenChange={(v) => { if (!v) { setSettleOut(null); setSettlePaid(null); } }}>
+        <DialogContent className="sm:max-w-[420px]">
+          {settlePaid !== null ? (
+            <PaidState usd={settlePaid} />
+          ) : (
+            <div className="flex flex-col items-center gap-3 py-10 text-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">{t("billing.stripe.confirming")}</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
