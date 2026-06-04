@@ -215,10 +215,11 @@ saas:
     secret_key: ""          # sk_(test|live)_… or @/path/to/file
     publishable_key: ""     # pk_(test|live)_… (public, handed to the browser)
     webhook_secret: ""      # whsec_… or @/path/to/file (optional)
-    # Presentment currency. "cny" charges in CNY via the live exchange rate and
-    # credits the USD wallet (required for Alipay on a non-US Stripe account —
-    # Alipay can only present USD on US-based accounts). "usd" charges 1:1.
-    currency: "cny"
+    # Line-item currency for the Checkout Session; the wallet is credited 1:1 in
+    # this currency. Keep "usd": Adaptive Pricing localizes the presentment
+    # currency per buyer at checkout (which unlocks Alipay/WeChat on a non-US
+    # account), and the buyer pays Stripe's 2-4% conversion fee on the converted leg.
+    currency: "usd"
     # return_url: ""        # redirect-method return; default <site_url>/app/billing
 
   # Live USD/CNY rate source. Default is the public fawazahmed0

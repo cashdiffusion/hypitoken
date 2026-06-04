@@ -12,19 +12,21 @@ import (
 	"github.com/stripe/stripe-go/v82/webhook"
 )
 
-// StripeGateway drives the embedded Payment Element top-up flow. Unlike the
+// StripeGateway drives the embedded Checkout-Sessions top-up flow. Unlike the
 // QR gateways (Alipay/Z-Pay) which implement the Gateway interface, Stripe has
-// a different lifecycle — create a PaymentIntent, hand its client_secret to the
-// browser, then confirm settlement via either a signed webhook OR a live
-// PaymentIntent retrieval on poll. So it lives off to the side on the Handler
-// (Handler.Stripe) rather than behind Gateway, and runs *alongside* whichever
-// QR gateway is configured.
+// a different lifecycle — create a Checkout Session, hand its client_secret to
+// the browser's CheckoutElementsProvider, then confirm settlement via either a
+// signed webhook OR a live session retrieval on poll. So it lives off to the
+// side on the Handler (Handler.Stripe) rather than behind Gateway, and runs
+// *alongside* whichever QR gateway is configured.
 //
-// Money is charged in Currency. With "usd" (default) it bills 1:1 — a $10
-// top-up bills USD 10.00 and credits the wallet $10. With "cny" the handler
-// converts the USD wallet credit to CNY via the live exchange rate before
-// charging (Alipay can't present USD on a non-US Stripe account, so a
-// CN-facing deploy charges CNY and still credits the USD wallet).
+// The session's single line item is priced in Currency (USD) and the wallet is
+// credited 1:1 in USD. Adaptive Pricing is enabled, so Stripe auto-converts the
+// presentment currency to the buyer's local currency at checkout — which is what
+// unlocks Alipay/WeChat/local rails on a non-US account. The buyer pays Stripe's
+// 2-4% conversion fee on the converted leg; we receive the full USD amount. We
+// moved off the raw PaymentIntents API because Adaptive Pricing is only
+// supported with Checkout Sessions + Elements, not with PaymentIntents.
 type StripeGateway struct {
 	sc             *stripe.Client
 	publishableKey string
@@ -71,58 +73,69 @@ func (g *StripeGateway) Currency() string       { return g.currency }
 func (g *StripeGateway) ReturnURL() string      { return g.returnURL }
 func (g *StripeGateway) HasWebhookSecret() bool { return g.webhookSecret != "" }
 
-// minorUnits converts a major-unit amount (e.g. dollars / yuan) to the integer
-// minor unit Stripe expects (cents / fen). Both currencies exercised on this
-// surface — USD and CNY — are two-decimal, so a flat ×100 is correct.
+// minorUnits converts a major-unit amount (e.g. dollars) to the integer minor
+// unit Stripe expects (cents). The line item is always priced in USD (a
+// two-decimal currency), so a flat ×100 is correct.
 func minorUnits(amount float64) int64 {
 	return int64(math.Round(amount * 100))
 }
 
-// StripeIntent is the subset of a created PaymentIntent the topup handler
-// returns to the browser.
-type StripeIntent struct {
-	PaymentIntentID string
-	ClientSecret    string
+// StripeSession is the subset of a created Checkout Session the topup handler
+// returns to the browser (client_secret) and persists (id).
+type StripeSession struct {
+	SessionID    string
+	ClientSecret string
 }
 
-// CreateTopUpIntent creates a PaymentIntent for a wallet top-up. chargeAmount is
-// the amount billed in the gateway's presentment currency (USD 1:1, or the
-// CNY-converted amount); usdCredit is the wallet credit, stamped into metadata
-// for reconciliation. The order id and user id are stamped into metadata too so
-// the webhook / poll path can map the settled intent back to our order without a
-// side table.
-func (g *StripeGateway) CreateTopUpIntent(ctx context.Context, outTradeNo string, chargeAmount, usdCredit float64, userID int64, description string) (*StripeIntent, error) {
-	params := &stripe.PaymentIntentCreateParams{
-		Amount:   stripe.Int64(minorUnits(chargeAmount)),
-		Currency: stripe.String(g.currency),
-		// Let the Payment Element surface every rail enabled in the dashboard
-		// (or the pinned configuration). allow_redirects=always so Alipay /
-		// WeChat Pay / crypto, which bounce through a hosted auth page, work.
-		AutomaticPaymentMethods: &stripe.PaymentIntentCreateAutomaticPaymentMethodsParams{
-			Enabled:        stripe.Bool(true),
-			AllowRedirects: stripe.String(string(stripe.PaymentIntentAutomaticPaymentMethodsAllowRedirectsAlways)),
+// CreateTopUpSession creates a custom-UI-mode Checkout Session for a wallet
+// top-up: one USD line item, Adaptive Pricing on (Stripe localizes the
+// presentment currency for the buyer, unlocking Alipay et al.), the customer's
+// email prefilled, and the order id / user id / usd credit stamped into metadata
+// so the webhook / poll path can map a settled session back to our order without
+// a side table. returnURL is where redirect-based methods (Alipay/WeChat) send
+// the browser back. Returns the session id + client_secret.
+func (g *StripeGateway) CreateTopUpSession(ctx context.Context, outTradeNo string, usd float64, userID int64, email, returnURL, description string) (*StripeSession, error) {
+	params := &stripe.CheckoutSessionCreateParams{
+		Mode:   stripe.String(string(stripe.CheckoutSessionModePayment)),
+		UIMode: stripe.String(string(stripe.CheckoutSessionUIModeCustom)),
+		// Adaptive Pricing converts the USD price to the buyer's local currency,
+		// which is what makes Alipay/WeChat eligible on a non-US account.
+		AdaptivePricing: &stripe.CheckoutSessionCreateAdaptivePricingParams{
+			Enabled: stripe.Bool(true),
 		},
-		Description: stripe.String(description),
+		ReturnURL: stripe.String(returnURL),
+		LineItems: []*stripe.CheckoutSessionCreateLineItemParams{{
+			Quantity: stripe.Int64(1),
+			PriceData: &stripe.CheckoutSessionCreateLineItemPriceDataParams{
+				Currency:   stripe.String(g.currency),
+				UnitAmount: stripe.Int64(minorUnits(usd)),
+				ProductData: &stripe.CheckoutSessionCreateLineItemPriceDataProductDataParams{
+					Name: stripe.String(description),
+				},
+			},
+		}},
+		Metadata: map[string]string{
+			"out_trade_no": outTradeNo,
+			"user_id":      strconv.FormatInt(userID, 10),
+			"usd_credit":   strconv.FormatFloat(usd, 'f', 2, 64),
+		},
 	}
-	if g.pmcID != "" {
-		params.PaymentMethodConfiguration = stripe.String(g.pmcID)
+	if email != "" {
+		params.CustomerEmail = stripe.String(email)
 	}
-	params.AddMetadata("out_trade_no", outTradeNo)
-	params.AddMetadata("user_id", strconv.FormatInt(userID, 10))
-	params.AddMetadata("usd_credit", strconv.FormatFloat(usdCredit, 'f', 2, 64))
 
-	pi, err := g.sc.V1PaymentIntents.Create(ctx, params)
+	sess, err := g.sc.V1CheckoutSessions.Create(ctx, params)
 	if err != nil {
 		return nil, err
 	}
-	return &StripeIntent{PaymentIntentID: pi.ID, ClientSecret: pi.ClientSecret}, nil
+	return &StripeSession{SessionID: sess.ID, ClientSecret: sess.ClientSecret}, nil
 }
 
-// RetrieveIntent fetches the live PaymentIntent — used by the poll path
+// RetrieveSession fetches the live Checkout Session — used by the poll path
 // (orderStatus) and admin reconciliation to settle an order even when the
 // webhook never arrived.
-func (g *StripeGateway) RetrieveIntent(ctx context.Context, id string) (*stripe.PaymentIntent, error) {
-	return g.sc.V1PaymentIntents.Retrieve(ctx, id, &stripe.PaymentIntentRetrieveParams{})
+func (g *StripeGateway) RetrieveSession(ctx context.Context, id string) (*stripe.CheckoutSession, error) {
+	return g.sc.V1CheckoutSessions.Retrieve(ctx, id, &stripe.CheckoutSessionRetrieveParams{})
 }
 
 // ConstructEvent verifies a webhook payload's signature and returns the parsed
@@ -134,23 +147,25 @@ func (g *StripeGateway) ConstructEvent(payload []byte, sigHeader string) (stripe
 	return webhook.ConstructEvent(payload, sigHeader, g.webhookSecret)
 }
 
-// verifyIntentForOrder checks a retrieved/parsed PaymentIntent against the
-// stored order before crediting: it must be settled, in our currency, and have
-// collected at least the charged amount (in the presentment currency — USD for a
-// 1:1 deploy, CNY for a rate-converted one).
-func verifyIntentForOrder(pi *stripe.PaymentIntent, chargeAmount float64, wantCurrency string) error {
-	if pi == nil {
-		return errors.New("nil payment intent")
+// verifySessionForOrder checks a retrieved/parsed Checkout Session against the
+// stored order before crediting: it must be paid, in our integration currency
+// (USD — Adaptive Pricing keeps the session amount in our currency even when the
+// buyer pays a converted local amount), and total at least the order's USD
+// credit. amount_total is the authoritative USD figure regardless of the
+// buyer's presentment currency.
+func verifySessionForOrder(sess *stripe.CheckoutSession, usdCredit float64, wantCurrency string) error {
+	if sess == nil {
+		return errors.New("nil checkout session")
 	}
-	if pi.Status != stripe.PaymentIntentStatusSucceeded {
-		return fmt.Errorf("payment intent %s not succeeded (status=%s)", pi.ID, pi.Status)
+	if sess.PaymentStatus != stripe.CheckoutSessionPaymentStatusPaid {
+		return fmt.Errorf("checkout session %s not paid (status=%s payment_status=%s)", sess.ID, sess.Status, sess.PaymentStatus)
 	}
-	if wantCurrency != "" && !strings.EqualFold(string(pi.Currency), wantCurrency) {
-		return fmt.Errorf("%w: currency mismatch (got=%s want=%s)", ErrOrderTampered, pi.Currency, wantCurrency)
+	if wantCurrency != "" && !strings.EqualFold(string(sess.Currency), wantCurrency) {
+		return fmt.Errorf("%w: currency mismatch (got=%s want=%s)", ErrOrderTampered, sess.Currency, wantCurrency)
 	}
-	want := minorUnits(chargeAmount)
-	if pi.AmountReceived < want {
-		return fmt.Errorf("%w: amount short (received=%d want=%d %s)", ErrOrderTampered, pi.AmountReceived, want, pi.Currency)
+	want := minorUnits(usdCredit)
+	if sess.AmountTotal < want {
+		return fmt.Errorf("%w: amount short (total=%d want=%d %s)", ErrOrderTampered, sess.AmountTotal, want, sess.Currency)
 	}
 	return nil
 }

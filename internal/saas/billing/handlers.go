@@ -68,14 +68,14 @@ type PayResult struct {
 	PayURL string `json:"pay_url,omitempty"`
 	Img    string `json:"img,omitempty"`
 
-	// Stripe Payment Element fields. Provider + PaymentIntentID are persisted
-	// in the order's qr_code JSON column so the poll / reconcile path can map
-	// an order back to its PaymentIntent. ClientSecret + PublishableKey are
-	// returned to the browser in the topup response only and are NEVER stored.
-	Provider        string `json:"provider,omitempty"`
-	PaymentIntentID string `json:"payment_intent_id,omitempty"`
-	ClientSecret    string `json:"client_secret,omitempty"`
-	PublishableKey  string `json:"publishable_key,omitempty"`
+	// Stripe Checkout fields. Provider + SessionID are persisted in the order's
+	// qr_code JSON column so the poll / reconcile path can map an order back to
+	// its Checkout Session. ClientSecret + PublishableKey are returned to the
+	// browser in the topup response only and are NEVER stored.
+	Provider       string `json:"provider,omitempty"`
+	SessionID      string `json:"session_id,omitempty"`
+	ClientSecret   string `json:"client_secret,omitempty"`
+	PublishableKey string `json:"publishable_key,omitempty"`
 }
 
 // Notification is the verified subset of Alipay's async notify / sync query
@@ -267,7 +267,7 @@ func (h *Handler) topup(c *gin.Context) {
 	// cny_amount column is repurposed to hold the charged amount with rate=1
 	// so the existing admin dashboard sums stay coherent.
 	if strings.EqualFold(strings.TrimSpace(req.Provider), "stripe") {
-		h.topupStripe(c, u.ID, req.USD, out)
+		h.topupStripe(c, u.ID, req.USD, out, u.Email)
 		return
 	}
 

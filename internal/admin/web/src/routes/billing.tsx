@@ -43,13 +43,13 @@ export default function BillingPage() {
     reload();
   }, []);
 
-  // Post-redirect settle: Alipay / WeChat / crypto via Stripe bounce the
-  // browser to a hosted auth page and back here with ?out=<order>&
-  // redirect_status=<...>. Resume polling that order, then clean the URL.
+  // Post-redirect settle: Alipay / WeChat via Stripe Checkout bounce the browser
+  // to a hosted auth page and back here with ?out=<order> (Stripe also appends
+  // its own session_id / redirect_status). Resume polling that order, clean URL.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const out = params.get("out");
-    if (!out || !params.get("redirect_status")) return;
+    if (!out || !(params.get("session_id") || params.get("redirect_status"))) return;
     let stop = false;
     (async () => {
       for (let i = 0; i < 90 && !stop; i++) {
@@ -244,9 +244,9 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
   }, [open]);
 
   useEffect(() => {
-    // Need a live CNY rate for the QR rail and for Stripe-in-CNY.
-    const needRate = provider === "qr" || providers?.stripe?.currency === "cny";
-    if (!open || order || !needRate) return;
+    // Live CNY rate is only needed for the QR rail (Stripe charges USD 1:1 and
+    // localizes the buyer's currency itself via Adaptive Pricing).
+    if (!open || order || provider !== "qr") return;
     let cancelled = false;
     const tick = async () => {
       try {
@@ -264,9 +264,6 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
   const amount = parseFloat(usd || "0");
   const stripeEnabled = !!providers?.stripe?.enabled;
   const qrEnabled = !!providers?.qr?.enabled;
-  // Stripe presentment currency. "cny" means charge in CNY via the live rate
-  // (so Alipay works on a non-US account); else USD 1:1.
-  const stripeCNY = providers?.stripe?.currency === "cny";
 
   const create = async () => {
     setBusy(true);
@@ -367,28 +364,9 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
                 <div className="space-y-3">
                   <MethodChips />
                   <div className="rounded-md border border-border-strong bg-muted/30 p-3 text-sm">
-                    {stripeCNY ? (
-                      <>
-                        <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.dialog.youPay")}</span><span className="font-mono tabular-nums">¥{(amount * (rate?.cny_per_usd || 7.2)).toFixed(2)}</span></div>
-                        <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.dialog.walletCredit")}</span><span className="font-mono tabular-nums">{fmtUSD(amount)}</span></div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-muted-foreground inline-flex items-center gap-1.5">
-                            <span className="relative inline-flex h-1.5 w-1.5">
-                              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75 animate-ping" />
-                              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                            </span>
-                            {t("billing.dialog.liveRate")}{rateAge > 1 ? t("billing.dialog.rateSecondsAgo", { n: rateAge }) : ""}
-                          </span>
-                          <span className="font-mono text-muted-foreground">{t("billing.dialog.ratePrefix")}{rate?.cny_per_usd.toFixed(4)}</span>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.stripe.youPay")}</span><span className="font-mono tabular-nums">{fmtUSD(amount)}</span></div>
-                        <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.dialog.walletCredit")}</span><span className="font-mono tabular-nums">{fmtUSD(amount)}</span></div>
-                        <div className="mt-1 text-[11px] text-muted-foreground">{t("billing.stripe.usdNote")}</div>
-                      </>
-                    )}
+                    <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.stripe.youPay")}</span><span className="font-mono tabular-nums">{fmtUSD(amount)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.dialog.walletCredit")}</span><span className="font-mono tabular-nums">{fmtUSD(amount)}</span></div>
+                    <div className="mt-1 text-[11px] text-muted-foreground">{t("billing.stripe.localizeNote")}</div>
                   </div>
                 </div>
               ) : (
@@ -435,10 +413,6 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
                 <StripeTopUp
                   publishableKey={order.publishable_key}
                   clientSecret={order.client_secret}
-                  returnUrl={order.return_url || ""}
-                  outTradeNo={order.out_trade_no}
-                  amountUsd={order.usd_credit}
-                  payLabel={order.currency === "cny" ? `¥${Number(order.cny_amount).toFixed(2)}` : fmtUSD(order.usd_credit)}
                   onConfirmed={() => pollOrder(order.out_trade_no)}
                 />
               )}

@@ -243,6 +243,7 @@ export default {
       payDesc: "Choose a method below. Card details are handled securely by Stripe.",
       youPay: "You pay (USD)",
       usdNote: "Charged 1:1 in USD — no exchange-rate markup.",
+      localizeNote: "Wallet credited 1:1 in USD; at checkout Stripe localizes the payment currency to your region (e.g. CNY for Alipay), which may include a ~2-4% FX fee.",
       pay: "Pay {{amount}}",
       processing: "Processing…",
       confirming: "Confirming payment…",

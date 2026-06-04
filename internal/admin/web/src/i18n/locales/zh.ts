@@ -241,6 +241,7 @@ export default {
       payDesc: "在下方选择支付方式。卡片信息由 Stripe 安全处理。",
       youPay: "实付 (USD)",
       usdNote: "按 1:1 美元计费，无汇率加价。",
+      localizeNote: "钱包按 1:1 美元入账；结账时 Stripe 会按你所在地区本地化支付币种（如支付宝走人民币），可能含约 2-4% 汇率。",
       pay: "支付 {{amount}}",
       processing: "处理中…",
       confirming: "正在确认支付…",
