@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/smartwalle/alipay/v3"
 	log "github.com/sirupsen/logrus"
+	"github.com/smartwalle/alipay/v3"
 
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
@@ -84,7 +84,7 @@ type Notification struct {
 	OutTradeNo  string
 	TradeNo     string
 	TradeStatus string
-	TotalAmount string  // raw, e.g. "68.28"
+	TotalAmount string // raw, e.g. "68.28"
 	AppID       string
 	SellerID    string
 }
@@ -226,9 +226,8 @@ func (h *Handler) topup(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
 	}
-	if !math.IsInf(req.USD, 0) && !math.IsNaN(req.USD) {
-		// fall through
-	} else {
+	if math.IsInf(req.USD, 0) || math.IsNaN(req.USD) {
+		// Reject non-finite amounts (Inf/NaN are not valid top-up values).
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid amount"})
 		return
 	}
@@ -249,10 +248,10 @@ func (h *Handler) topup(c *gin.Context) {
 	}
 	if pending, _ := h.DB.CountPendingOrders(c.Request.Context(), u.ID); pending >= h.MaxPendingPerUser {
 		c.JSON(http.StatusTooManyRequests, gin.H{
-			"error":           "too many pending orders",
-			"pending_orders":  pending,
-			"max_pending":     h.MaxPendingPerUser,
-			"hint":            "wait for existing orders to expire or close them via the Billing page",
+			"error":          "too many pending orders",
+			"pending_orders": pending,
+			"max_pending":    h.MaxPendingPerUser,
+			"hint":           "wait for existing orders to expire or close them via the Billing page",
 		})
 		return
 	}
@@ -370,12 +369,13 @@ func (h *Handler) notify(c *gin.Context) {
 // applyNotification is the single funnel through which an order can be
 // credited — both the async notify path and the manual reconciliation path
 // must call this. Performs full validation:
-//   1. trade_status is a settled value
-//   2. app_id matches our configured AppID
-//   3. seller_id matches the stored value if we recorded one (best effort)
-//   4. total_amount matches the order's CNY amount (rounded to 2 decimals)
-//   5. order is still pending (idempotent — repeat retries no-op)
-//   6. order has not expired
+//  1. trade_status is a settled value
+//  2. app_id matches our configured AppID
+//  3. seller_id matches the stored value if we recorded one (best effort)
+//  4. total_amount matches the order's CNY amount (rounded to 2 decimals)
+//  5. order is still pending (idempotent — repeat retries no-op)
+//  6. order has not expired
+//
 // Successful path atomically marks paid + credits wallet inside one tx.
 func (h *Handler) applyNotification(ctx context.Context, n *Notification, source string) error {
 	o, err := h.DB.GetOrder(ctx, n.OutTradeNo)
@@ -635,11 +635,11 @@ func (g *AlipayGateway) AppID() string { return g.appID }
 // AlipayParams configures a real Alipay gateway. Use loadKey()-friendly
 // strings ("@/path/to/file" or inline PEM) for the key fields.
 type AlipayParams struct {
-	AppID            string
-	PrivateKey       string
-	AlipayPublicKey  string
-	IsProduction     bool
-	NotifyURL        string
+	AppID           string
+	PrivateKey      string
+	AlipayPublicKey string
+	IsProduction    bool
+	NotifyURL       string
 }
 
 func NewAlipayGateway(p AlipayParams) (*AlipayGateway, error) {

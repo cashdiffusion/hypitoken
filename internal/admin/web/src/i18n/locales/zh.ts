@@ -193,7 +193,8 @@ export default {
     topUpOrdersSub: "展示待支付和最近完成的充值订单，已过期订单会自动隐藏。",
     noActiveOrders: "暂无活动订单。",
     walletHistory: "钱包流水",
-    walletHistorySub: "仅展示充值、退款和管理员调整。逐笔请求扣费请查看 <logs>日志</logs>，精确到 token 级。",
+    walletHistorySub:
+      "仅展示充值、退款和管理员调整。逐笔请求扣费请查看 <logs>日志</logs>，精确到 token 级。",
     noWalletYet: "暂无钱包动账。",
     columns: {
       order: "订单",
@@ -241,7 +242,8 @@ export default {
       payDesc: "在下方选择支付方式。卡片信息由 Stripe 安全处理。",
       youPay: "实付 (USD)",
       usdNote: "按 1:1 美元计费，无汇率加价。",
-      localizeNote: "钱包按 1:1 美元入账；结账时 Stripe 会按你所在地区本地化支付币种（如支付宝走人民币），可能含约 2-4% 汇率。",
+      localizeNote:
+        "钱包按 1:1 美元入账；结账时 Stripe 会按你所在地区本地化支付币种（如支付宝走人民币），可能含约 2-4% 汇率。",
       pay: "支付 {{amount}}",
       processing: "处理中…",
       confirming: "正在确认支付…",
@@ -258,8 +260,7 @@ export default {
 
   logs: {
     title: "计费日志",
-    sub:
-      "记录你账户下每一笔已计费请求，并按 token 类型、官方目录价和分组倍率拆分。每行金额都对应一次真实钱包扣款。",
+    sub: "记录你账户下每一笔已计费请求，并按 token 类型、官方目录价和分组倍率拆分。每行金额都对应一次真实钱包扣款。",
     summary: {
       requests: "请求数",
       sumIn: "Σ 输入 (token)",
@@ -363,7 +364,8 @@ export default {
         claudeMult: "Claude 倍率",
         codexMult: "Codex 倍率",
         credGroup: "凭证分组 (可选)",
-        credGroupHint: "留空表示可使用任意凭证。填写分组名（如 \"premium\"）后，该价格分组只会使用同标签凭证。",
+        credGroupHint:
+          '留空表示可使用任意凭证。填写分组名（如 "premium"）后，该价格分组只会使用同标签凭证。',
       },
       cols: {
         name: "名称",
@@ -373,7 +375,7 @@ export default {
       },
       created: "分组已创建",
       deleted: "已删除",
-      confirmDelete: "删除分组 \"{{name}}\"？该分组下的用户会迁移到 default 分组。",
+      confirmDelete: '删除分组 "{{name}}"？该分组下的用户会迁移到 default 分组。',
     },
     creds: {
       claudeTab: "Claude (Anthropic)",
@@ -395,8 +397,9 @@ export default {
       },
       remove: "移除",
       removed: "已移除",
-      confirmRemove: "移除凭证 \"{{name}}\"？",
-      kiroConfirmDelete: "删除 Kiro 凭证 \"{{name}}\"？该账户的 refresh chain 不会被撤销 —— 如需主动 logout，请使用 kirortrip 工具。",
+      confirmRemove: '移除凭证 "{{name}}"？',
+      kiroConfirmDelete:
+        '删除 Kiro 凭证 "{{name}}"？该账户的 refresh chain 不会被撤销 —— 如需主动 logout，请使用 kirortrip 工具。',
       maxConcurrent: "最大并发",
       modelMapLabel: "模型映射（可选，JSON）",
       modelMapHint: "把请求的模型改写为上游模型，例如把 opus 路由到更便宜的档位。",
@@ -404,13 +407,15 @@ export default {
       addSessionCookie: "+ Session cookie",
       uploadJson: "上传 JSON",
       sessionCookieTitle: "通过 claude.com session cookie 添加",
-      sessionCookieDesc: "粘贴 claude.com 的 sessionKey（sk-ant-sid…）。必须配置代理 —— claude.com 会拦截没有浏览器级 TLS 的服务器 IP。",
+      sessionCookieDesc:
+        "粘贴 claude.com 的 sessionKey（sk-ant-sid…）。必须配置代理 —— claude.com 会拦截没有浏览器级 TLS 的服务器 IP。",
       sessionCookieInvalid: "session cookie 必须以 sk-ant-sid 开头",
       sessionCookieProxyRequired: "session-cookie 登录必须提供代理地址",
       sessionCookieAdded: "已添加凭证 {{email}}",
       sessionCookieBusy: "授权中…",
       uploadTitle: "上传 {{provider}} 凭证 JSON",
-      uploadDesc: "粘贴从其他实例导出的凭证 JSON。类型（OAuth / API key）会根据其 `type` 字段推断；下方字段在导入时覆盖。",
+      uploadDesc:
+        "粘贴从其他实例导出的凭证 JSON。类型（OAuth / API key）会根据其 `type` 字段推断；下方字段在导入时覆盖。",
       uploadContentLabel: "凭证 JSON",
       uploadEmpty: "请先粘贴凭证 JSON",
       uploadParseError: "JSON 解析失败：{{msg}}",
@@ -496,26 +501,21 @@ export default {
       "在一个网关后管理多组上游凭证。自适应路由、健康监控和会话连续性都在服务端完成，客户端无需感知。",
     feat: {
       adaptiveT: "自适应路由",
-      adaptiveB:
-        "凭证池按最少活跃会话调度。自动故障转移、冷却管理和每日重置任务持续维护池健康。",
+      adaptiveB: "凭证池按最少活跃会话调度。自动故障转移、冷却管理和每日重置任务持续维护池健康。",
       stickyT: "粘性会话",
-      stickyB:
-        "每个客户端令牌在活跃窗口内固定到同一上游凭证，保留提示词缓存命中和对话连续性。",
+      stickyB: "每个客户端令牌在活跃窗口内固定到同一上游凭证，保留提示词缓存命中和对话连续性。",
       ccT: "Claude Code 原生",
-      ccB:
-        "完整模拟 Claude Code 指纹，advisor、深度思考、子 agent、MCP 工具调用都按官方 CLI 行为转发。",
+      ccB: "完整模拟 Claude Code 指纹，advisor、深度思考、子 agent、MCP 工具调用都按官方 CLI 行为转发。",
       perTokenT: "单令牌精细访问控制",
       perTokenB:
         "每个令牌可设置独立的月消费上限，并使用服务器侧并发和 RPM 控制，避免应用之间互相影响。",
       healthT: "实时健康看板",
-      healthB:
-        "用状态页形式展示上游凭证和模型探针结果。硬故障自动轮换，并提供凭证级用量视图。",
+      healthB: "用状态页形式展示上游凭证和模型探针结果。硬故障自动轮换，并提供凭证级用量视图。",
       dualT: "双 provider",
       dualB:
         "Claude (Anthropic) 与 Codex (OpenAI) 共用一个网关域名，按路径路由，同一个 bearer 令牌即可访问。",
     },
-    featuresWideTitle:
-      "粘性会话把每个令牌固定到同一凭证 —— 缓存命中与上下文在每一轮都保留。",
+    featuresWideTitle: "粘性会话把每个令牌固定到同一凭证 —— 缓存命中与上下文在每一轮都保留。",
     featuresWideLabels: ["会话", "粘性", "凭证池", "故障转移"],
 
     status: {
@@ -550,15 +550,51 @@ export default {
     testimonialsTitle: "他们的 CLI 都<hl>跑在它上面</hl>。",
     testimonialsSub: "把凭证池迁到网关之后，运维者们的真实反馈。",
     testimonials: [
-      { text: "我们把六个 Claude 订阅汇聚到同一个端点。粘性会话保住了缓存命中，客户端配置一行都没改。", name: "陈宇航", role: "平台负责人" },
-      { text: "凭证触顶时自适应路由会悄悄故障转移，我们的 Claude Code 工作流不再撞到死路。", name: "佐藤美里", role: "资深工程师" },
-      { text: "一个 bearer 令牌同时打通 Claude 和 Codex，按路径路由，省去了维护两套集成。", name: "王凯", role: "后端负责人" },
-      { text: "单令牌的消费上限让我们能给每个团队发沙箱化的访问权限，再也不用担心账单失控。", name: "林若涵", role: "研发经理" },
-      { text: "健康看板读起来就像状态页。硬故障会自动轮换，而且每个凭证都看得一清二楚。", name: "高磊", role: "SRE" },
-      { text: "跨轮次的会话连续性是我没想到自己需要的能力。即便高负载，对话也能保住上下文。", name: "刘思远", role: "AI 工程师" },
-      { text: "自托管只要一个二进制加一个 Caddy 站点，当天下午就开始转发流量了。", name: "赵明", role: "DevOps" },
-      { text: "按令牌的并发与 RPM 控制，让某个吵闹的应用不会饿死其他应用，隔离非常到位。", name: "田中由纪", role: "技术主管" },
-      { text: "它对真实 Claude Code 行为的还原足够到位，advisor、思考、子 agent 都能干净地透传。", name: "罗莎", role: "产品工程师" },
+      {
+        text: "我们把六个 Claude 订阅汇聚到同一个端点。粘性会话保住了缓存命中，客户端配置一行都没改。",
+        name: "陈宇航",
+        role: "平台负责人",
+      },
+      {
+        text: "凭证触顶时自适应路由会悄悄故障转移，我们的 Claude Code 工作流不再撞到死路。",
+        name: "佐藤美里",
+        role: "资深工程师",
+      },
+      {
+        text: "一个 bearer 令牌同时打通 Claude 和 Codex，按路径路由，省去了维护两套集成。",
+        name: "王凯",
+        role: "后端负责人",
+      },
+      {
+        text: "单令牌的消费上限让我们能给每个团队发沙箱化的访问权限，再也不用担心账单失控。",
+        name: "林若涵",
+        role: "研发经理",
+      },
+      {
+        text: "健康看板读起来就像状态页。硬故障会自动轮换，而且每个凭证都看得一清二楚。",
+        name: "高磊",
+        role: "SRE",
+      },
+      {
+        text: "跨轮次的会话连续性是我没想到自己需要的能力。即便高负载，对话也能保住上下文。",
+        name: "刘思远",
+        role: "AI 工程师",
+      },
+      {
+        text: "自托管只要一个二进制加一个 Caddy 站点，当天下午就开始转发流量了。",
+        name: "赵明",
+        role: "DevOps",
+      },
+      {
+        text: "按令牌的并发与 RPM 控制，让某个吵闹的应用不会饿死其他应用，隔离非常到位。",
+        name: "田中由纪",
+        role: "技术主管",
+      },
+      {
+        text: "它对真实 Claude Code 行为的还原足够到位，advisor、思考、子 agent 都能干净地透传。",
+        name: "罗莎",
+        role: "产品工程师",
+      },
     ],
 
     archEyebrow: "架构",
@@ -573,11 +609,7 @@ export default {
     ],
     archCta: "查看架构文档",
     archGatewayLabel: "网关路由",
-    archCreds: [
-      "OAuth 凭证 1",
-      "OAuth 凭证 2",
-      "API key 兜底",
-    ],
+    archCreds: ["OAuth 凭证 1", "OAuth 凭证 2", "API key 兜底"],
     archStickyTag: "粘性",
     archNodes: {
       ccLabel: "Claude Code",
@@ -592,11 +624,13 @@ export default {
     workflowTitle: "三步接入网关。",
     step: {
       registerT: "注册账号",
-      registerB: "注册并完成邮箱验证。管理员可在后台添加 Anthropic 或 OpenAI 凭证，网关负责后续调度。",
+      registerB:
+        "注册并完成邮箱验证。管理员可在后台添加 Anthropic 或 OpenAI 凭证，网关负责后续调度。",
       tokenT: "申请 bearer 令牌",
       tokenB: "为每个应用或团队签发 sk-cpa-• 令牌，并单独设置月消费上限。",
       pointT: "指向网关",
-      pointB: "设置 ANTHROPIC_BASE_URL 或 OPENAI_BASE_URL 后照常运行 claude / codex，advisor、thinking、子 agent 都可使用。",
+      pointB:
+        "设置 ANTHROPIC_BASE_URL 或 OPENAI_BASE_URL 后照常运行 claude / codex，advisor、thinking、子 agent 都可使用。",
     },
 
     ctaTitle: "开始使用 HypiToken。",

@@ -18,6 +18,6 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
 export function RequireAdmin({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return null;
-  if (!user || user.role !== "admin") return <Navigate to="/app" replace />;
+  if (user?.role !== "admin") return <Navigate to="/app" replace />;
   return <>{children}</>;
 }

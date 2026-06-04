@@ -9,15 +9,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/wjsoj/cc-core/auth"
 	legacyadmin "github.com/wjsoj/CPA-Claude/internal/admin"
-	"github.com/wjsoj/cc-core/pricing"
-	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/CPA-Claude/internal/saas/admin"
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
+	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/pricing"
+	"github.com/wjsoj/cc-core/requestlog"
 )
 
 // Mount attaches all /api/v2/* SaaS routes onto engine. Public-routes (auth
@@ -98,7 +98,7 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 				provSeen[name] = map[string]bool{}
 			}
 			ci.Count++
-			prov := string(a.Provider)
+			prov := a.Provider
 			if prov != "" && !provSeen[name][prov] {
 				provSeen[name][prov] = true
 				ci.Providers = append(ci.Providers, prov)
@@ -436,10 +436,10 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	// availability looked" without leaking per-credential detail.
 	v2.GET("/health/monitor", func(c *gin.Context) {
 		const (
-			recentSlots  = 144 // 24h / 10min
-			recentSlotS  = int64(600)
-			dailyDays    = 30
-			daySec       = int64(86400)
+			recentSlots = 144 // 24h / 10min
+			recentSlotS = int64(600)
+			dailyDays   = 30
+			daySec      = int64(86400)
 		)
 		now := time.Now()
 		nowU := now.Unix()
@@ -447,7 +447,10 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 
 		// Current status per provider from the live model_health rows.
 		curr, _ := store.ListModelHealth(c.Request.Context())
-		type pcount struct{ ok, total int; checkedAt int64 }
+		type pcount struct {
+			ok, total int
+			checkedAt int64
+		}
 		cur := map[string]*pcount{}
 		for _, r := range curr {
 			p := cur[r.Provider]

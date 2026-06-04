@@ -107,9 +107,9 @@ func (h *Handler) register(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"token":    tok,
-		"expires":  exp.Unix(),
-		"user":     userView(u),
+		"token":   tok,
+		"expires": exp.Unix(),
+		"user":    userView(u),
 	})
 }
 

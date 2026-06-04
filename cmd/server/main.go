@@ -16,12 +16,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/CPA-Claude/internal/admin"
-	"github.com/wjsoj/cc-core/auth"
-	"github.com/wjsoj/cc-core/clienttoken"
 	"github.com/wjsoj/CPA-Claude/internal/config"
 	"github.com/wjsoj/CPA-Claude/internal/logging"
-	"github.com/wjsoj/cc-core/pricing"
-	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/CPA-Claude/internal/saas"
 	saasadapter "github.com/wjsoj/CPA-Claude/internal/saas/adapter"
 	saasadmin "github.com/wjsoj/CPA-Claude/internal/saas/admin"
@@ -33,6 +29,10 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	"github.com/wjsoj/CPA-Claude/internal/server"
 	"github.com/wjsoj/CPA-Claude/internal/shop"
+	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/clienttoken"
+	"github.com/wjsoj/cc-core/pricing"
+	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/usage"
 )
 
@@ -212,7 +212,7 @@ func main() {
 		go billingH.RunExpirySweeper(refresherCtx)
 		// Admin "Sync from Alipay" hook — calls alipay.trade.query through
 		// the same applyNotification funnel as the async notify path.
-		saasadmin.Reconciler = func(ctx interface{ Done() <-chan struct{} }, out string) (string, error) {
+		saasadmin.Reconciler = func(_ interface{ Done() <-chan struct{} }, out string) (string, error) {
 			c, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
 			return billingH.ReconcileOrder(c, out)

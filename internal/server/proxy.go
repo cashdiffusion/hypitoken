@@ -18,10 +18,10 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/wjsoj/cc-core/requestlog"
-	"github.com/wjsoj/cc-core/usage"
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/thinkingsig"
+	"github.com/wjsoj/cc-core/usage"
 )
 
 // hopHeaders are stripped when forwarding to upstream.
@@ -200,12 +200,12 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		inflightKey := auth.NormalizeProvider(provider) + "|" + clientToken
 		cur, releaseSlot := s.inflight.Begin(inflightKey)
 		defer releaseSlot()
-		if cur > int32(maxConc) {
+		if int(cur) > maxConc {
 			c.Header("Retry-After", "5")
 			c.AbortWithStatusJSON(429, gin.H{
-				"error":         "too many concurrent requests",
+				"error":          "too many concurrent requests",
 				"max_concurrent": maxConc,
-				"in_flight":     int(cur),
+				"in_flight":      int(cur),
 			})
 			s.emitLog(requestlog.Record{
 				Client:      clientName,
@@ -638,7 +638,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		s.pool.Unstick(auth.NormalizeProvider(a.Provider), clientToken, slotID)
 
 		writeResponseHeaders(c, resp)
-		c.Writer.Write(errBody)
+		_, _ = c.Writer.Write(errBody)
 		return false, true
 	}
 
@@ -668,7 +668,7 @@ recoveredFromSignature:
 		if rewriteClientModel != "" {
 			respBody = rewriteResponseModel(respBody, rewriteClientModel)
 		}
-		c.Writer.Write(respBody)
+		_, _ = c.Writer.Write(respBody)
 		counts.Add(extractUsageFromJSON(respBody, &sub))
 	}
 	_ = resp.Body.Close()
@@ -868,7 +868,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	var errSnippet string
 	if resp.StatusCode >= 400 {
 		errBody, _ := io.ReadAll(resp.Body)
-		c.Writer.Write(errBody)
+		_, _ = c.Writer.Write(errBody)
 		errSnippet = truncate(errBody, 500)
 		log.Warnf("proxy(apikey): %s returned %d — body=%s", a.ID, resp.StatusCode, errSnippet)
 	} else {
@@ -880,7 +880,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 			if rewriteClientModel != "" {
 				respBody = rewriteResponseModel(respBody, rewriteClientModel)
 			}
-			c.Writer.Write(respBody)
+			_, _ = c.Writer.Write(respBody)
 			counts.Add(extractUsageFromJSON(respBody, &sub))
 		}
 	}
@@ -1032,6 +1032,7 @@ func writeResponseHeaders(c *gin.Context, resp *http.Response) {
 //   - Accept-Encoding stays "identity" for both stream and non-stream because
 //     our response path streams raw bytes without decompression. Real Claude
 //     Code sends "gzip, deflate, br, zstd" on non-stream requests.
+//
 // accountAnchorFor returns a never-empty, per-credential anchor used to
 // derive the device_id (and session_id) for one OAuth account. AccountKey()
 // already falls back account_uuid > email > file-basename, and the basename
@@ -1203,7 +1204,7 @@ func streamSSE(c *gin.Context, resp *http.Response, counts *usage.Counts, sub *s
 					mergeSSEUsage(counts, sub, payload)
 				}
 			}
-			c.Writer.Write(outLine)
+			_, _ = c.Writer.Write(outLine)
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -1313,7 +1314,7 @@ func (s *subUsage) replaceFrom(its []iterationUsageRaw) {
 // advisor iterations. Auth-side load tracking only applies to successful
 // sub-calls — a failed parent rarely has billable advisor activity, and
 // double-counting would distort WeightedTotal-driven load balancing.
-func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientToken, clientName, parentModel, path string, status int, sub subUsage) float64 {
+func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientToken, clientName, _ string, path string, status int, sub subUsage) float64 {
 	if status >= 400 || len(sub.byModel) == 0 {
 		return 0
 	}
@@ -1541,9 +1542,9 @@ func parseUnixSecondsHeader(v string) (time.Time, bool) {
 // already in the future (past stamps are a separate signal — see
 // parseUnifiedRatelimitRejected).
 func clampReset(t time.Time) time.Time {
-	max := time.Now().Add(30 * 24 * time.Hour)
-	if t.After(max) {
-		return max
+	maxV := time.Now().Add(30 * 24 * time.Hour)
+	if t.After(maxV) {
+		return maxV
 	}
 	return t
 }

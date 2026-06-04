@@ -18,9 +18,9 @@ const defaultExchangeURL = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-a
 
 // Rate is the cached USD->CNY conversion. Goroutine-safe.
 type Rate struct {
-	mu       sync.RWMutex
+	mu        sync.RWMutex
 	cnyPerUSD float64
-	asOf     time.Time
+	asOf      time.Time
 
 	url      string
 	fallback float64
@@ -114,7 +114,7 @@ func (r *Rate) RunRefresher(ctx context.Context, interval time.Duration) {
 type fetchErr int
 
 func (e fetchErr) Error() string { return "fetch status " + http.StatusText(int(e)) }
-func errFetchStatus(s int) error  { return fetchErr(s) }
+func errFetchStatus(s int) error { return fetchErr(s) }
 
 var errNoCNYField = errFetchErr("missing usd.cny in response")
 

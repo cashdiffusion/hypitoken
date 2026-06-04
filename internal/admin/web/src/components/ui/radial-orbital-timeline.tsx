@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
 import { ArrowRight, Link as LinkIcon, Zap } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,7 +49,7 @@ export default function RadialOrbitalTimeline({
   const [activeNodeId, setActiveNodeId] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const orbitRef = useRef<HTMLDivElement>(null);
-  const nodeRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const nodeRefs = useRef<Record<number, HTMLButtonElement | null>>({});
 
   // Re-sync with the parent's autoRotate (e.g. reduced-motion toggles).
   useEffect(() => {
@@ -81,7 +81,7 @@ export default function RadialOrbitalTimeline({
     setExpandedItems((prev) => {
       const newState = { ...prev };
       Object.keys(newState).forEach((key) => {
-        if (parseInt(key) !== id) newState[parseInt(key)] = false;
+        if (parseInt(key, 10) !== id) newState[parseInt(key, 10)] = false;
       });
 
       newState[id] = !prev[id];
@@ -151,10 +151,15 @@ export default function RadialOrbitalTimeline({
   };
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: outer backdrop only deselects on click/Escape; screen readers interact with individual orbit nodes
     <div
       className={`relative flex w-full items-center justify-center overflow-hidden ${className}`}
       ref={containerRef}
       onClick={handleContainerClick}
+      onKeyDown={(e) => {
+        if (e.key === "Escape")
+          handleContainerClick(e as unknown as React.MouseEvent<HTMLDivElement>);
+      }}
     >
       <div className="relative flex h-full w-full max-w-4xl items-center justify-center">
         <div
@@ -190,16 +195,23 @@ export default function RadialOrbitalTimeline({
             };
 
             return (
-              <div
+              <button
+                type="button"
                 key={item.id}
                 ref={(el) => {
                   nodeRefs.current[item.id] = el;
                 }}
-                className="absolute cursor-pointer transition-all duration-700"
+                className="absolute cursor-pointer transition-all duration-700 border-0 bg-transparent p-0"
                 style={nodeStyle}
                 onClick={(e) => {
                   e.stopPropagation();
                   toggleItem(item.id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.stopPropagation();
+                    toggleItem(item.id);
+                  }
                 }}
               >
                 {/* Soft glow scaled by energy */}
@@ -306,7 +318,7 @@ export default function RadialOrbitalTimeline({
                     </CardContent>
                   </Card>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>

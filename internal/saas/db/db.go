@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
+	// _ "modernc.org/sqlite" registers the SQLite database driver.
 	_ "modernc.org/sqlite"
 )
 

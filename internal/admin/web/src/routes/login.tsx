@@ -1,19 +1,20 @@
-import { lazy, Suspense, useState, type FormEvent, type ReactNode } from "react";
+import { KeyRound, Layers, Receipt, ShieldCheck } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
+import { type FormEvent, lazy, type ReactNode, Suspense, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useTranslation } from "react-i18next";
-import { motion, useReducedMotion } from "motion/react";
+import { HlsVideo } from "@/components/landing/hls-video";
+import { useIsMobile, usePrefersReducedMotion } from "@/components/landing/use-media";
+import { LanguageToggle } from "@/components/language-toggle";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { HlsVideo } from "@/components/landing/hls-video";
-import { useIsMobile, usePrefersReducedMotion } from "@/components/landing/use-media";
-import { apiPost } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { LanguageToggle } from "@/components/language-toggle";
-import { KeyRound, ShieldCheck, Receipt, Layers } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { apiPost } from "@/lib/api";
+import type { User } from "@/lib/types";
+import { cn, errMsg } from "@/lib/utils";
 
 const ParticleField = lazy(() => import("@/components/landing/particle-field"));
 
@@ -26,29 +27,31 @@ const VIDEO_RIGHT = "https://video.wjsphy.top/auth-right.mp4";
 
 // Tactile press + lift, shared by every auth submit button. Pure CSS so it
 // stays snappy and honours reduced motion via the browser.
-export const authBtn = "transition-transform duration-200 ease-out hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]";
+export const authBtn =
+  "transition-transform duration-200 ease-out hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]";
 
 export default function LoginPage() {
   const { user, signIn } = useAuth();
   const nav = useNavigate();
-  const loc = useLocation() as any;
+  const loc = useLocation();
   const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
-  if (user) return <Navigate to={loc.state?.from ?? "/app"} replace />;
+  const locState = loc.state as { from?: string } | null;
+  if (user) return <Navigate to={locState?.from ?? "/app"} replace />;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     try {
-      const r = await apiPost<any>("/auth/login", { email, password });
+      const r = await apiPost<{ token: string; user: User }>("/auth/login", { email, password });
       signIn(r.token, r.user);
       toast.success(t("auth.login.welcomeBack"));
       nav("/app");
-    } catch (e: any) {
-      toast.error(e.message || t("auth.login.invalidCredentials"));
+    } catch (e) {
+      toast.error(errMsg(e, t("auth.login.invalidCredentials")));
     } finally {
       setBusy(false);
     }
@@ -59,22 +62,45 @@ export default function LoginPage() {
       <AuthForm onSubmit={submit} className="space-y-4">
         <AuthRow className="space-y-2">
           <Label htmlFor="email">{t("common.email")}</Label>
-          <Input id="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+          <Input
+            id="email"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+          />
         </AuthRow>
         <AuthRow className="space-y-2">
           <div className="flex items-center justify-between">
             <Label htmlFor="password">{t("common.password")}</Label>
-            <Link to="/forgot-password" className="text-xs text-muted-foreground transition-colors hover:text-primary hover:underline underline-offset-4">
+            <Link
+              to="/forgot-password"
+              className="text-xs text-muted-foreground transition-colors hover:text-primary hover:underline underline-offset-4"
+            >
               {t("auth.login.forgotPassword")}
             </Link>
           </div>
-          <Input id="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+          <Input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
         </AuthRow>
         <AuthRow>
-          <Button type="submit" className={cn("w-full", authBtn)} disabled={busy}>{busy ? t("auth.login.title") + "…" : t("auth.login.submit")}</Button>
+          <Button type="submit" className={cn("w-full", authBtn)} disabled={busy}>
+            {busy ? `${t("auth.login.title")}…` : t("auth.login.submit")}
+          </Button>
         </AuthRow>
         <AuthRow className="text-center text-sm text-muted-foreground">
-          {t("auth.login.noAccount")} <Link to="/register" className="text-primary underline-offset-4 hover:underline">{t("auth.login.createOne")}</Link>
+          {t("auth.login.noAccount")}{" "}
+          <Link to="/register" className="text-primary underline-offset-4 hover:underline">
+            {t("auth.login.createOne")}
+          </Link>
         </AuthRow>
       </AuthForm>
     </AuthLayout>
@@ -83,17 +109,39 @@ export default function LoginPage() {
 
 // ─── Motion form helpers — staggered field entrance, reused by every page ─────
 
-const fieldStagger = { hidden: {}, show: { transition: { staggerChildren: 0.07, delayChildren: 0.12 } } };
+const fieldStagger = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.07, delayChildren: 0.12 } },
+};
 const fieldItem = {
   hidden: { opacity: 0, y: 12, filter: "blur(6px)" },
   show: { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.45, ease: EASE } },
 };
 
-export function AuthForm({ children, onSubmit, className }: { children: ReactNode; onSubmit: (e: FormEvent) => void; className?: string }) {
+export function AuthForm({
+  children,
+  onSubmit,
+  className,
+}: {
+  children: ReactNode;
+  onSubmit: (e: FormEvent) => void;
+  className?: string;
+}) {
   const reduce = useReducedMotion();
-  if (reduce) return <form onSubmit={onSubmit} className={className}>{children}</form>;
+  if (reduce)
+    return (
+      <form onSubmit={onSubmit} className={className}>
+        {children}
+      </form>
+    );
   return (
-    <motion.form onSubmit={onSubmit} className={className} variants={fieldStagger} initial="hidden" animate="show">
+    <motion.form
+      onSubmit={onSubmit}
+      className={className}
+      variants={fieldStagger}
+      initial="hidden"
+      animate="show"
+    >
       {children}
     </motion.form>
   );
@@ -102,14 +150,21 @@ export function AuthForm({ children, onSubmit, className }: { children: ReactNod
 export function AuthRow({ children, className }: { children: ReactNode; className?: string }) {
   const reduce = useReducedMotion();
   if (reduce) return <div className={className}>{children}</div>;
-  return <motion.div variants={fieldItem} className={className}>{children}</motion.div>;
+  return (
+    <motion.div variants={fieldItem} className={className}>
+      {children}
+    </motion.div>
+  );
 }
 
 // ─── Split-screen auth shell — cinematic video on one half, glass form on the
 // other. `side` is the side the FORM occupies (video fills the opposite). ─────
 
 export function AuthLayout({
-  title, sub, children, side = "right",
+  title,
+  sub,
+  children,
+  side = "right",
 }: {
   title: string;
   sub?: string;
@@ -124,9 +179,21 @@ export function AuthLayout({
 
   const videoPanel = (
     <div className="dark relative hidden overflow-hidden lg:block">
-      <HlsVideo src={videoSrc} className="kenburns" style={{ opacity: 0.8 }} fallbackColor="#06120e" />
+      <HlsVideo
+        src={videoSrc}
+        className="kenburns"
+        style={{ opacity: 0.8 }}
+        fallbackColor="#06120e"
+      />
       {/* legibility scrims + a primary-tinted wash toward the form seam */}
-      <div aria-hidden className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(4,12,9,0.85) 0%, rgba(4,12,9,0.25) 45%, rgba(4,12,9,0.45) 100%)" }} />
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(to top, rgba(4,12,9,0.85) 0%, rgba(4,12,9,0.25) 45%, rgba(4,12,9,0.45) 100%)",
+        }}
+      />
       <div
         aria-hidden
         className="absolute inset-0"
@@ -139,7 +206,10 @@ export function AuthLayout({
       <div className="noise pointer-events-none absolute inset-0 opacity-[0.16]" aria-hidden />
 
       <div className="relative z-10 flex h-full flex-col justify-between p-10 text-white xl:p-14">
-        <Link to="/" className="inline-flex w-fit items-center gap-2 font-display text-xl font-semibold">
+        <Link
+          to="/"
+          className="inline-flex w-fit items-center gap-2 font-display text-xl font-semibold"
+        >
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground shadow-lg">
             <KeyRound className="h-4 w-4" />
           </span>
@@ -169,13 +239,18 @@ export function AuthLayout({
       {/* ambient tech backdrop: particle field + focal glow behind the card */}
       {showParticles && (
         <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.38]">
-          <Suspense fallback={null}><ParticleField count={1500} /></Suspense>
+          <Suspense fallback={null}>
+            <ParticleField count={1500} />
+          </Suspense>
         </div>
       )}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
-        style={{ background: "radial-gradient(ellipse 50% 45% at 50% 38%, color-mix(in oklch, var(--primary) 13%, transparent), transparent 72%)" }}
+        style={{
+          background:
+            "radial-gradient(ellipse 50% 45% at 50% 38%, color-mix(in oklch, var(--primary) 13%, transparent), transparent 72%)",
+        }}
       />
 
       <div className="absolute right-4 top-4 z-20 flex items-center gap-1">
@@ -183,7 +258,10 @@ export function AuthLayout({
         <ThemeToggle />
       </div>
       {/* mobile-only brand (video panel that normally carries it is hidden) */}
-      <Link to="/" className="absolute left-4 top-4 z-20 flex items-center gap-2 font-display text-lg font-semibold lg:hidden">
+      <Link
+        to="/"
+        className="absolute left-4 top-4 z-20 flex items-center gap-2 font-display text-lg font-semibold lg:hidden"
+      >
         <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
           <KeyRound className="h-3.5 w-3.5" />
         </span>
@@ -191,7 +269,9 @@ export function AuthLayout({
       </Link>
 
       <motion.div
-        initial={reduce ? false : { opacity: 0, x: side === "right" ? 36 : -36, filter: "blur(8px)" }}
+        initial={
+          reduce ? false : { opacity: 0, x: side === "right" ? 36 : -36, filter: "blur(8px)" }
+        }
         animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
         transition={{ duration: 0.55, ease: EASE }}
         className="glass relative z-10 w-full max-w-sm rounded-3xl p-7 shadow-2xl sm:p-8"
@@ -208,7 +288,17 @@ export function AuthLayout({
   return (
     <div className="relative min-h-dvh w-full overflow-hidden bg-background text-foreground">
       <div className="grid min-h-dvh lg:grid-cols-2">
-        {videoOnLeft ? <>{videoPanel}{formPanel}</> : <>{formPanel}{videoPanel}</>}
+        {videoOnLeft ? (
+          <>
+            {videoPanel}
+            {formPanel}
+          </>
+        ) : (
+          <>
+            {formPanel}
+            {videoPanel}
+          </>
+        )}
       </div>
     </div>
   );
@@ -241,7 +331,10 @@ function PanelChips() {
       {chips.map((c) => (
         <motion.li
           key={c.label}
-          variants={{ hidden: { opacity: 0, x: -16 }, show: { opacity: 1, x: 0, transition: { duration: 0.5, ease: EASE } } }}
+          variants={{
+            hidden: { opacity: 0, x: -16 },
+            show: { opacity: 1, x: 0, transition: { duration: 0.5, ease: EASE } },
+          }}
           className="glass-dark inline-flex w-fit items-center gap-2.5 rounded-full px-4 py-2 text-sm font-medium"
         >
           <c.icon className="h-4 w-4 text-primary" />

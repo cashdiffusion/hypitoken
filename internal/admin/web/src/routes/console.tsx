@@ -1,15 +1,16 @@
-import { useState, useEffect, useCallback } from "react";
-import { Navigate, Link } from "react-router-dom";
-import { Activity, RefreshCw, Info } from "lucide-react";
-import { useTranslation, Trans } from "react-i18next";
-import { useAuth } from "@/hooks/use-auth";
-import { Button } from "@/components/ui/button";
+import { Activity, Info, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import { Link, Navigate } from "react-router-dom";
 import { SpotlightCard } from "@/components/landing/interactions";
-import { Reveal, RevealStagger, RevealItem } from "@/components/landing/reveal";
-import { api, ApiError } from "@/legacy/lib/api";
-import type { Summary } from "@/legacy/lib/types";
+import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/use-auth";
 import { OverviewPanel } from "@/legacy/components/overview-panel";
-import { cn, fmtInt, fmtDate } from "@/legacy/lib/utils";
+import { ApiError, api } from "@/legacy/lib/api";
+import type { Summary } from "@/legacy/lib/types";
+import { cn, fmtDate, fmtInt } from "@/legacy/lib/utils";
+import { errMsg } from "@/lib/utils";
 
 // /app/console exposes only the original CPA-Claude OVERVIEW panel —
 // charts and fleet KPIs — wrapped in the SaaS shell. Visible to any
@@ -37,7 +38,10 @@ function MetricCell({
   accent?: boolean;
 }) {
   return (
-    <SpotlightCard tiltDeg={0} className={cn("w-full rounded-xl p-4", accent && "ring-1 ring-primary/30")}>
+    <SpotlightCard
+      tiltDeg={0}
+      className={cn("w-full rounded-xl p-4", accent && "ring-1 ring-primary/30")}
+    >
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="mt-2 flex items-baseline gap-1.5">
         <span
@@ -76,13 +80,13 @@ export default function ConsolePage() {
       setData(d);
       setErr("");
       setLastTick(Date.now());
-    } catch (x: any) {
+    } catch (x) {
       if (x instanceof ApiError && x.status === 401) {
         // SSO failed — JWT expired. Bounce to login.
         window.location.href = "/login";
         return;
       }
-      setErr(x.message || "fetch failed");
+      setErr(errMsg(x, "fetch failed"));
     }
   }, []);
 
@@ -143,7 +147,8 @@ export default function ConsolePage() {
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5">
           <div className="space-y-2.5 max-w-3xl">
             <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl leading-[0.95] tracking-tight">
-              <Activity className="inline-block h-7 w-7 align-[-3px] text-primary" /> {t("console.title")}
+              <Activity className="inline-block h-7 w-7 align-[-3px] text-primary" />{" "}
+              {t("console.title")}
             </h1>
             <p className="text-sm lg:text-base text-muted-foreground max-w-2xl">
               {t("console.activeWindow", { min: data ? data.active_window_minutes : "···" })}
@@ -155,8 +160,18 @@ export default function ConsolePage() {
                 <Trans
                   i18nKey="console.banner"
                   components={{
-                    billing: <Link to="/app/billing" className="underline underline-offset-2 text-foreground hover:text-primary" />,
-                    logs: <Link to="/app/logs" className="underline underline-offset-2 text-foreground hover:text-primary" />,
+                    billing: (
+                      <Link
+                        to="/app/billing"
+                        className="underline underline-offset-2 text-foreground hover:text-primary"
+                      />
+                    ),
+                    logs: (
+                      <Link
+                        to="/app/logs"
+                        className="underline underline-offset-2 text-foreground hover:text-primary"
+                      />
+                    ),
                   }}
                 />
               </p>
@@ -164,7 +179,12 @@ export default function ConsolePage() {
           </div>
 
           <div className="flex items-center gap-2 lg:justify-end">
-            <Button variant="outline" onClick={manualRefresh} className="gap-2" aria-label={t("common.refresh")}>
+            <Button
+              variant="outline"
+              onClick={manualRefresh}
+              className="gap-2"
+              aria-label={t("common.refresh")}
+            >
               <RefreshCw
                 className={cn("h-4 w-4 transition-transform", refreshing && "animate-spin")}
               />
@@ -197,10 +217,26 @@ export default function ConsolePage() {
             accent
           />
         </RevealItem>
-        <RevealItem className="flex"><MetricCell label={t("console.metrics.oauth")} value={fmtInt(oauths.length)} /></RevealItem>
-        <RevealItem className="flex"><MetricCell label={t("console.metrics.apiKeys")} value={fmtInt(apikeys.length)} /></RevealItem>
-        <RevealItem className="flex"><MetricCell label={t("console.metrics.sumIn24h")} value={fmtInt(totals.in24)} unit={t("console.metrics.tok")} /></RevealItem>
-        <RevealItem className="flex"><MetricCell label={t("console.metrics.sumOut")} value={fmtInt(totals.out)} unit={t("console.metrics.tok")} /></RevealItem>
+        <RevealItem className="flex">
+          <MetricCell label={t("console.metrics.oauth")} value={fmtInt(oauths.length)} />
+        </RevealItem>
+        <RevealItem className="flex">
+          <MetricCell label={t("console.metrics.apiKeys")} value={fmtInt(apikeys.length)} />
+        </RevealItem>
+        <RevealItem className="flex">
+          <MetricCell
+            label={t("console.metrics.sumIn24h")}
+            value={fmtInt(totals.in24)}
+            unit={t("console.metrics.tok")}
+          />
+        </RevealItem>
+        <RevealItem className="flex">
+          <MetricCell
+            label={t("console.metrics.sumOut")}
+            value={fmtInt(totals.out)}
+            unit={t("console.metrics.tok")}
+          />
+        </RevealItem>
       </RevealStagger>
 
       {/* The original Overview panel — charts + fleet health visualisation. */}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	// _ "modernc.org/sqlite" registers the SQLite database driver.
 	_ "modernc.org/sqlite"
 )
 
@@ -507,14 +508,15 @@ func (db *DB) MarkOrderPaidAndFulfil(ctx context.Context, outTradeNo, tradeNo st
 		err = tx.QueryRowContext(ctx,
 			`SELECT id, content FROM shop_card_secrets WHERE product_id = ? AND consumed = 0 ORDER BY id ASC LIMIT 1`,
 			o.ProductID).Scan(&cardID, &content)
-		if errors.Is(err, sql.ErrNoRows) {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
 			// Drained. Mark order as await_manual so the operator sees it
 			// in the admin queue. The buyer still gets an email letting
 			// them know payment landed but delivery is pending.
 			newStatus = OrderAwaitManual
-		} else if err != nil {
+		case err != nil:
 			return nil, err
-		} else {
+		default:
 			if _, err := tx.ExecContext(ctx,
 				`UPDATE shop_card_secrets SET consumed = 1, consumed_by_order = ?, consumed_at = ? WHERE id = ?`,
 				outTradeNo, now, cardID); err != nil {

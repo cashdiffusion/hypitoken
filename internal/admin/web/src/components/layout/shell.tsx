@@ -1,14 +1,22 @@
-import { Link, NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
+import {
+  KeyRound,
+  LayoutDashboard,
+  LogOut,
+  Receipt,
+  Shield,
+  Terminal,
+  User as UserIcon,
+  Wallet,
+} from "lucide-react";
 import { motion } from "motion/react";
-import { useAuth } from "@/hooks/use-auth";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { LanguageToggle } from "@/components/language-toggle";
-import { Button } from "@/components/ui/button";
-import { LogOut, User as UserIcon, Wallet, KeyRound, LayoutDashboard, Shield, Terminal, Receipt } from "lucide-react";
-import { fmtUSD } from "@/lib/utils";
-import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { LanguageToggle } from "@/components/language-toggle";
 import { MobileMenu } from "@/components/layout/mobile-menu";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/use-auth";
+import { cn, fmtUSD } from "@/lib/utils";
 
 // NAV_ITEMS is keyed by i18n string id rather than the literal label —
 // resolved at render time so language switching reflows the sidebar.
@@ -23,16 +31,26 @@ const NAV_ITEMS = [
 // SideNavLink — a sidebar row that, when active, renders a shared glass pill
 // + a left primary accent bar. The pill uses a motion layoutId so it slides
 // between rows as you navigate, the way a polished product sidebar does.
-function SideNavLink({ to, end, icon: Icon, label }: { to: string; end?: boolean; icon: typeof Wallet; label: string }) {
+function SideNavLink({
+  to,
+  end,
+  icon: Icon,
+  label,
+}: {
+  to: string;
+  end?: boolean;
+  icon: typeof Wallet;
+  label: string;
+}) {
   const { pathname } = useLocation();
-  const active = end ? pathname === to : pathname === to || pathname.startsWith(to + "/");
+  const active = end ? pathname === to : pathname === to || pathname.startsWith(`${to}/`);
   return (
     <NavLink
       to={to}
       end={end}
       className={cn(
         "relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
-        active ? "font-medium text-primary" : "text-muted-foreground hover:text-foreground"
+        active ? "font-medium text-primary" : "text-muted-foreground hover:text-foreground",
       )}
     >
       {active && (
@@ -75,7 +93,9 @@ export function AppShell() {
             ))}
             {user?.role === "admin" && (
               <>
-                <div className="mt-6 mb-1 px-3 text-xs uppercase tracking-wider text-muted-foreground">{t("nav.operator")}</div>
+                <div className="mt-6 mb-1 px-3 text-xs uppercase tracking-wider text-muted-foreground">
+                  {t("nav.operator")}
+                </div>
                 <SideNavLink to="/app/admin" icon={Shield} label={t("nav.admin")} />
               </>
             )}
@@ -97,25 +117,55 @@ function Header() {
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/70 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
         <div className="flex items-center gap-6">
-          <Link to="/app" className="flex items-center gap-2 font-display text-xl font-semibold tracking-tight">
+          <Link
+            to="/app"
+            className="flex items-center gap-2 font-display text-xl font-semibold tracking-tight"
+          >
             <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
               <KeyRound className="h-3.5 w-3.5" />
             </span>
             HypiToken
           </Link>
           <nav className="hidden items-center gap-1 md:flex">
-            <Link to="/" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">{t("nav.home")}</Link>
-            <Link to="/pricing" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">{t("nav.pricing")}</Link>
-            <Link to="/docs" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">{t("nav.docs")}</Link>
-            <Link to="/status" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">{t("nav.status")}</Link>
+            <Link
+              to="/"
+              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {t("nav.home")}
+            </Link>
+            <Link
+              to="/pricing"
+              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {t("nav.pricing")}
+            </Link>
+            <Link
+              to="/docs"
+              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {t("nav.docs")}
+            </Link>
+            <Link
+              to="/status"
+              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {t("nav.status")}
+            </Link>
           </nav>
         </div>
         <div className="flex items-center gap-2">
           {user && (
-            <Link to="/app/billing" className="glass hidden items-center gap-2.5 rounded-full px-3.5 py-1.5 transition-shadow hover:shadow-md sm:flex">
+            <Link
+              to="/app/billing"
+              className="glass hidden items-center gap-2.5 rounded-full px-3.5 py-1.5 transition-shadow hover:shadow-md sm:flex"
+            >
               <Wallet className="h-3.5 w-3.5 text-primary" />
-              <span className="text-xs uppercase text-muted-foreground tracking-wider">{t("common.balance")}</span>
-              <span className="font-mono text-sm font-semibold tabular-nums">{fmtUSD(user.balance_usd)}</span>
+              <span className="text-xs uppercase text-muted-foreground tracking-wider">
+                {t("common.balance")}
+              </span>
+              <span className="font-mono text-sm font-semibold tabular-nums">
+                {fmtUSD(user.balance_usd)}
+              </span>
             </Link>
           )}
           <div className="hidden items-center gap-2 lg:flex">
@@ -156,22 +206,35 @@ export function PublicHeader() {
   const linkCls = ({ isActive }: { isActive: boolean }) =>
     cn(
       "rounded-full px-3 py-1.5 text-sm transition-colors",
-      isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"
+      isActive
+        ? "bg-accent text-foreground"
+        : "text-muted-foreground hover:bg-accent hover:text-foreground",
     );
   return (
     <div className="sticky top-0 z-40 px-4 pt-3 md:px-6">
       <header className="glass mx-auto flex max-w-7xl items-center justify-between gap-4 rounded-full px-3 py-2 md:px-4">
-        <Link to="/" className="flex items-center gap-2 pl-1 font-display text-lg font-semibold tracking-tight">
+        <Link
+          to="/"
+          className="flex items-center gap-2 pl-1 font-display text-lg font-semibold tracking-tight"
+        >
           <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
             <KeyRound className="h-3.5 w-3.5" />
           </span>
           HypiToken
         </Link>
         <nav className="hidden items-center gap-1 lg:flex">
-          <NavLink to="/" end className={linkCls}>{t("nav.home")}</NavLink>
-          <NavLink to="/pricing" className={linkCls}>{t("nav.pricing")}</NavLink>
-          <NavLink to="/docs" className={linkCls}>{t("nav.docs")}</NavLink>
-          <NavLink to="/status" className={linkCls}>{t("nav.status")}</NavLink>
+          <NavLink to="/" end className={linkCls}>
+            {t("nav.home")}
+          </NavLink>
+          <NavLink to="/pricing" className={linkCls}>
+            {t("nav.pricing")}
+          </NavLink>
+          <NavLink to="/docs" className={linkCls}>
+            {t("nav.docs")}
+          </NavLink>
+          <NavLink to="/status" className={linkCls}>
+            {t("nav.status")}
+          </NavLink>
         </nav>
         <div className="flex items-center gap-2">
           <div className="hidden items-center gap-1.5 lg:flex">

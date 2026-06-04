@@ -3,12 +3,12 @@
 // Edit the .md files directly — no rebuild of TS code required.
 
 export interface DocSection {
-  slug: string;       // url segment (matches /docs/:slug)
+  slug: string; // url segment (matches /docs/:slug)
   title: string;
   group: string;
   intro?: string;
-  order: number;      // sort key
-  body: string;       // raw markdown (without frontmatter)
+  order: number; // sort key
+  body: string; // raw markdown (without frontmatter)
 }
 
 // Vite eagerly imports every .md file as raw text at build time.
@@ -27,7 +27,7 @@ function parseFrontmatter(raw: string): { meta: Record<string, string>; body: st
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n+([\s\S]*)$/.exec(raw);
   if (!m) return { meta: {}, body: raw };
   const meta: Record<string, string> = {};
-  for (const line of m[1]!.split(/\r?\n/)) {
+  for (const line of (m[1] ?? "").split(/\r?\n/)) {
     const i = line.indexOf(":");
     if (i <= 0) continue;
     const k = line.slice(0, i).trim();
@@ -37,7 +37,7 @@ function parseFrontmatter(raw: string): { meta: Record<string, string>; body: st
     }
     meta[k] = v;
   }
-  return { meta, body: m[2]! };
+  return { meta, body: m[2] ?? "" };
 }
 
 function buildDocs(modules: Record<string, string>): DocSection[] {
@@ -85,10 +85,17 @@ export function findDoc(slug: string, lang?: string): DocSection | undefined {
 
 // Slugify a heading text so the TOC anchors match what react-markdown
 // generates (or our renderer assigns).
+//
+// Must keep Unicode letters/numbers (CJK included): the docs are bilingual and
+// a `\w`-only filter would strip every Chinese character, collapsing headings
+// like "这是什么" to an empty id. That broke anchor navigation AND the
+// scroll-spy (an empty activeID matched every heading at once, so the whole
+// TOC lit up). `\p{L}\p{N}` with the `u` flag preserves CJK while still
+// dropping punctuation.
 export function slugify(text: string): string {
   return text
     .toLowerCase()
     .trim()
-    .replace(/[^\w\s-]/g, "")
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
     .replace(/\s+/g, "-");
 }

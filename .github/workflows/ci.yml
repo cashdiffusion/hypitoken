@@ -24,3 +24,28 @@ jobs:
         run: go build ./...
       - name: Vet
         run: go vet ./...
+
+  lint-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
+
+  lint-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install admin SPA deps
+        run: cd internal/admin/web && bun install --frozen-lockfile
+      - name: Biome check
+        run: cd internal/admin/web && bun run lint

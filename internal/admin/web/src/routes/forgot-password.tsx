@@ -1,14 +1,14 @@
-import { useState, type FormEvent } from "react";
+import { type FormEvent, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiPost } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
-import { cn } from "@/lib/utils";
-import { AuthLayout, AuthForm, AuthRow, authBtn } from "./login";
+import { apiPost } from "@/lib/api";
+import { cn, errMsg } from "@/lib/utils";
+import { AuthForm, AuthLayout, AuthRow, authBtn } from "./login";
 
 // Two-step reset flow that mirrors the backend's /auth/send-code (purpose=reset)
 // + /auth/reset-password endpoints. We don't reveal whether the email is
@@ -32,8 +32,8 @@ export default function ForgotPasswordPage() {
       await apiPost("/auth/send-code", { email, purpose: "reset" });
       toast.success(t("auth.forgot.codeSent"));
       setStep("reset");
-    } catch (e: any) {
-      toast.error(e.message || t("auth.register.codeSendFailed"));
+    } catch (e) {
+      toast.error(errMsg(e, t("auth.register.codeSendFailed")));
     } finally {
       setBusy(false);
     }
@@ -46,8 +46,8 @@ export default function ForgotPasswordPage() {
       await apiPost("/auth/reset-password", { email, code, new_password: newPassword });
       toast.success(t("auth.forgot.reset"));
       nav("/login");
-    } catch (e: any) {
-      toast.error(e.message || t("common.error"));
+    } catch (e) {
+      toast.error(errMsg(e, t("common.error")));
     } finally {
       setBusy(false);
     }
@@ -55,7 +55,11 @@ export default function ForgotPasswordPage() {
 
   if (step === "reset") {
     return (
-      <AuthLayout side="right" title={t("auth.forgot.step2Title")} sub={t("auth.forgot.step2Sub", { email })}>
+      <AuthLayout
+        side="right"
+        title={t("auth.forgot.step2Title")}
+        sub={t("auth.forgot.step2Sub", { email })}
+      >
         <AuthForm key="reset" onSubmit={resetPassword} className="space-y-4">
           <AuthRow className="space-y-2">
             <Label htmlFor="code">{t("auth.register.codeLabel")}</Label>
@@ -90,7 +94,13 @@ export default function ForgotPasswordPage() {
             </Button>
           </AuthRow>
           <AuthRow>
-            <Button type="button" variant="ghost" className={cn("w-full", authBtn)} disabled={busy} onClick={() => setStep("start")}>
+            <Button
+              type="button"
+              variant="ghost"
+              className={cn("w-full", authBtn)}
+              disabled={busy}
+              onClick={() => setStep("start")}
+            >
               {t("common.back")}
             </Button>
           </AuthRow>

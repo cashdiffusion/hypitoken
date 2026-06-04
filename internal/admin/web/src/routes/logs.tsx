@@ -1,14 +1,14 @@
-import { useEffect, useState } from "react";
 import { Receipt, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api } from "@/lib/api";
-import { lookupPriceCard } from "@/lib/pricing";
+import { PageHeader } from "@/components/app/page-primitives";
+import { SpotlightCard } from "@/components/landing/interactions";
+import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Reveal, RevealStagger, RevealItem } from "@/components/landing/reveal";
-import { SpotlightCard } from "@/components/landing/interactions";
-import { PageHeader } from "@/components/app/page-primitives";
-import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import { lookupPriceCard } from "@/lib/pricing";
+import { cn, errMsg } from "@/lib/utils";
 
 interface PriceCard {
   input_per_1m: number;
@@ -66,18 +66,21 @@ const PAGE = 50;
 
 function fmtTokens(n: number): string {
   if (!n) return "0";
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
 }
 
 // Render a charge in USD with enough decimals to ground-truth — wallets
 // are in USD so always show 4 decimals; thousand separator for clarity.
 function fmtUSD(n: number): string {
-  return "$" + (n || 0).toLocaleString("en-US", {
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
-  });
+  return (
+    "$" +
+    (n || 0).toLocaleString("en-US", {
+      minimumFractionDigits: 4,
+      maximumFractionDigits: 4,
+    })
+  );
 }
 
 function fmtTime(iso: string): string {
@@ -106,16 +109,16 @@ export default function LogsPage() {
     try {
       const r = await api<QueryResult>(`/me/requests?limit=${PAGE}&offset=${o}`);
       setData(r);
-    } catch (e: any) {
-      setErr(e.message || "load failed");
+    } catch (e) {
+      setErr(errMsg(e, "load failed"));
     } finally {
       setBusy(false);
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only fetch; reload is defined inline and would change every render
   useEffect(() => {
     reload(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const entries = data?.entries || [];
@@ -130,7 +133,12 @@ export default function LogsPage() {
         title={t("logs.title")}
         sub={t("logs.sub")}
         action={
-          <Button variant="outline" onClick={() => reload(offset)} disabled={busy} className="gap-2">
+          <Button
+            variant="outline"
+            onClick={() => reload(offset)}
+            disabled={busy}
+            className="gap-2"
+          >
             <RefreshCw className={cn("h-4 w-4", busy && "animate-spin")} />
             {t("common.refresh")}
           </Button>
@@ -139,11 +147,21 @@ export default function LogsPage() {
 
       {sum && (
         <RevealStagger className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <RevealItem className="flex"><SumTile label={t("logs.summary.requests")} value={sum.count.toLocaleString()} /></RevealItem>
-          <RevealItem className="flex"><SumTile label={t("logs.summary.sumIn")} value={fmtTokens(sum.input_tokens)} /></RevealItem>
-          <RevealItem className="flex"><SumTile label={t("logs.summary.sumOut")} value={fmtTokens(sum.output_tokens)} /></RevealItem>
-          <RevealItem className="flex"><SumTile label={t("logs.summary.cacheRead")} value={fmtTokens(sum.cache_read_tokens)} /></RevealItem>
-          <RevealItem className="flex"><SumTile label={t("logs.summary.totalBilled")} value={fmtUSD(sum.cost_usd)} accent /></RevealItem>
+          <RevealItem className="flex">
+            <SumTile label={t("logs.summary.requests")} value={sum.count.toLocaleString()} />
+          </RevealItem>
+          <RevealItem className="flex">
+            <SumTile label={t("logs.summary.sumIn")} value={fmtTokens(sum.input_tokens)} />
+          </RevealItem>
+          <RevealItem className="flex">
+            <SumTile label={t("logs.summary.sumOut")} value={fmtTokens(sum.output_tokens)} />
+          </RevealItem>
+          <RevealItem className="flex">
+            <SumTile label={t("logs.summary.cacheRead")} value={fmtTokens(sum.cache_read_tokens)} />
+          </RevealItem>
+          <RevealItem className="flex">
+            <SumTile label={t("logs.summary.totalBilled")} value={fmtUSD(sum.cost_usd)} accent />
+          </RevealItem>
         </RevealStagger>
       )}
 
@@ -172,10 +190,13 @@ export default function LogsPage() {
             <tbody>
               {entries.length === 0 && !busy && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-12 text-center text-muted-foreground">{t("logs.none")}</td>
+                  <td colSpan={9} className="px-3 py-12 text-center text-muted-foreground">
+                    {t("logs.none")}
+                  </td>
                 </tr>
               )}
               {entries.map((e, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: no stable unique id on log entries; ts alone may collide on retries
                 <tr key={i} className="border-t border-border hover:bg-accent/30">
                   <td className="px-3 py-2 font-mono text-xs whitespace-nowrap" title={e.ts}>
                     {fmtTime(e.ts)}
@@ -183,7 +204,7 @@ export default function LogsPage() {
                   <td className="px-3 py-2 font-mono text-xs">
                     <div className="font-medium text-foreground">{e.model}</div>
                     <div className="text-muted-foreground/70 text-[11px]">
-                      {(e.provider || "anthropic")} · {e.auth_kind}
+                      {e.provider || "anthropic"} · {e.auth_kind}
                     </div>
                   </td>
                   <td className="px-3 py-2 font-mono tabular-nums text-right">
@@ -196,12 +217,20 @@ export default function LogsPage() {
                     {fmtTokens(e.cache_read_tokens)} / {fmtTokens(e.cache_create_tokens)}
                   </td>
                   <td className="px-3 py-2 font-mono tabular-nums text-right text-muted-foreground/80">
-                    {e.multiplier ? e.multiplier.toFixed(2) + "×" : "—"}
+                    {e.multiplier ? `${e.multiplier.toFixed(2)}×` : "—"}
                   </td>
                   <td className="px-3 py-2 font-mono tabular-nums text-right font-semibold">
-                    <ChargedCell entry={e} priceCard={lookupPriceCard(pricing, e.provider, e.model)} />
+                    <ChargedCell
+                      entry={e}
+                      priceCard={lookupPriceCard(pricing, e.provider, e.model)}
+                    />
                   </td>
-                  <td className={cn("px-3 py-2 font-mono tabular-nums text-right", statusClass(e.status))}>
+                  <td
+                    className={cn(
+                      "px-3 py-2 font-mono tabular-nums text-right",
+                      statusClass(e.status),
+                    )}
+                  >
                     {e.status}
                   </td>
                   <td className="px-3 py-2 font-mono tabular-nums text-right text-muted-foreground">
@@ -216,7 +245,10 @@ export default function LogsPage() {
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
-          {t("logs.showing", { shown: entries.length, total: data?.summary.count.toLocaleString() || 0 })}
+          {t("logs.showing", {
+            shown: entries.length,
+            total: data?.summary.count.toLocaleString() || 0,
+          })}
           {data ? t("logs.scanned", { n: data.scanned.toLocaleString() }) : ""}
         </span>
         <div className="flex gap-2">
@@ -252,7 +284,10 @@ export default function LogsPage() {
 
 function SumTile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <SpotlightCard tiltDeg={0} className={cn("w-full rounded-xl p-3.5", accent && "ring-1 ring-primary/30")}>
+    <SpotlightCard
+      tiltDeg={0}
+      className={cn("w-full rounded-xl p-3.5", accent && "ring-1 ring-primary/30")}
+    >
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div
         className={cn(
@@ -279,10 +314,10 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
   if (!priceCard) {
     return <span>{fmtUSD(entry.cost_usd)}</span>;
   }
-  const inUSD  = (entry.input_tokens        * priceCard.input_per_1m)        / 1e6;
-  const outUSD = (entry.output_tokens       * priceCard.output_per_1m)       / 1e6;
-  const crUSD  = (entry.cache_read_tokens   * priceCard.cache_read_per_1m)   / 1e6;
-  const cwUSD  = (entry.cache_create_tokens * priceCard.cache_create_per_1m) / 1e6;
+  const inUSD = (entry.input_tokens * priceCard.input_per_1m) / 1e6;
+  const outUSD = (entry.output_tokens * priceCard.output_per_1m) / 1e6;
+  const crUSD = (entry.cache_read_tokens * priceCard.cache_read_per_1m) / 1e6;
+  const cwUSD = (entry.cache_create_tokens * priceCard.cache_create_per_1m) / 1e6;
   const officialUSD = inUSD + outUSD + crUSD + cwUSD;
   const mult = entry.multiplier && entry.multiplier > 0 ? entry.multiplier : 1;
   const computed = officialUSD * mult;
@@ -299,10 +334,36 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
     sub: number;
     dim?: boolean;
   }> = [
-    { key: "in", label: t("logs.popup.input"), tokens: entry.input_tokens, rate: priceCard.input_per_1m, sub: inUSD },
-    { key: "out", label: t("logs.popup.output"), tokens: entry.output_tokens, rate: priceCard.output_per_1m, sub: outUSD },
-    { key: "cr", label: t("logs.popup.cacheR"), tokens: entry.cache_read_tokens, rate: priceCard.cache_read_per_1m, sub: crUSD, dim: true },
-    { key: "cw", label: t("logs.popup.cacheW"), tokens: entry.cache_create_tokens, rate: priceCard.cache_create_per_1m, sub: cwUSD, dim: true },
+    {
+      key: "in",
+      label: t("logs.popup.input"),
+      tokens: entry.input_tokens,
+      rate: priceCard.input_per_1m,
+      sub: inUSD,
+    },
+    {
+      key: "out",
+      label: t("logs.popup.output"),
+      tokens: entry.output_tokens,
+      rate: priceCard.output_per_1m,
+      sub: outUSD,
+    },
+    {
+      key: "cr",
+      label: t("logs.popup.cacheR"),
+      tokens: entry.cache_read_tokens,
+      rate: priceCard.cache_read_per_1m,
+      sub: crUSD,
+      dim: true,
+    },
+    {
+      key: "cw",
+      label: t("logs.popup.cacheW"),
+      tokens: entry.cache_create_tokens,
+      rate: priceCard.cache_create_per_1m,
+      sub: cwUSD,
+      dim: true,
+    },
   ];
 
   return (
@@ -357,11 +418,14 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
               <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/80">
                 {t("logs.popup.header")}
               </div>
-              <div className="mt-1 font-mono text-xs font-medium text-foreground truncate" title={entry.model}>
+              <div
+                className="mt-1 font-mono text-xs font-medium text-foreground truncate"
+                title={entry.model}
+              >
                 {entry.model}
               </div>
               <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                {(entry.provider || "anthropic")} · {entry.auth_kind}
+                {entry.provider || "anthropic"} · {entry.auth_kind}
               </div>
             </div>
             <div className="text-right shrink-0">
@@ -401,9 +465,7 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
                   <span>${r.rate.toFixed(2)}</span>
                   <span className="text-muted-foreground/60">/M</span>
                 </span>
-                <span className="text-right tabular-nums text-foreground">
-                  ${r.sub.toFixed(6)}
-                </span>
+                <span className="text-right tabular-nums text-foreground">${r.sub.toFixed(6)}</span>
               </div>
             ))}
 
@@ -417,9 +479,7 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
             >
               <span className="text-muted-foreground/80">Σ {t("logs.popup.official")}</span>
               <span />
-              <span className="text-right tabular-nums font-medium">
-                ${officialUSD.toFixed(6)}
-              </span>
+              <span className="text-right tabular-nums font-medium">${officialUSD.toFixed(6)}</span>
             </div>
 
             {/* Multiplier line — only if non-trivial */}
@@ -456,10 +516,7 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
             <span className="font-mono text-sm font-semibold tabular-nums text-foreground">
               {fmtUSD(entry.cost_usd)}
             </span>
-            <span
-              aria-hidden
-              className="absolute inset-y-0 left-0 w-[2px] bg-primary"
-            />
+            <span aria-hidden className="absolute inset-y-0 left-0 w-[2px] bg-primary" />
           </div>
 
           {/* Drift warning */}
@@ -471,7 +528,10 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
                 animationDuration: "320ms",
               }}
             >
-              {t("logs.popup.drift", { recomputed: "$" + computed.toFixed(6), stored: fmtUSD(entry.cost_usd) })}
+              {t("logs.popup.drift", {
+                recomputed: `$${computed.toFixed(6)}`,
+                stored: fmtUSD(entry.cost_usd),
+              })}
             </div>
           )}
         </TooltipContent>

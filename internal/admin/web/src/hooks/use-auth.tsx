@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
 import { apiGet, getCachedUser, getJWT, logout, setCachedUser, setJWT } from "@/lib/api";
-import type { User, PricingGroup } from "@/lib/types";
+import type { PricingGroup, User } from "@/lib/types";
+import { errStatus } from "@/lib/utils";
 
 interface AuthState {
   user: User | null;
@@ -30,8 +31,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(r.user);
       setGroup(r.group);
       setCachedUser(r.user);
-    } catch (e: any) {
-      if (e?.status === 401) {
+    } catch (e) {
+      if (errStatus(e) === 401) {
         logout();
         setUser(null);
         setGroup(null);
@@ -41,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only bootstrap; refresh is stable and does not need to re-run on every render
   useEffect(() => {
     refresh();
   }, []);
@@ -59,7 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setGroup(null);
   };
 
-  return <Ctx.Provider value={{ user, group, loading, refresh, signIn, signOut }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={{ user, group, loading, refresh, signIn, signOut }}>
+      {children}
+    </Ctx.Provider>
+  );
 }
 
 export function useAuth() {

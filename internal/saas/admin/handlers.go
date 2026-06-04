@@ -52,10 +52,10 @@ func (h *Handler) dashboard(c *gin.Context) {
 		return
 	}
 	users := gin.H{
-		"total":     snap.UsersTotal,
-		"verified":  snap.UsersVerified,
-		"new_30d":   snap.UsersNew30d,
-		"disabled":  snap.UsersDisabled,
+		"total":    snap.UsersTotal,
+		"verified": snap.UsersVerified,
+		"new_30d":  snap.UsersNew30d,
+		"disabled": snap.UsersDisabled,
 	}
 	revenue := gin.H{
 		"topups_lifetime":  snap.TopupsLifetime,
@@ -355,18 +355,19 @@ func (h *Handler) listHealth(c *gin.Context) {
 	// Build sequential display names per provider+kind.
 	// Counters keyed by "<provider>-<kind>" (e.g. "anthropic-oauth", "openai-apikey").
 	counters := map[string]int{}
-	displayName := func(authID, provider, model string) string {
+	displayName := func(authID, provider, _ string) string {
 		// Infer kind from auth_id prefix heuristic — API key files start with
 		// "apikey-" or contain "_api_key"; OAuth files contain "oauth" or start with
 		// "sk-ant-oat" after redaction. We use the model probe as a proxy:
 		// if the auth_id looks like a filename with "apikey" it's apikey, else oauth.
 		kind := "oauth"
 		lower := authID
-		if len(lower) > 7 && lower[:7] == "apikey-" {
+		switch {
+		case len(lower) > 7 && lower[:7] == "apikey-":
 			kind = "api"
-		} else if len(lower) > 10 && lower[:10] == "openai_api" {
+		case len(lower) > 10 && lower[:10] == "openai_api":
 			kind = "api"
-		} else if len(lower) > 7 && lower[:7] == "openai-" {
+		case len(lower) > 7 && lower[:7] == "openai-":
 			kind = "api"
 		}
 		// Shorten provider name for display.

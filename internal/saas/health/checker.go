@@ -19,9 +19,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/requestlog"
-	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 )
 
 func newUUID() string {

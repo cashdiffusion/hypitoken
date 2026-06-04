@@ -145,9 +145,9 @@ func (s *Shop) handleCreateOrder(c *gin.Context) {
 // pageQuery renders the "look up my order" form.
 func (s *Shop) pageQuery(c *gin.Context) {
 	s.render(c, "query.html", gin.H{
-		"Error":      c.Query("err"),
-		"TradeNo":    c.Query("trade_no"),
-		"Email":      c.Query("email"),
+		"Error":   c.Query("err"),
+		"TradeNo": c.Query("trade_no"),
+		"Email":   c.Query("email"),
 	})
 }
 

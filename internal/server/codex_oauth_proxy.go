@@ -39,10 +39,10 @@ const (
 // suffix on the ChatGPT Codex backend (mounted under /codex). The backend
 // hosts:
 //   - /responses           — streaming inference (non-streaming clients are
-//                            satisfied via aggregateCodexResponseStream).
+//     satisfied via aggregateCodexResponseStream).
 //   - /responses/compact   — Codex CLI's conversation-compaction endpoint;
-//                            body shape is the same /v1/responses payload,
-//                            so the same sanitize/transport path applies.
+//     body shape is the same /v1/responses payload,
+//     so the same sanitize/transport path applies.
 func codexOAuthPath(clientPath string) string {
 	switch clientPath {
 	case "/v1/responses/compact":
@@ -438,7 +438,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			return true, false
 		}
 		writeResponseHeaders(c, resp)
-		c.Writer.Write(errBody)
+		_, _ = c.Writer.Write(errBody)
 		s.emitLog(requestlog.Record{
 			Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.ProviderOpenAI,
 			AuthID: a.ID, AuthLabel: a.Label, AuthKind: "oauth", Model: model,
@@ -450,7 +450,8 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	}
 
 	var counts usage.Counts
-	if isCompactPath {
+	switch {
+	case isCompactPath:
 		// /codex/responses/compact returns a single JSON object — no SSE.
 		// Read it once, extract usage, pass through verbatim. Matches sub2api's
 		// handleNonStreamingResponsePassthrough behavior on this path.
@@ -481,12 +482,12 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		}
 		c.Writer.Header().Set("Content-Type", "application/json")
 		c.Writer.WriteHeader(resp.StatusCode)
-		c.Writer.Write(payload)
-	} else if stream {
+		_, _ = c.Writer.Write(payload)
+	case stream:
 		// Streaming client: passthrough SSE verbatim.
 		writeResponseHeaders(c, resp)
 		streamSSECodexBackend(c, resp, &counts)
-	} else {
+	default:
 		// Non-streaming client: aggregate SSE into a single response object
 		// (mirrors CLIProxyAPI's CodexExecutor.Execute aggregation).
 		payload, aerr := aggregateCodexResponseStream(resp.Body, &counts)
@@ -514,7 +515,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		}
 		c.Writer.Header().Set("Content-Type", "application/json")
 		c.Writer.WriteHeader(http.StatusOK)
-		c.Writer.Write(payload)
+		_, _ = c.Writer.Write(payload)
 	}
 	_ = resp.Body.Close()
 
@@ -673,7 +674,7 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 					counts.Add(extractCodexBackendUsageFromJSON(payload))
 				}
 			}
-			c.Writer.Write(line)
+			_, _ = c.Writer.Write(line)
 			if flusher != nil {
 				flusher.Flush()
 			}

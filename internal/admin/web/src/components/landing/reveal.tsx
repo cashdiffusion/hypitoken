@@ -43,7 +43,15 @@ const itemVariants: Variants = {
 };
 
 // Staggered container — wrap RevealItem children for a cascading entrance.
-export function RevealStagger({ children, className, amount = 0.2 }: { children: ReactNode; className?: string; amount?: number }) {
+export function RevealStagger({
+  children,
+  className,
+  amount = 0.2,
+}: {
+  children: ReactNode;
+  className?: string;
+  amount?: number;
+}) {
   const reduce = useReducedMotion();
   if (reduce) return <div className={className}>{children}</div>;
   return (
@@ -71,7 +79,15 @@ export function RevealItem({ children, className }: { children: ReactNode; class
 
 // Word-by-word blur-in for hero headlines. Splits on spaces; each word rises
 // and unblurs on a stagger. Whole-word spans keep wrapping natural.
-export function WordReveal({ text, className, delay = 0 }: { text: string; className?: string; delay?: number }) {
+export function WordReveal({
+  text,
+  className,
+  delay = 0,
+}: {
+  text: string;
+  className?: string;
+  delay?: number;
+}) {
   const reduce = useReducedMotion();
   const words = text.split(" ");
   if (reduce) return <span className={className}>{text}</span>;
@@ -81,17 +97,26 @@ export function WordReveal({ text, className, delay = 0 }: { text: string; class
       style={{ display: "inline-flex", flexWrap: "wrap", justifyContent: "inherit" }}
       initial="hidden"
       animate="show"
-      variants={{ hidden: {}, show: { transition: { staggerChildren: 0.07, delayChildren: delay } } }}
+      variants={{
+        hidden: {},
+        show: { transition: { staggerChildren: 0.07, delayChildren: delay } },
+      }}
       aria-label={text}
     >
       {words.map((w, i) => (
         <motion.span
+          // biome-ignore lint/suspicious/noArrayIndexKey: words can repeat in a sentence; positional index is the correct stable key here
           key={`${w}-${i}`}
           aria-hidden
           style={{ display: "inline-block", marginRight: "0.28em" }}
           variants={{
             hidden: { opacity: 0, y: 40, filter: "blur(10px)" },
-            show: { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.6, ease: EASE } },
+            show: {
+              opacity: 1,
+              y: 0,
+              filter: "blur(0px)",
+              transition: { duration: 0.6, ease: EASE },
+            },
           }}
         >
           {w}

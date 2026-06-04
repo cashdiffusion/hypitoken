@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wjsoj/cc-core/auth"
-	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 	"github.com/wjsoj/CPA-Claude/internal/server"
+	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/cc-core/usage"
 )
 
@@ -141,7 +141,7 @@ func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *serv
 //
 // Returns the billed amount so the caller can write it into the request log
 // (so the log row matches the wallet ledger byte-for-byte).
-func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provider, model string, counts usage.Counts, officialCostUSD float64) (float64, error) {
+func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provider, model string, _ usage.Counts, officialCostUSD float64) (float64, error) {
 	if officialCostUSD <= 0 {
 		return 0, nil
 	}

@@ -188,7 +188,7 @@ func (s *Shop) pageAdminOrders(c *gin.Context) {
 		return
 	}
 	s.render(c, "admin_orders.html", gin.H{
-		"Orders":      orders,
+		"Orders":       orders,
 		"StatusFilter": status,
 	})
 }

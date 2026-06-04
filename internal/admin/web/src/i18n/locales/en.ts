@@ -192,10 +192,12 @@ export default {
     requestsBilledTopups: "{{r}} requests billed · {{t}} top-ups",
     liveRate: "Live rate: 1 USD = ¥{{rate}}",
     topUpOrders: "Top-up orders",
-    topUpOrdersSub: "Pending and recently paid top-up orders. Expired orders are hidden automatically.",
+    topUpOrdersSub:
+      "Pending and recently paid top-up orders. Expired orders are hidden automatically.",
     noActiveOrders: "No active orders.",
     walletHistory: "Wallet history",
-    walletHistorySub: "Top-ups, refunds, and admin adjustments only. Per-request charges are available in <logs>Logs</logs> with token-level detail.",
+    walletHistorySub:
+      "Top-ups, refunds, and admin adjustments only. Per-request charges are available in <logs>Logs</logs> with token-level detail.",
     noWalletYet: "No wallet activity yet.",
     columns: {
       order: "Order",
@@ -243,7 +245,8 @@ export default {
       payDesc: "Choose a method below. Card details are handled securely by Stripe.",
       youPay: "You pay (USD)",
       usdNote: "Charged 1:1 in USD — no exchange-rate markup.",
-      localizeNote: "Wallet credited 1:1 in USD; at checkout Stripe localizes the payment currency to your region (e.g. CNY for Alipay), which may include a ~2-4% FX fee.",
+      localizeNote:
+        "Wallet credited 1:1 in USD; at checkout Stripe localizes the payment currency to your region (e.g. CNY for Alipay), which may include a ~2-4% FX fee.",
       pay: "Pay {{amount}}",
       processing: "Processing…",
       confirming: "Confirming payment…",
@@ -260,8 +263,7 @@ export default {
 
   logs: {
     title: "Billing log",
-    sub:
-      "Every billed request on your account, broken down by token type, official rate, and group multiplier. Each row corresponds to a real wallet deduction.",
+    sub: "Every billed request on your account, broken down by token type, official rate, and group multiplier. Each row corresponds to a real wallet deduction.",
     summary: {
       requests: "Requests",
       sumIn: "Σ in (tok)",
@@ -358,14 +360,16 @@ export default {
       heading: "Pricing groups",
       newBtn: "+ New group",
       newTitle: "New pricing group",
-      newSub: "Final charge per request = upstream USD × multiplier. Lower multipliers mean lower user prices.",
+      newSub:
+        "Final charge per request = upstream USD × multiplier. Lower multipliers mean lower user prices.",
       labels: {
         name: "Name",
         desc: "Description",
         claudeMult: "Claude multiplier",
         codexMult: "Codex multiplier",
         credGroup: "Credential group (optional)",
-        credGroupHint: "Leave blank to allow any credential. Set a group name, such as \"premium\", to restrict this pricing group to credentials with the same label.",
+        credGroupHint:
+          'Leave blank to allow any credential. Set a group name, such as "premium", to restrict this pricing group to credentials with the same label.',
       },
       cols: {
         name: "Name",
@@ -375,7 +379,7 @@ export default {
       },
       created: "Group created",
       deleted: "Deleted",
-      confirmDelete: "Delete group \"{{name}}\"? Users in this group will be moved to default.",
+      confirmDelete: 'Delete group "{{name}}"? Users in this group will be moved to default.',
     },
     creds: {
       claudeTab: "Claude (Anthropic)",
@@ -397,8 +401,9 @@ export default {
       },
       remove: "Remove",
       removed: "Removed",
-      confirmRemove: "Remove credential \"{{name}}\"?",
-      kiroConfirmDelete: "Delete Kiro credential \"{{name}}\"? The account's refresh chain is NOT revoked — to actively log out, use the kirortrip tool.",
+      confirmRemove: 'Remove credential "{{name}}"?',
+      kiroConfirmDelete:
+        'Delete Kiro credential "{{name}}"? The account\'s refresh chain is NOT revoked — to actively log out, use the kirortrip tool.',
       maxConcurrent: "Max concurrent",
       modelMapLabel: "Model map (optional, JSON)",
       modelMapHint: "Rewrite requested model → upstream model, e.g. route opus to a cheaper tier.",
@@ -406,13 +411,15 @@ export default {
       addSessionCookie: "+ Session cookie",
       uploadJson: "Upload JSON",
       sessionCookieTitle: "Add via claude.com session cookie",
-      sessionCookieDesc: "Paste a claude.com sessionKey (sk-ant-sid…). A proxy is required — claude.com blocks server IPs without browser-grade TLS.",
+      sessionCookieDesc:
+        "Paste a claude.com sessionKey (sk-ant-sid…). A proxy is required — claude.com blocks server IPs without browser-grade TLS.",
       sessionCookieInvalid: "Session cookie must start with sk-ant-sid",
       sessionCookieProxyRequired: "A proxy URL is required for session-cookie login",
       sessionCookieAdded: "Added credential {{email}}",
       sessionCookieBusy: "Authorizing…",
       uploadTitle: "Upload {{provider}} credential JSON",
-      uploadDesc: "Paste a credential JSON exported from another instance. The kind (OAuth / API key) is inferred from its `type` field; the fields below override on import.",
+      uploadDesc:
+        "Paste a credential JSON exported from another instance. The kind (OAuth / API key) is inferred from its `type` field; the fields below override on import.",
       uploadContentLabel: "Credential JSON",
       uploadEmpty: "Paste a credential JSON first",
       uploadParseError: "JSON parse failed: {{msg}}",
@@ -420,7 +427,8 @@ export default {
       uploadBusy: "Importing…",
       uploadConfirm: "Import",
       newApiTitle: "Add API key",
-      newApiSub: "Stored encrypted at rest. Can be used as fallback when OAuth credentials are saturated or unavailable.",
+      newApiSub:
+        "Stored encrypted at rest. Can be used as fallback when OAuth credentials are saturated or unavailable.",
       newApiPlaceholder: "sk-ant-… or sk-…",
       newApiLabelPlaceholder: "label (optional)",
       newApiBaseUrlPlaceholder: "base_url override (optional)",
@@ -504,8 +512,7 @@ export default {
       stickyB:
         "Each client token gets a consistent upstream credential within its active window — preserving cache hits and conversation continuity.",
       ccT: "Claude Code native",
-      ccB:
-        "Full Claude Code fingerprinting for advisor mode, extended thinking, sub-agents, and MCP tools, forwarded with official CLI behavior.",
+      ccB: "Full Claude Code fingerprinting for advisor mode, extended thinking, sub-agents, and MCP tools, forwarded with official CLI behavior.",
       perTokenT: "Per-token access control",
       perTokenB:
         "Each token can carry its own monthly spending cap and uses server-side concurrency and RPM controls, keeping apps isolated from each other.",
@@ -552,15 +559,51 @@ export default {
     testimonialsTitle: "Teams keep their CLIs <hl>running</hl> on it.",
     testimonialsSub: "What operators say after moving their credential pools behind the gateway.",
     testimonials: [
-      { text: "We pooled six Claude subscriptions behind one endpoint. Sticky sessions kept our cache hits, and nobody changed a line of client config.", name: "Daniel Brooks", role: "Platform Lead" },
-      { text: "Adaptive routing quietly fails over when a credential hits its limit. Our Claude Code workflows just stopped hitting dead ends.", name: "Mira Sato", role: "Staff Engineer" },
-      { text: "One bearer token, both Claude and Codex. Routing by path meant we didn't have to maintain two integrations.", name: "Lukas Wagner", role: "Backend Lead" },
-      { text: "The per-token spending caps let us hand sandboxed access to each team without worrying about a runaway bill.", name: "Priya Nair", role: "Engineering Manager" },
-      { text: "The health dashboard reads like a status page. Hard failures rotate out on their own and we see it all per credential.", name: "Tom Eriksen", role: "SRE" },
-      { text: "Session continuity across turns is the part I didn't know I needed. Conversations keep their context even under load.", name: "Hannah Cole", role: "AI Engineer" },
-      { text: "Self-hosting was a single binary plus a Caddy site. It was forwarding traffic the same afternoon.", name: "Marco Bianchi", role: "DevOps" },
-      { text: "Concurrency and RPM controls per token keep one noisy app from starving the others. Isolation just works.", name: "Yuki Tanaka", role: "Tech Lead" },
-      { text: "It mirrors real Claude Code behavior closely enough that advisor mode, thinking, and sub-agents all pass through cleanly.", name: "Elena Rossi", role: "Product Engineer" },
+      {
+        text: "We pooled six Claude subscriptions behind one endpoint. Sticky sessions kept our cache hits, and nobody changed a line of client config.",
+        name: "Daniel Brooks",
+        role: "Platform Lead",
+      },
+      {
+        text: "Adaptive routing quietly fails over when a credential hits its limit. Our Claude Code workflows just stopped hitting dead ends.",
+        name: "Mira Sato",
+        role: "Staff Engineer",
+      },
+      {
+        text: "One bearer token, both Claude and Codex. Routing by path meant we didn't have to maintain two integrations.",
+        name: "Lukas Wagner",
+        role: "Backend Lead",
+      },
+      {
+        text: "The per-token spending caps let us hand sandboxed access to each team without worrying about a runaway bill.",
+        name: "Priya Nair",
+        role: "Engineering Manager",
+      },
+      {
+        text: "The health dashboard reads like a status page. Hard failures rotate out on their own and we see it all per credential.",
+        name: "Tom Eriksen",
+        role: "SRE",
+      },
+      {
+        text: "Session continuity across turns is the part I didn't know I needed. Conversations keep their context even under load.",
+        name: "Hannah Cole",
+        role: "AI Engineer",
+      },
+      {
+        text: "Self-hosting was a single binary plus a Caddy site. It was forwarding traffic the same afternoon.",
+        name: "Marco Bianchi",
+        role: "DevOps",
+      },
+      {
+        text: "Concurrency and RPM controls per token keep one noisy app from starving the others. Isolation just works.",
+        name: "Yuki Tanaka",
+        role: "Tech Lead",
+      },
+      {
+        text: "It mirrors real Claude Code behavior closely enough that advisor mode, thinking, and sub-agents all pass through cleanly.",
+        name: "Elena Rossi",
+        role: "Product Engineer",
+      },
     ],
 
     archEyebrow: "Architecture",
@@ -575,11 +618,7 @@ export default {
     ],
     archCta: "See architecture docs",
     archGatewayLabel: "gateway routing",
-    archCreds: [
-      "OAuth credential 1",
-      "OAuth credential 2",
-      "API key fallback",
-    ],
+    archCreds: ["OAuth credential 1", "OAuth credential 2", "API key fallback"],
     archStickyTag: "sticky",
     archNodes: {
       ccLabel: "Claude Code",
@@ -594,15 +633,18 @@ export default {
     workflowTitle: "Connect in three steps.",
     step: {
       registerT: "Create an account",
-      registerB: "Register and verify your email. Operators can add Anthropic or OpenAI credentials in the admin panel; the gateway handles routing.",
+      registerB:
+        "Register and verify your email. Operators can add Anthropic or OpenAI credentials in the admin panel; the gateway handles routing.",
       tokenT: "Issue a bearer token",
       tokenB: "Mint sk-cpa-• tokens per app or team, each with its own monthly spending cap.",
       pointT: "Point your CLI",
-      pointB: "Set ANTHROPIC_BASE_URL or OPENAI_BASE_URL and run claude or codex normally. Advisor, thinking, and sub-agents keep working.",
+      pointB:
+        "Set ANTHROPIC_BASE_URL or OPENAI_BASE_URL and run claude or codex normally. Advisor, thinking, and sub-agents keep working.",
     },
 
     ctaTitle: "Start using HypiToken.",
-    ctaSub: "Create an account, issue a token, and route Claude Code and Codex through one gateway.",
+    ctaSub:
+      "Create an account, issue a token, and route Claude Code and Codex through one gateway.",
     ctaCreate: "Create account",
     ctaReadDocs: "Read docs",
 
@@ -635,7 +677,8 @@ export default {
       codexMult: "Codex ×",
       credGroup: "Cred. group",
     },
-    per1m: "Per 1M tokens. Official rates shown; your effective price is the official rate × your group multiplier.",
+    per1m:
+      "Per 1M tokens. Official rates shown; your effective price is the official rate × your group multiplier.",
     modelTag: "Model",
     unit: "$ / M tokens",
     official: "Official",
@@ -778,7 +821,7 @@ export default {
         cacheW: "Cache W",
         cost: "Cost",
         status: "Status",
-      duration: "Duration",
+        duration: "Duration",
       },
       unnamed: "(unnamed)",
     },

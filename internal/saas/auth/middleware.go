@@ -12,8 +12,8 @@ import (
 type ctxKey string
 
 const (
-	CtxUser     ctxKey = "saas_user"
-	CtxClaims   ctxKey = "saas_claims"
+	CtxUser   ctxKey = "saas_user"
+	CtxClaims ctxKey = "saas_claims"
 )
 
 // RequireUser returns gin middleware that parses the Authorization: Bearer

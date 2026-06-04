@@ -1,20 +1,53 @@
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Eye,
+  EyeOff,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Terminal,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
-import { Plus, RefreshCw, Trash2, Copy, Check, Eye, EyeOff, Terminal, Pencil, X, ChevronUp, ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { GlassPanel, PageHeader } from "@/components/app/page-primitives";
 import { Reveal } from "@/components/landing/reveal";
-import { PageHeader, GlassPanel } from "@/components/app/page-primitives";
+import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useConfirm } from "@/components/ui/confirm-dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
-import { copyToClipboard, fmtUSD } from "@/lib/utils";
 import type { Channel, UserToken } from "@/lib/types";
+import { copyToClipboard, errMsg, fmtUSD } from "@/lib/utils";
 
 function detectOS(): "Windows" | "macOS" | "Linux" {
   const ua = navigator.userAgent;
@@ -36,7 +69,10 @@ export default function TokensPage() {
     const r = await apiGet<{ tokens: UserToken[] }>("/tokens");
     setTokens(r.tokens || []);
   };
-  useEffect(() => { refresh(); }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only fetch; refresh is a stable inline async fn intentionally not re-run on every render
+  useEffect(() => {
+    refresh();
+  }, []);
 
   return (
     <div className="space-y-8">
@@ -44,13 +80,19 @@ export default function TokensPage() {
         eyebrow={tt("nav.tokens")}
         title={tt("tokens.title")}
         sub={tt("tokens.sub")}
-        action={<Button onClick={() => setOpen(true)} className="gap-2"><Plus className="h-4 w-4" /> {tt("tokens.newToken")}</Button>}
+        action={
+          <Button onClick={() => setOpen(true)} className="gap-2">
+            <Plus className="h-4 w-4" /> {tt("tokens.newToken")}
+          </Button>
+        }
       />
 
       <Reveal>
         <GlassPanel bodyClassName="p-0">
           {tokens.length === 0 ? (
-            <div className="p-12 text-center text-sm text-muted-foreground">{tt("tokens.none")}</div>
+            <div className="p-12 text-center text-sm text-muted-foreground">
+              {tt("tokens.none")}
+            </div>
           ) : (
             <Table>
               <TableHeader>
@@ -65,14 +107,25 @@ export default function TokensPage() {
               <TableBody>
                 {tokens.map((t) => (
                   <TableRow key={t.id} className={t.disabled ? "opacity-50" : ""}>
-                    <TableCell className="font-medium">{t.name || <span className="text-muted-foreground">(unnamed)</span>}</TableCell>
+                    <TableCell className="font-medium">
+                      {t.name || <span className="text-muted-foreground">(unnamed)</span>}
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs">
-                          {reveal[t.id] ? t.token : t.token.slice(0, 12) + "…" + t.token.slice(-4)}
+                          {reveal[t.id] ? t.token : `${t.token.slice(0, 12)}…${t.token.slice(-4)}`}
                         </code>
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setReveal((r) => ({ ...r, [t.id]: !r[t.id] }))}>
-                          {reveal[t.id] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          onClick={() => setReveal((r) => ({ ...r, [t.id]: !r[t.id] }))}
+                        >
+                          {reveal[t.id] ? (
+                            <EyeOff className="h-3.5 w-3.5" />
+                          ) : (
+                            <Eye className="h-3.5 w-3.5" />
+                          )}
                         </Button>
                         <CopyBtn text={t.token} />
                       </div>
@@ -81,8 +134,12 @@ export default function TokensPage() {
                       {t.groups && t.groups.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
                           {t.groups.map((g, i) => (
-                            <span key={i} className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono">
-                              {i > 0 && <span className="mr-0.5 text-muted-foreground">→</span>}{g}
+                            <span
+                              key={g}
+                              className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono"
+                            >
+                              {i > 0 && <span className="mr-0.5 text-muted-foreground">→</span>}
+                              {g}
                             </span>
                           ))}
                         </div>
@@ -90,29 +147,61 @@ export default function TokensPage() {
                         <span className="text-xs text-muted-foreground">默认</span>
                       )}
                     </TableCell>
-                    <TableCell className="font-mono tabular-nums text-right">{t.monthly_usd_cap > 0 ? fmtUSD(t.monthly_usd_cap) : tt("common.unlimited")}</TableCell>
+                    <TableCell className="font-mono tabular-nums text-right">
+                      {t.monthly_usd_cap > 0 ? fmtUSD(t.monthly_usd_cap) : tt("common.unlimited")}
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
-                        <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => setUseToken(t)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 gap-1.5 text-xs"
+                          onClick={() => setUseToken(t)}
+                        >
                           <Terminal className="h-3.5 w-3.5" />
                           {tt("tokens.useToken")}
                         </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8" title="编辑" onClick={() => setEditToken(t)}>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          title="编辑"
+                          onClick={() => setEditToken(t)}
+                        >
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8" title={tt("tokens.rotate")} onClick={async () => {
-                          await apiPost(`/tokens/${t.id}/rotate`);
-                          toast.success(tt("tokens.rotated"));
-                          refresh();
-                        }}>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          title={tt("tokens.rotate")}
+                          onClick={async () => {
+                            await apiPost(`/tokens/${t.id}/rotate`);
+                            toast.success(tt("tokens.rotated"));
+                            refresh();
+                          }}
+                        >
                           <RefreshCw className="h-3.5 w-3.5" />
                         </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={async () => {
-                          if (!(await confirm({ title: tt("common.delete"), description: tt("tokens.confirmDelete"), confirmLabel: tt("common.delete"), destructive: true }))) return;
-                          await apiDelete(`/tokens/${t.id}`);
-                          toast.success(tt("tokens.deleted"));
-                          refresh();
-                        }}>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                          onClick={async () => {
+                            if (
+                              !(await confirm({
+                                title: tt("common.delete"),
+                                description: tt("tokens.confirmDelete"),
+                                confirmLabel: tt("common.delete"),
+                                destructive: true,
+                              }))
+                            )
+                              return;
+                            await apiDelete(`/tokens/${t.id}`);
+                            toast.success(tt("tokens.deleted"));
+                            refresh();
+                          }}
+                        >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -145,7 +234,10 @@ function ChannelPicker({ value, onChange }: { value: string[]; onChange: (v: str
       .finally(() => setLoaded(true));
   }, []);
 
-  const available = useMemo(() => channels.filter((c) => !value.includes(c.name)), [channels, value]);
+  const available = useMemo(
+    () => channels.filter((c) => !value.includes(c.name)),
+    [channels, value],
+  );
   const move = (i: number, delta: number) => {
     const j = i + delta;
     if (j < 0 || j >= value.length) return;
@@ -161,7 +253,10 @@ function ChannelPicker({ value, onChange }: { value: string[]; onChange: (v: str
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {value.map((g, i) => (
-            <span key={g} className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 py-0.5 pl-2 pr-0.5 text-xs">
+            <span
+              key={g}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 py-0.5 pl-2 pr-0.5 text-xs"
+            >
               <span className="font-mono text-muted-foreground">{i + 1}.</span>
               <span className="font-mono">{g}</span>
               <button
@@ -212,18 +307,28 @@ function ChannelPicker({ value, onChange }: { value: string[]; onChange: (v: str
         </Select>
       )}
       <p className="text-[11px] text-muted-foreground">
-        从左到右按优先级使用；前面的渠道不可用（配额耗尽 / 凭证全部冷却）时自动 fallthrough 到后面的。
+        从左到右按优先级使用；前面的渠道不可用（配额耗尽 / 凭证全部冷却）时自动 fallthrough
+        到后面的。
       </p>
     </div>
   );
 }
 
-function EditTokenDialog({ token, onClose, onSaved }: { token: UserToken | null; onClose: () => void; onSaved: () => void }) {
+function EditTokenDialog({
+  token,
+  onClose,
+  onSaved,
+}: {
+  token: UserToken | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [cap, setCap] = useState("");
   const [groups, setGroups] = useState<string[]>([]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally keyed on token.id only — re-syncs form when a different token is opened, not on every upstream property update
   useEffect(() => {
     if (!token) return;
     setName(token.name || "");
@@ -247,8 +352,8 @@ function EditTokenDialog({ token, onClose, onSaved }: { token: UserToken | null;
       toast.success("已更新");
       onSaved();
       onClose();
-    } catch (e: any) {
-      toast.error(e.message);
+    } catch (e) {
+      toast.error(errMsg(e));
     }
   };
 
@@ -257,7 +362,9 @@ function EditTokenDialog({ token, onClose, onSaved }: { token: UserToken | null;
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>编辑令牌</DialogTitle>
-          <DialogDescription>修改名称、月消费上限和渠道优先级。Token 本身不会变；如需更换 Token 请用「轮换」。</DialogDescription>
+          <DialogDescription>
+            修改名称、月消费上限和渠道优先级。Token 本身不会变；如需更换 Token 请用「轮换」。
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="space-y-2">
@@ -266,7 +373,13 @@ function EditTokenDialog({ token, onClose, onSaved }: { token: UserToken | null;
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-cap">{t("tokens.dialog.capLabel")}</Label>
-            <Input id="edit-cap" type="number" step="0.01" value={cap} onChange={(e) => setCap(e.target.value)} />
+            <Input
+              id="edit-cap"
+              type="number"
+              step="0.01"
+              value={cap}
+              onChange={(e) => setCap(e.target.value)}
+            />
           </div>
           <div className="space-y-2">
             <Label>渠道（按优先级排列）</Label>
@@ -274,7 +387,9 @@ function EditTokenDialog({ token, onClose, onSaved }: { token: UserToken | null;
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>{t("common.cancel")}</Button>
+          <Button variant="outline" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
           <Button onClick={submit}>保存</Button>
         </DialogFooter>
       </DialogContent>
@@ -285,11 +400,16 @@ function EditTokenDialog({ token, onClose, onSaved }: { token: UserToken | null;
 function CopyBtn({ text }: { text: string }) {
   const [done, setDone] = useState(false);
   return (
-    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={async () => {
-      await copyToClipboard(text);
-      setDone(true);
-      setTimeout(() => setDone(false), 1500);
-    }}>
+    <Button
+      size="icon"
+      variant="ghost"
+      className="h-7 w-7"
+      onClick={async () => {
+        await copyToClipboard(text);
+        setDone(true);
+        setTimeout(() => setDone(false), 1500);
+      }}
+    >
       {done ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
     </Button>
   );
@@ -302,6 +422,7 @@ function CodeBlock({ code }: { code: string }) {
   return (
     <div className="relative mt-3 w-full min-w-0 rounded-lg border border-border bg-[#0d1117]">
       <button
+        type="button"
         onClick={async () => {
           await copyToClipboard(code);
           setCopied(true);
@@ -312,7 +433,9 @@ function CodeBlock({ code }: { code: string }) {
         {copied ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
         {copied ? "Copied" : "Copy"}
       </button>
-      <pre className="overflow-x-auto px-4 py-4 pr-16 font-mono text-xs leading-relaxed text-zinc-200">{code}</pre>
+      <pre className="overflow-x-auto px-4 py-4 pr-16 font-mono text-xs leading-relaxed text-zinc-200">
+        {code}
+      </pre>
     </div>
   );
 }
@@ -419,7 +542,11 @@ npm install -g @openai/codex`,
           <DialogTitle className="flex items-center gap-2">
             <Terminal className="h-4 w-4" />
             {t("tokens.useTokenDialog.title")}
-            {token?.name && <span className="font-mono text-sm font-normal text-muted-foreground">· {token.name}</span>}
+            {token?.name && (
+              <span className="font-mono text-sm font-normal text-muted-foreground">
+                · {token.name}
+              </span>
+            )}
           </DialogTitle>
           <DialogDescription>{t("tokens.useTokenDialog.sub")}</DialogDescription>
         </DialogHeader>
@@ -429,6 +556,7 @@ npm install -g @openai/codex`,
           {(["macOS", "Windows", "Linux"] as const).map((s) => (
             <button
               key={s}
+              type="button"
               onClick={() => setOS(s)}
               className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                 os === s
@@ -444,22 +572,32 @@ npm install -g @openai/codex`,
         {/* Tool selector */}
         <Tabs defaultValue="claude-code" className="mt-2 min-w-0">
           <TabsList className="w-full">
-            <TabsTrigger value="claude-code" className="flex-1">Claude Code</TabsTrigger>
-            <TabsTrigger value="codex" className="flex-1">Codex CLI</TabsTrigger>
+            <TabsTrigger value="claude-code" className="flex-1">
+              Claude Code
+            </TabsTrigger>
+            <TabsTrigger value="codex" className="flex-1">
+              Codex CLI
+            </TabsTrigger>
           </TabsList>
 
           {/* Claude Code */}
           <TabsContent value="claude-code" className="space-y-4 pt-2 min-w-0">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">{t("tokens.useTokenDialog.step1Install")}</p>
+              <p className="text-sm font-medium text-muted-foreground">
+                {t("tokens.useTokenDialog.step1Install")}
+              </p>
               <CodeBlock code={claudeCodeInstall[os]} />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">{t("tokens.useTokenDialog.step2Config")}</p>
+              <p className="text-sm font-medium text-muted-foreground">
+                {t("tokens.useTokenDialog.step2Config")}
+              </p>
               <CodeBlock code={claudeCodeConfig[os]} />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">{t("tokens.useTokenDialog.step3Run")}</p>
+              <p className="text-sm font-medium text-muted-foreground">
+                {t("tokens.useTokenDialog.step3Run")}
+              </p>
               <CodeBlock code="claude" />
             </div>
           </TabsContent>
@@ -467,15 +605,21 @@ npm install -g @openai/codex`,
           {/* Codex CLI */}
           <TabsContent value="codex" className="space-y-4 pt-2 min-w-0">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">{t("tokens.useTokenDialog.step1Install")}</p>
+              <p className="text-sm font-medium text-muted-foreground">
+                {t("tokens.useTokenDialog.step1Install")}
+              </p>
               <CodeBlock code={codexInstall[os]} />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">{t("tokens.useTokenDialog.step2Config")}</p>
+              <p className="text-sm font-medium text-muted-foreground">
+                {t("tokens.useTokenDialog.step2Config")}
+              </p>
               <CodeBlock code={codexAuthJson[os]} />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">{t("tokens.useTokenDialog.step3Run")}</p>
+              <p className="text-sm font-medium text-muted-foreground">
+                {t("tokens.useTokenDialog.step3Run")}
+              </p>
               <CodeBlock code="codex" />
             </div>
           </TabsContent>
@@ -483,14 +627,24 @@ npm install -g @openai/codex`,
 
         <div className="min-w-0 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
           <div className="font-medium text-foreground">{t("tokens.useTokenDialog.yourToken")}</div>
-          <code className="mt-1 block w-full overflow-x-auto rounded bg-muted px-1.5 py-0.5 font-mono">{tk}</code>
+          <code className="mt-1 block w-full overflow-x-auto rounded bg-muted px-1.5 py-0.5 font-mono">
+            {tk}
+          </code>
         </div>
       </DialogContent>
     </Dialog>
   );
 }
 
-function CreateTokenDialog({ open, onOpenChange, onCreated }: any) {
+function CreateTokenDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onCreated: () => void;
+}) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [cap, setCap] = useState("");
@@ -506,9 +660,11 @@ function CreateTokenDialog({ open, onOpenChange, onCreated }: any) {
       toast.success(t("tokens.dialog.created"));
       onCreated();
       onOpenChange(false);
-      setName(""); setCap(""); setGroups([]);
-    } catch (e: any) {
-      toast.error(e.message);
+      setName("");
+      setCap("");
+      setGroups([]);
+    } catch (e) {
+      toast.error(errMsg(e));
     }
   };
 
@@ -522,11 +678,23 @@ function CreateTokenDialog({ open, onOpenChange, onCreated }: any) {
         <div className="grid gap-4 py-2">
           <div className="space-y-2">
             <Label htmlFor="name">{t("common.name")}</Label>
-            <Input id="name" placeholder={t("tokens.dialog.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              id="name"
+              placeholder={t("tokens.dialog.namePlaceholder")}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="cap">{t("tokens.dialog.capLabel")}</Label>
-            <Input id="cap" type="number" step="0.01" placeholder={t("tokens.dialog.capPlaceholder")} value={cap} onChange={(e) => setCap(e.target.value)} />
+            <Input
+              id="cap"
+              type="number"
+              step="0.01"
+              placeholder={t("tokens.dialog.capPlaceholder")}
+              value={cap}
+              onChange={(e) => setCap(e.target.value)}
+            />
             <p className="text-xs text-muted-foreground">{t("tokens.dialog.capHint")}</p>
           </div>
           <div className="space-y-2">
@@ -535,7 +703,9 @@ function CreateTokenDialog({ open, onOpenChange, onCreated }: any) {
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t("common.cancel")}
+          </Button>
           <Button onClick={submit}>{t("common.create")}</Button>
         </DialogFooter>
       </DialogContent>

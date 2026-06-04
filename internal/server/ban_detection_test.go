@@ -11,9 +11,9 @@ func TestParseClaudeUsageLimitBody(t *testing.T) {
 	future := now.Add(3 * time.Hour).Truncate(time.Second).Unix()
 
 	cases := []struct {
-		name      string
-		body      string
-		wantOK    bool
+		name       string
+		body       string
+		wantOK     bool
 		wantInPast bool // true => parsed t should be before now (i.e. fallback or no-op)
 	}{
 		{

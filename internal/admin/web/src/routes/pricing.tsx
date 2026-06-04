@@ -1,17 +1,24 @@
-import { lazy, Suspense, useEffect, useState } from "react";
 import {
-  Sparkles, Infinity as InfinityIcon, Wallet, Gauge, Receipt,
-  ArrowRight, Plus, Minus, ChevronDown,
+  ArrowRight,
+  ChevronDown,
+  Gauge,
+  Infinity as InfinityIcon,
+  Minus,
+  Plus,
+  Receipt,
+  Sparkles,
+  Wallet,
 } from "lucide-react";
-import { motion, AnimatePresence, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { PublicHeader } from "@/components/layout/shell";
-import { Reveal, RevealStagger, RevealItem } from "@/components/landing/reveal";
 import { SpotlightCard } from "@/components/landing/interactions";
+import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { useIsMobile, usePrefersReducedMotion } from "@/components/landing/use-media";
+import { PublicHeader } from "@/components/layout/shell";
 import { api } from "@/lib/api";
-import { cn } from "@/lib/utils";
 import type { PricingGroup } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const FloatingGeometry = lazy(() => import("@/components/landing/floating-geometry"));
 
@@ -19,27 +26,115 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 
 // Official Anthropic & OpenAI model pricing (USD per 1M tokens, as of May 2025)
 const CLAUDE_MODELS = [
-  { name: "claude-opus-4-7",   display: "Claude Opus 4.7",   tier: "flagship", input: 5.0, output: 25.0, cacheWrite: 6.25, cacheRead: 0.5 },
-  { name: "claude-opus-4-6",   display: "Claude Opus 4.6",   tier: "advanced", input: 5.0, output: 25.0, cacheWrite: 6.25, cacheRead: 0.5 },
-  { name: "claude-sonnet-4-6", display: "Claude Sonnet 4.6", tier: "balanced", input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
-  { name: "claude-sonnet-4-5", display: "Claude Sonnet 4.5", tier: "standard", input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
-  { name: "claude-haiku-4-5",  display: "Claude Haiku 4.5",  tier: "fast",     input: 1.0, output: 5.0,  cacheWrite: 1.25, cacheRead: 0.1 },
+  {
+    name: "claude-opus-4-7",
+    display: "Claude Opus 4.7",
+    tier: "flagship",
+    input: 5.0,
+    output: 25.0,
+    cacheWrite: 6.25,
+    cacheRead: 0.5,
+  },
+  {
+    name: "claude-opus-4-6",
+    display: "Claude Opus 4.6",
+    tier: "advanced",
+    input: 5.0,
+    output: 25.0,
+    cacheWrite: 6.25,
+    cacheRead: 0.5,
+  },
+  {
+    name: "claude-sonnet-4-6",
+    display: "Claude Sonnet 4.6",
+    tier: "balanced",
+    input: 3.0,
+    output: 15.0,
+    cacheWrite: 3.75,
+    cacheRead: 0.3,
+  },
+  {
+    name: "claude-sonnet-4-5",
+    display: "Claude Sonnet 4.5",
+    tier: "standard",
+    input: 3.0,
+    output: 15.0,
+    cacheWrite: 3.75,
+    cacheRead: 0.3,
+  },
+  {
+    name: "claude-haiku-4-5",
+    display: "Claude Haiku 4.5",
+    tier: "fast",
+    input: 1.0,
+    output: 5.0,
+    cacheWrite: 1.25,
+    cacheRead: 0.1,
+  },
 ];
 
 // Codex CLI OAuth models — covered by ChatGPT Plus/Pro/Team subscription.
 const CODEX_OAUTH_MODELS = [
-  { name: "gpt-5.5",         display: "GPT-5.5",       tier: "flagship", input: 5.0,  output: 30.0, cacheWrite: null, cacheRead: 0.5 },
-  { name: "gpt-5.4",         display: "GPT-5.4",       tier: "advanced", input: 2.5,  output: 15.0, cacheWrite: null, cacheRead: 0.25 },
-  { name: "gpt-5.4-mini",    display: "GPT-5.4 mini",  tier: "fast",     input: 0.75, output: 4.5,  cacheWrite: null, cacheRead: 0.075 },
-  { name: "gpt-5.3-codex",   display: "GPT-5.3 Codex", tier: "coding",   input: 1.75, output: 14.0, cacheWrite: null, cacheRead: 0.175 },
-  { name: "gpt-5.2",         display: "GPT-5.2",       tier: "standard", input: 1.5,  output: 6.0,  cacheWrite: null, cacheRead: null },
+  {
+    name: "gpt-5.5",
+    display: "GPT-5.5",
+    tier: "flagship",
+    input: 5.0,
+    output: 30.0,
+    cacheWrite: null,
+    cacheRead: 0.5,
+  },
+  {
+    name: "gpt-5.4",
+    display: "GPT-5.4",
+    tier: "advanced",
+    input: 2.5,
+    output: 15.0,
+    cacheWrite: null,
+    cacheRead: 0.25,
+  },
+  {
+    name: "gpt-5.4-mini",
+    display: "GPT-5.4 mini",
+    tier: "fast",
+    input: 0.75,
+    output: 4.5,
+    cacheWrite: null,
+    cacheRead: 0.075,
+  },
+  {
+    name: "gpt-5.3-codex",
+    display: "GPT-5.3 Codex",
+    tier: "coding",
+    input: 1.75,
+    output: 14.0,
+    cacheWrite: null,
+    cacheRead: 0.175,
+  },
+  {
+    name: "gpt-5.2",
+    display: "GPT-5.2",
+    tier: "standard",
+    input: 1.5,
+    output: 6.0,
+    cacheWrite: null,
+    cacheRead: null,
+  },
 ];
 
-type ModelRow = { name: string; display: string; tier: string; input: number; output: number; cacheWrite: number | null; cacheRead: number | null };
+type ModelRow = {
+  name: string;
+  display: string;
+  tier: string;
+  input: number;
+  output: number;
+  cacheWrite: number | null;
+  cacheRead: number | null;
+};
 
 // Format a USD/M-token rate: up to 3 decimals, trailing zeros trimmed ($5, $2.4, $0.075).
 function fmtPrice(n: number): string {
-  return "$" + n.toFixed(3).replace(/\.?0+$/, "");
+  return `$${n.toFixed(3).replace(/\.?0+$/, "")}`;
 }
 
 // ─── Hero ─────────────────────────────────────────────────────────────────────
@@ -60,7 +155,10 @@ function Hero() {
     <div className="relative overflow-hidden">
       {/* ambient floating geometry, far back, very subtle */}
       {showAmbient && (
-        <div aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-[420px] w-[420px] opacity-70 md:opacity-100">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-24 -top-24 h-[420px] w-[420px] opacity-70 md:opacity-100"
+        >
           <Suspense fallback={null}>
             <FloatingGeometry color="#34d399" />
           </Suspense>
@@ -80,7 +178,12 @@ function Hero() {
           {t("pricing.title")}
         </h1>
         <p className="mt-4 max-w-2xl text-base text-muted-foreground md:text-lg">
-          <Trans i18nKey="pricing.pageSub" components={{ code: <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs" /> }} />
+          <Trans
+            i18nKey="pricing.pageSub"
+            components={{
+              code: <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs" />,
+            }}
+          />
         </p>
       </Reveal>
       <Reveal delay={0.1} className="mt-7 flex flex-wrap gap-2.5">
@@ -101,32 +204,52 @@ function Hero() {
 // ─── Billing formula visualization — restrained skeuomorphic tiles ────────────
 
 function FormulaTile({
-  icon: Icon, label, hint, value, accent,
+  icon: Icon,
+  label,
+  hint,
+  value,
+  accent,
 }: {
-  icon: typeof Gauge; label: string; hint: string; value: string; accent?: boolean;
+  icon: typeof Gauge;
+  label: string;
+  hint: string;
+  value: string;
+  accent?: boolean;
 }) {
   return (
     <div
       className={cn(
         "glass relative flex flex-1 flex-col gap-3 rounded-2xl p-5",
-        accent && "ring-1 ring-primary/30"
+        accent && "ring-1 ring-primary/30",
       )}
     >
       {/* engraved top highlight for a tactile, skeuomorphic edge */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-px"
-        style={{ background: "linear-gradient(90deg, transparent, color-mix(in oklch, var(--primary) 40%, transparent), transparent)" }}
+        style={{
+          background:
+            "linear-gradient(90deg, transparent, color-mix(in oklch, var(--primary) 40%, transparent), transparent)",
+        }}
       />
-      <div className={cn(
-        "inline-flex h-9 w-9 items-center justify-center rounded-lg",
-        accent ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground"
-      )}>
+      <div
+        className={cn(
+          "inline-flex h-9 w-9 items-center justify-center rounded-lg",
+          accent ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground",
+        )}
+      >
         <Icon className="h-4.5 w-4.5" />
       </div>
       <div>
         <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className={cn("mt-1 font-display text-2xl font-semibold tracking-tight", accent && "text-primary")}>{value}</div>
+        <div
+          className={cn(
+            "mt-1 font-display text-2xl font-semibold tracking-tight",
+            accent && "text-primary",
+          )}
+        >
+          {value}
+        </div>
         <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
       </div>
     </div>
@@ -149,21 +272,48 @@ function BillingFormula() {
     <div>
       <Reveal>
         <span className="eyebrow text-primary">{t("pricing.viz.eyebrow")}</span>
-        <h2 className="mt-3 font-display text-2xl font-semibold tracking-tight md:text-3xl">{t("pricing.viz.title")}</h2>
+        <h2 className="mt-3 font-display text-2xl font-semibold tracking-tight md:text-3xl">
+          {t("pricing.viz.title")}
+        </h2>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{t("pricing.viz.sub")}</p>
       </Reveal>
 
       <RevealStagger className="mt-7 flex flex-col items-stretch gap-3 md:flex-row md:items-center">
         <RevealItem className="flex flex-1">
-          <FormulaTile icon={Gauge} label={t("pricing.viz.official")} hint={t("pricing.viz.officialHint")} value="$X" />
+          <FormulaTile
+            icon={Gauge}
+            label={t("pricing.viz.official")}
+            hint={t("pricing.viz.officialHint")}
+            value="$X"
+          />
         </RevealItem>
-        <RevealItem><Operator><Plus className="h-4 w-4 rotate-45" /></Operator></RevealItem>
-        <RevealItem className="flex flex-1">
-          <FormulaTile icon={Sparkles} label={t("pricing.viz.multiplier")} hint={t("pricing.viz.multiplierHint")} value="×N" />
+        <RevealItem>
+          <Operator>
+            <Plus className="h-4 w-4 rotate-45" />
+          </Operator>
         </RevealItem>
-        <RevealItem><Operator><Minus className="h-4 w-4" /><Minus className="-ml-2 h-4 w-4" /></Operator></RevealItem>
         <RevealItem className="flex flex-1">
-          <FormulaTile icon={Wallet} label={t("pricing.viz.charged")} hint={t("pricing.viz.chargedHint")} value="$Y" accent />
+          <FormulaTile
+            icon={Sparkles}
+            label={t("pricing.viz.multiplier")}
+            hint={t("pricing.viz.multiplierHint")}
+            value="×N"
+          />
+        </RevealItem>
+        <RevealItem>
+          <Operator>
+            <Minus className="h-4 w-4" />
+            <Minus className="-ml-2 h-4 w-4" />
+          </Operator>
+        </RevealItem>
+        <RevealItem className="flex flex-1">
+          <FormulaTile
+            icon={Wallet}
+            label={t("pricing.viz.charged")}
+            hint={t("pricing.viz.chargedHint")}
+            value="$Y"
+            accent
+          />
         </RevealItem>
       </RevealStagger>
 
@@ -194,14 +344,22 @@ function PriceCol({ label, official, mult }: { label: string; official: number; 
         <>
           <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="opacity-70">{t("pricing.official")}</span>
-            <span className="font-mono line-through decoration-muted-foreground/40">{fmtPrice(official)}</span>
+            <span className="font-mono line-through decoration-muted-foreground/40">
+              {fmtPrice(official)}
+            </span>
           </div>
-          <div className="font-display text-2xl font-semibold tabular-nums text-primary">{fmtPrice(official * mult)}</div>
+          <div className="font-display text-2xl font-semibold tabular-nums text-primary">
+            {fmtPrice(official * mult)}
+          </div>
         </>
       ) : (
-        <div className="mt-1 font-display text-2xl font-semibold tabular-nums">{fmtPrice(official)}</div>
+        <div className="mt-1 font-display text-2xl font-semibold tabular-nums">
+          {fmtPrice(official)}
+        </div>
       )}
-      <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">{t("pricing.unit")}</div>
+      <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+        {t("pricing.unit")}
+      </div>
     </div>
   );
 }
@@ -217,8 +375,18 @@ function CacheRow({ label, value, mult }: { label: string; value: number | null;
   );
 }
 
-function ModelCard({ m, mult, featured, index, reduce }: {
-  m: ModelRow; mult: number; featured?: boolean; index: number; reduce: boolean;
+function ModelCard({
+  m,
+  mult,
+  featured,
+  index,
+  reduce,
+}: {
+  m: ModelRow;
+  mult: number;
+  featured?: boolean;
+  index: number;
+  reduce: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -228,14 +396,17 @@ function ModelCard({ m, mult, featured, index, reduce }: {
       transition={{ duration: 0.45, delay: index * 0.05, ease: EASE }}
       className={cn(
         "glass group relative flex flex-col overflow-hidden rounded-2xl p-5 transition-transform duration-300 hover:-translate-y-0.5",
-        featured && "sm:col-span-2 lg:row-span-2 lg:col-span-2"
+        featured && "sm:col-span-2 lg:row-span-2 lg:col-span-2",
       )}
     >
       {/* engraved top highlight */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-px"
-        style={{ background: "linear-gradient(90deg, transparent, color-mix(in oklch, var(--primary) 40%, transparent), transparent)" }}
+        style={{
+          background:
+            "linear-gradient(90deg, transparent, color-mix(in oklch, var(--primary) 40%, transparent), transparent)",
+        }}
       />
       {/* concentric-ripple badge on the featured card */}
       {featured && (
@@ -251,10 +422,17 @@ function ModelCard({ m, mult, featured, index, reduce }: {
       <div className="relative flex items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-display text-sm font-medium text-foreground">{t(`pricing.tiers.${m.tier}`)}</span>
+            <span className="font-display text-sm font-medium text-foreground">
+              {t(`pricing.tiers.${m.tier}`)}
+            </span>
             <span className="text-xs text-muted-foreground">{t("pricing.modelTag")}</span>
           </div>
-          <div className={cn("mt-1 font-mono font-semibold text-primary", featured ? "text-xl md:text-2xl" : "text-base md:text-lg")}>
+          <div
+            className={cn(
+              "mt-1 font-mono font-semibold text-primary",
+              featured ? "text-xl md:text-2xl" : "text-base md:text-lg",
+            )}
+          >
             {m.name}
           </div>
         </div>
@@ -290,7 +468,14 @@ function ModelBento({ models, mult }: { models: ModelRow[]; mult: number }) {
     <div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:grid-rows-2">
         {models.map((m, i) => (
-          <ModelCard key={m.name} m={m} mult={mult} featured={i === 0} index={i} reduce={!!reduce} />
+          <ModelCard
+            key={m.name}
+            m={m}
+            mult={mult}
+            featured={i === 0}
+            index={i}
+            reduce={!!reduce}
+          />
         ))}
       </div>
       <p className="mt-4 text-xs text-muted-foreground">{t("pricing.per1m")}</p>
@@ -302,9 +487,22 @@ function ModelTables({ claudeMult, codexMult }: { claudeMult: number; codexMult:
   const { t } = useTranslation();
   const [tab, setTab] = useState<"claude" | "codex">("claude");
   const tabs = [
-    { id: "claude" as const, label: t("pricing.claudeTitle"), sub: t("pricing.claudeSub"), models: CLAUDE_MODELS, mult: claudeMult },
-    { id: "codex" as const, label: t("pricing.codexTitle"), sub: t("pricing.codexSub"), models: CODEX_OAUTH_MODELS, mult: codexMult },
+    {
+      id: "claude" as const,
+      label: t("pricing.claudeTitle"),
+      sub: t("pricing.claudeSub"),
+      models: CLAUDE_MODELS,
+      mult: claudeMult,
+    },
+    {
+      id: "codex" as const,
+      label: t("pricing.codexTitle"),
+      sub: t("pricing.codexSub"),
+      models: CODEX_OAUTH_MODELS,
+      mult: codexMult,
+    },
   ];
+  // biome-ignore lint/style/noNonNullAssertion: tab state is always one of the two tab ids defined above
   const active = tabs.find((x) => x.id === tab)!;
 
   return (
@@ -313,18 +511,23 @@ function ModelTables({ claudeMult, codexMult }: { claudeMult: number; codexMult:
         <span className="eyebrow text-primary">{t("pricing.tablesEyebrow")}</span>
         <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="font-display text-2xl font-semibold tracking-tight md:text-3xl">{active.label}</h2>
+            <h2 className="font-display text-2xl font-semibold tracking-tight md:text-3xl">
+              {active.label}
+            </h2>
             <p className="mt-1 max-w-xl text-sm text-muted-foreground">{active.sub}</p>
           </div>
           {/* segmented control */}
           <div className="glass inline-flex rounded-full p-1 text-sm">
             {tabs.map((x) => (
               <button
+                type="button"
                 key={x.id}
                 onClick={() => setTab(x.id)}
                 className={cn(
                   "relative rounded-full px-4 py-1.5 font-medium transition-colors",
-                  tab === x.id ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  tab === x.id
+                    ? "text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 {tab === x.id && (
@@ -367,8 +570,12 @@ function AccessGroups({ groups }: { groups: PricingGroup[] }) {
     <div>
       <Reveal>
         <span className="eyebrow text-primary">{t("pricing.accessGroupsTitle")}</span>
-        <h2 className="mt-3 font-display text-2xl font-semibold tracking-tight md:text-3xl">{t("pricing.accessGroupsTitle")}</h2>
-        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{t("pricing.accessGroupsSub")}</p>
+        <h2 className="mt-3 font-display text-2xl font-semibold tracking-tight md:text-3xl">
+          {t("pricing.accessGroupsTitle")}
+        </h2>
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          {t("pricing.accessGroupsSub")}
+        </p>
       </Reveal>
       <RevealStagger className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {groups.map((g) => (
@@ -382,7 +589,9 @@ function AccessGroups({ groups }: { groups: PricingGroup[] }) {
                   </span>
                 )}
               </div>
-              {g.Description && <p className="mt-1 text-xs text-muted-foreground">{g.Description}</p>}
+              {g.Description && (
+                <p className="mt-1 text-xs text-muted-foreground">{g.Description}</p>
+              )}
               <div className="mt-4 space-y-2">
                 <MultRow label="Claude" value={g.ClaudeMultiplier} />
                 <MultRow label="Codex" value={g.CodexMultiplier} />
@@ -420,11 +629,17 @@ function FaqItem({ q, a, defaultOpen }: { q: string; a: React.ReactNode; default
   return (
     <div className="glass overflow-hidden rounded-2xl">
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left"
       >
         <span className="font-medium">{q}</span>
-        <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-300", open && "rotate-180 text-primary")} />
+        <ChevronDown
+          className={cn(
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-300",
+            open && "rotate-180 text-primary",
+          )}
+        />
       </button>
       <AnimatePresence initial={false}>
         {open && (
@@ -445,19 +660,32 @@ function FaqItem({ q, a, defaultOpen }: { q: string; a: React.ReactNode; default
 
 function Faq() {
   const { t } = useTranslation();
-  const logsLink = <a className="text-primary underline-offset-2 hover:underline" href="/app/logs" />;
+  const logsLink = (
+    // biome-ignore lint/a11y/useAnchorContent: Trans component fills in the link text from the translation string
+    <a className="text-primary underline-offset-2 hover:underline" href="/app/logs" />
+  );
   return (
     <div>
       <Reveal>
         <span className="eyebrow text-primary">{t("pricing.faqEyebrow")}</span>
-        <h2 className="mt-3 font-display text-2xl font-semibold tracking-tight md:text-3xl">{t("pricing.faqTitle")}</h2>
+        <h2 className="mt-3 font-display text-2xl font-semibold tracking-tight md:text-3xl">
+          {t("pricing.faqTitle")}
+        </h2>
       </Reveal>
       <RevealStagger className="mt-6 space-y-3">
         <RevealItem>
-          <FaqItem defaultOpen q={t("pricing.faq.q1")} a={<Trans i18nKey="pricing.faq.a1" components={{ logs: logsLink }} />} />
+          <FaqItem
+            defaultOpen
+            q={t("pricing.faq.q1")}
+            a={<Trans i18nKey="pricing.faq.a1" components={{ logs: logsLink }} />}
+          />
         </RevealItem>
-        <RevealItem><FaqItem q={t("pricing.faq.q2")} a={t("pricing.faq.a2")} /></RevealItem>
-        <RevealItem><FaqItem q={t("pricing.faq.q3")} a={t("pricing.faq.a3")} /></RevealItem>
+        <RevealItem>
+          <FaqItem q={t("pricing.faq.q2")} a={t("pricing.faq.a2")} />
+        </RevealItem>
+        <RevealItem>
+          <FaqItem q={t("pricing.faq.q3")} a={t("pricing.faq.a3")} />
+        </RevealItem>
       </RevealStagger>
     </div>
   );
@@ -473,9 +701,14 @@ function PricingCta() {
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 -z-10"
-          style={{ background: "radial-gradient(70% 120% at 50% 0%, color-mix(in oklch, var(--primary) 14%, transparent), transparent 70%)" }}
+          style={{
+            background:
+              "radial-gradient(70% 120% at 50% 0%, color-mix(in oklch, var(--primary) 14%, transparent), transparent 70%)",
+          }}
         />
-        <h2 className="mx-auto max-w-2xl font-display text-2xl font-semibold tracking-tight md:text-3xl">{t("pricing.viz.title")}</h2>
+        <h2 className="mx-auto max-w-2xl font-display text-2xl font-semibold tracking-tight md:text-3xl">
+          {t("pricing.viz.title")}
+        </h2>
         <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground">{t("pricing.sub")}</p>
         <a
           href="/app/register"

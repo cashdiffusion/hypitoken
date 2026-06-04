@@ -3,7 +3,7 @@
 // once, so the reader picks their platform a single time. The default is
 // detected from the browser UA; the choice is then persisted to localStorage.
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
 
 export type OS = "macOS" | "Windows" | "Linux";
 
@@ -24,8 +24,9 @@ export function isOSGroup(labels: string[]): boolean {
 // macOS — the most common dev laptop and a safe Unix-style default.
 export function detectOS(): OS {
   if (typeof navigator === "undefined") return "macOS";
-  const uaData = (navigator as any).userAgentData;
-  const hint = `${uaData?.platform || ""} ${navigator.platform || ""} ${navigator.userAgent || ""}`.toLowerCase();
+  const uaData = (navigator as unknown as { userAgentData?: { platform?: string } }).userAgentData;
+  const hint =
+    `${uaData?.platform || ""} ${navigator.platform || ""} ${navigator.userAgent || ""}`.toLowerCase();
   if (/win/.test(hint)) return "Windows";
   if (/mac/.test(hint)) return "macOS";
   if (/linux|x11|ubuntu|debian|fedora|cros/.test(hint)) return "Linux";

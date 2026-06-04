@@ -1,8 +1,22 @@
-import { clsx, type ClassValue } from "clsx";
+import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { ApiError } from "@/lib/api";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+// errMsg / errStatus normalize the `unknown` value of a strict-mode catch
+// binding into the message + HTTP status the UI wants, without sprinkling
+// `e: any` casts at every call site.
+export function errMsg(e: unknown, fallback = "操作失败"): string {
+  if (e instanceof Error) return e.message || fallback;
+  if (typeof e === "string") return e || fallback;
+  return fallback;
+}
+
+export function errStatus(e: unknown): number | undefined {
+  return e instanceof ApiError ? e.status : undefined;
 }
 
 export const fmtInt = (n: number | null | undefined): string => {
@@ -39,7 +53,6 @@ export async function copyToClipboard(text: string): Promise<void> {
   ta.style.left = "-9999px";
   document.body.appendChild(ta);
   ta.select();
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  (document as any).execCommand("copy");
+  document.execCommand("copy");
   document.body.removeChild(ta);
 }

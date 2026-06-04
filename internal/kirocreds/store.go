@@ -30,17 +30,17 @@ import (
 
 // Entry is one stored Kiro credential.
 type Entry struct {
-	ID         string                `json:"id"`
-	Label      string                `json:"label,omitempty"`
-	Group      string                `json:"group,omitempty"` // for future per-credential group scoping
-	Disabled   bool                  `json:"disabled,omitempty"`
+	ID       string `json:"id"`
+	Label    string `json:"label,omitempty"`
+	Group    string `json:"group,omitempty"` // for future per-credential group scoping
+	Disabled bool   `json:"disabled,omitempty"`
 	// MaxConcurrent is the per-credential in-flight request cap. 0 = unlimited.
 	// Enforced by Store.Acquire/Release; the live active counter lives in
 	// Store.active (process-local, not persisted).
-	MaxConcurrent int                `json:"max_concurrent,omitempty"`
-	CreatedAt  time.Time             `json:"created_at"`
-	UpdatedAt  time.Time             `json:"updated_at,omitempty"`
-	Cred       kiroauth.Credentials  `json:"credentials"`
+	MaxConcurrent int                  `json:"max_concurrent,omitempty"`
+	CreatedAt     time.Time            `json:"created_at"`
+	UpdatedAt     time.Time            `json:"updated_at,omitempty"`
+	Cred          kiroauth.Credentials `json:"credentials"`
 }
 
 // MaskedToken returns Cred.AccessToken with all but the first 10 chars masked.
@@ -106,8 +106,8 @@ func (s *Store) List() []*Entry {
 	defer s.mu.RUnlock()
 	out := make([]*Entry, 0, len(s.entries))
 	for _, e := range s.entries {
-		copy := *e
-		out = append(out, &copy)
+		cp := *e
+		out = append(out, &cp)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out
@@ -121,8 +121,8 @@ func (s *Store) Get(id string) (*Entry, bool) {
 	if !ok {
 		return nil, false
 	}
-	copy := *e
-	return &copy, true
+	cp := *e
+	return &cp, true
 }
 
 // HealthyEntries returns enabled entries whose AccessToken is non-empty.
@@ -135,8 +135,8 @@ func (s *Store) HealthyEntries() []*Entry {
 		if e.Disabled || e.Cred.AccessToken == "" {
 			continue
 		}
-		copy := *e
-		out = append(out, &copy)
+		cp := *e
+		out = append(out, &cp)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out
@@ -204,8 +204,8 @@ func (s *Store) Update(id string, label *string, group *string, disabled *bool, 
 	if err := s.saveEntryLocked(e); err != nil {
 		return nil, err
 	}
-	copy := *e
-	return &copy, nil
+	cp := *e
+	return &cp, nil
 }
 
 // Acquire reserves an in-flight slot on the given entry. Returns false when
@@ -218,7 +218,7 @@ func (s *Store) Acquire(id string) bool {
 		s.mu.RUnlock()
 		return false
 	}
-	cap := e.MaxConcurrent
+	capacity := e.MaxConcurrent
 	counter := s.active[id]
 	s.mu.RUnlock()
 	if counter == nil {
@@ -231,13 +231,13 @@ func (s *Store) Acquire(id string) bool {
 		}
 		s.mu.Unlock()
 	}
-	if cap <= 0 {
+	if capacity <= 0 {
 		atomic.AddInt64(counter, 1)
 		return true
 	}
 	for {
 		cur := atomic.LoadInt64(counter)
-		if cur >= int64(cap) {
+		if cur >= int64(capacity) {
 			return false
 		}
 		if atomic.CompareAndSwapInt64(counter, cur, cur+1) {

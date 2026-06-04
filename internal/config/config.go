@@ -6,19 +6,19 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/CPA-Claude/internal/saas"
 	"github.com/wjsoj/CPA-Claude/internal/shop"
+	"github.com/wjsoj/cc-core/pricing"
 	"gopkg.in/yaml.v3"
 )
 
 type APIKey struct {
-	Key      string            `yaml:"key"`
-	Provider string            `yaml:"provider,omitempty"` // "anthropic" | "openai"; empty = anthropic (legacy)
-	ProxyURL string            `yaml:"proxy_url,omitempty"`
-	Label    string            `yaml:"label,omitempty"`
-	BaseURL  string            `yaml:"base_url,omitempty"`
-	Group    string            `yaml:"group,omitempty"`
+	Key      string `yaml:"key"`
+	Provider string `yaml:"provider,omitempty"` // "anthropic" | "openai"; empty = anthropic (legacy)
+	ProxyURL string `yaml:"proxy_url,omitempty"`
+	Label    string `yaml:"label,omitempty"`
+	BaseURL  string `yaml:"base_url,omitempty"`
+	Group    string `yaml:"group,omitempty"`
 	// ModelMap routes/rewrites client-facing model names to upstream model
 	// names. See auth.Auth.ModelMap. Non-empty map turns this key into a
 	// model-restricted credential. Empty = wildcard.

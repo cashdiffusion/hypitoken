@@ -35,7 +35,10 @@ export function FeatureShowcase({ cards, wideTitle, wideLabels }: FeatureShowcas
   ];
 
   return (
-    <div className="mx-auto grid max-w-6xl gap-4 lg:grid-cols-2">
+    // grid-cols-1 (not implicit) is required: an implicit single column sizes
+    // to the cards' max-content (~527px) and overflows phones; minmax(0,1fr)
+    // lets the cards fill and shrink so their visuals scroll within instead.
+    <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 lg:grid-cols-2">
       {cards.map((c) => (
         <FeatureCard key={c.title}>
           <CardHeading icon={c.icon} label={c.label} title={c.title} body={c.body} />
@@ -60,7 +63,7 @@ export function FeatureShowcase({ cards, wideTitle, wideLabels }: FeatureShowcas
         <div className="flex justify-center gap-6 overflow-hidden">
           {clusters.map((circles, i) => (
             <CircularUI
-              key={i}
+              key={circles.map((c) => c.pattern).join("-")}
               label={wideLabels[i] ?? ""}
               circles={circles}
               className={i === 3 ? "hidden sm:block" : undefined}
@@ -112,8 +115,12 @@ function CardHeading({
     <div className="relative p-6">
       <RippleBadge icon={Icon} className="absolute right-6 top-6" />
       <span className="text-sm text-muted-foreground">{label}</span>
-      <p className="mt-4 max-w-[85%] font-display text-2xl font-semibold tracking-tight text-foreground">{title}</p>
-      {body && <p className="mt-2 max-w-[92%] text-sm leading-relaxed text-muted-foreground">{body}</p>}
+      <p className="mt-4 max-w-[85%] font-display text-2xl font-semibold tracking-tight text-foreground">
+        {title}
+      </p>
+      {body && (
+        <p className="mt-2 max-w-[92%] text-sm leading-relaxed text-muted-foreground">{body}</p>
+      )}
     </div>
   );
 }
@@ -128,8 +135,14 @@ function RippleBadge({ icon: Icon, className }: { icon: ElementType; className?:
         className,
       )}
     >
-      <span aria-hidden className="absolute inset-0 scale-[1.35] rounded-full ring-1 ring-primary/15" />
-      <span aria-hidden className="absolute inset-0 scale-[1.7] rounded-full ring-1 ring-primary/[0.08]" />
+      <span
+        aria-hidden
+        className="absolute inset-0 scale-[1.35] rounded-full ring-1 ring-primary/15"
+      />
+      <span
+        aria-hidden
+        className="absolute inset-0 scale-[1.7] rounded-full ring-1 ring-primary/[0.08]"
+      />
       <Icon className="size-5" />
     </span>
   );
@@ -139,7 +152,15 @@ interface CircleConfig {
   pattern: "none" | "border" | "primary" | "info";
 }
 
-function CircularUI({ label, circles, className }: { label: string; circles: CircleConfig[]; className?: string }) {
+function CircularUI({
+  label,
+  circles,
+  className,
+}: {
+  label: string;
+  circles: CircleConfig[];
+  className?: string;
+}) {
   const stripe = (color: string) =>
     `repeating-linear-gradient(-45deg, ${color}, ${color} 1px, transparent 1px, transparent 4px)`;
   return (
@@ -148,6 +169,7 @@ function CircularUI({ label, circles, className }: { label: string; circles: Cir
         <div className="relative flex aspect-square w-fit items-center -space-x-4 rounded-[15px] bg-gradient-to-b from-background to-muted/25 p-4">
           {circles.map((circle, i) => (
             <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: static decorative list — circle positions are purely positional within a fixed-size cluster
               key={i}
               className="size-7 rounded-full border border-primary sm:size-8"
               style={

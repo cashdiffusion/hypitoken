@@ -4,9 +4,9 @@
 // pick up the change.
 
 import { Globe } from "lucide-react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { useEffect } from "react";
 
 export function LanguageToggle() {
   const { i18n, t } = useTranslation();

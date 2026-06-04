@@ -17,6 +17,7 @@ export function Sparkline({ data, className }: { data: SparkPoint[]; className?:
         const pct = Math.round((d.value / max) * 100);
         return (
           <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: positional sparkline bars have no stable unique id
             key={i}
             title={`${d.label}: ${d.value.toLocaleString()}`}
             className={cn(

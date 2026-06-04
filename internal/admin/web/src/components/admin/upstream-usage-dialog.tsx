@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
 import { Gauge, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { apiPost } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { apiPost } from "@/lib/api";
+import { cn, errMsg } from "@/lib/utils";
 
 // ---- Anthropic shape (api.anthropic.com/api/oauth/usage) ----
 interface UsageWindow {
@@ -127,7 +127,9 @@ function codexReset(w?: CodexUsageRateWindow): string {
 // collectCodexWindows flattens the main rate_limit and every
 // additional_rate_limits[] entry into a single labelled list, so all windows —
 // including the weekly one wherever the portal puts it — render.
-function collectCodexWindows(u: CodexUsageResponse["usage"]): { label: string; w: CodexUsageRateWindow }[] {
+function collectCodexWindows(
+  u: CodexUsageResponse["usage"],
+): { label: string; w: CodexUsageRateWindow }[] {
   const out: { label: string; w: CodexUsageRateWindow }[] = [];
   const push = (w: CodexUsageRateWindow | undefined, fallback: string, prefix?: string) => {
     if (!w) return;
@@ -147,7 +149,10 @@ function collectCodexWindows(u: CodexUsageResponse["usage"]): { label: string; w
   return out;
 }
 
-const ANTHROPIC_WINDOWS: [keyof NonNullable<NonNullable<AnthropicResponse["usage"]>["body"]>, string][] = [
+const ANTHROPIC_WINDOWS: [
+  keyof NonNullable<NonNullable<AnthropicResponse["usage"]>["body"]>,
+  string,
+][] = [
   ["five_hour", "5-hour"],
   ["seven_day", "7-day"],
   ["seven_day_oauth_apps", "7-day OAuth"],
@@ -164,10 +169,10 @@ function pctColor(raw: number | undefined | null): { pct: number | null; color: 
     pct == null
       ? "bg-muted"
       : pct >= 90
-      ? "bg-red-500"
-      : pct >= 70
-      ? "bg-amber-500"
-      : "bg-emerald-500";
+        ? "bg-red-500"
+        : pct >= 70
+          ? "bg-amber-500"
+          : "bg-emerald-500";
   return { pct, color };
 }
 
@@ -181,10 +186,10 @@ function pctColorPct(raw: number | undefined | null): { pct: number | null; colo
     pct == null
       ? "bg-muted"
       : pct >= 90
-      ? "bg-red-500"
-      : pct >= 70
-      ? "bg-amber-500"
-      : "bg-emerald-500";
+        ? "bg-red-500"
+        : pct >= 70
+          ? "bg-amber-500"
+          : "bg-emerald-500";
   return { pct, color };
 }
 
@@ -226,20 +231,20 @@ export function UpstreamUsageDialog({ authId, authLabel, provider = "anthropic",
         `/admin/credentials/${encodeURIComponent(authId)}/${endpoint}`,
       );
       setData(d);
-    } catch (e: any) {
-      setErr(e.message || String(e));
+    } catch (e) {
+      setErr(errMsg(e, String(e)));
     } finally {
       setBusy(false);
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run is defined in the component body and intentionally excluded; authId/provider are the real triggers
   useEffect(() => {
     if (authId) {
       setData(null);
       setErr("");
       run();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authId, provider]);
 
   return (
@@ -257,9 +262,19 @@ export function UpstreamUsageDialog({ authId, authLabel, provider = "anthropic",
           </DialogTitle>
         </DialogHeader>
         {provider === "openai" ? (
-          <CodexUsageBody data={data as CodexUsageResponse | null} busy={busy} err={err} onRefresh={run} />
+          <CodexUsageBody
+            data={data as CodexUsageResponse | null}
+            busy={busy}
+            err={err}
+            onRefresh={run}
+          />
         ) : (
-          <AnthropicUsageBody data={data as AnthropicResponse | null} busy={busy} err={err} onRefresh={run} />
+          <AnthropicUsageBody
+            data={data as AnthropicResponse | null}
+            busy={busy}
+            err={err}
+            onRefresh={run}
+          />
         )}
       </DialogContent>
     </Dialog>
@@ -286,20 +301,40 @@ function AnthropicUsageBody({
       <div className="flex items-center justify-between text-sm text-muted-foreground">
         <div>
           {profile?.email_address || profile?.email || "—"}
-          {tier ? <span className="ml-2 font-mono text-xs">{t("legacy.upstreamUsage.tierLabel", { tier })}</span> : null}
-          {profile?.has_claude_max ? <span className="ml-2 font-mono text-xs uppercase text-success">{t("legacy.upstreamUsage.maxBadge")}</span> : null}
-          {profile?.has_claude_pro ? <span className="ml-2 font-mono text-xs uppercase text-success">{t("legacy.upstreamUsage.proBadge")}</span> : null}
+          {tier ? (
+            <span className="ml-2 font-mono text-xs">
+              {t("legacy.upstreamUsage.tierLabel", { tier })}
+            </span>
+          ) : null}
+          {profile?.has_claude_max ? (
+            <span className="ml-2 font-mono text-xs uppercase text-success">
+              {t("legacy.upstreamUsage.maxBadge")}
+            </span>
+          ) : null}
+          {profile?.has_claude_pro ? (
+            <span className="ml-2 font-mono text-xs uppercase text-success">
+              {t("legacy.upstreamUsage.proBadge")}
+            </span>
+          ) : null}
         </div>
         <Button size="sm" variant="ghost" disabled={busy} onClick={onRefresh}>
-          <RefreshCw className={cn("size-3", busy && "animate-spin")} /> {t("legacy.upstreamUsage.probe")}
+          <RefreshCw className={cn("size-3", busy && "animate-spin")} />{" "}
+          {t("legacy.upstreamUsage.probe")}
         </Button>
       </div>
 
-      {err && <div className="rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{err}</div>}
+      {err && (
+        <div className="rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          {err}
+        </div>
+      )}
 
       {data?.usage?.status && data.usage.status >= 400 ? (
         <div className="rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-          {t("legacy.upstreamUsage.httpError", { status: data.usage.status, message: data.usage.error || t("legacy.upstreamUsage.upstreamError") })}
+          {t("legacy.upstreamUsage.httpError", {
+            status: data.usage.status,
+            message: data.usage.error || t("legacy.upstreamUsage.upstreamError"),
+          })}
         </div>
       ) : null}
 
@@ -315,11 +350,16 @@ function AnthropicUsageBody({
                   <span className="font-medium">{label}</span>
                   <span className="font-mono text-muted-foreground">
                     {pct != null ? `${pct}%` : "—"}
-                    {w.resets_at ? t("legacy.upstreamUsage.resetsIn", { when: fmtCountdown(w.resets_at) }) : ""}
+                    {w.resets_at
+                      ? t("legacy.upstreamUsage.resetsIn", { when: fmtCountdown(w.resets_at) })
+                      : ""}
                   </span>
                 </div>
                 <div className="h-2 rounded-full bg-muted">
-                  <div className={cn("h-full rounded-full", color)} style={{ width: `${pct ?? 0}%` }} />
+                  <div
+                    className={cn("h-full rounded-full", color)}
+                    style={{ width: `${pct ?? 0}%` }}
+                  />
                 </div>
               </div>
             );
@@ -328,7 +368,9 @@ function AnthropicUsageBody({
       )}
 
       {!data && !err && busy && (
-        <div className="text-center py-6 text-sm text-muted-foreground">{t("legacy.upstreamUsage.querying")}</div>
+        <div className="text-center py-6 text-sm text-muted-foreground">
+          {t("legacy.upstreamUsage.querying")}
+        </div>
       )}
     </div>
   );
@@ -379,32 +421,50 @@ function CodexUsageBody({
         </Button>
       </div>
 
-      {err && <div className="rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{err}</div>}
+      {err && (
+        <div className="rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          {err}
+        </div>
+      )}
 
       {windows.length > 0 && (
         <div className="overflow-hidden rounded-md border border-border">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
-                <th className="px-3 py-1.5 text-left font-medium">{t("legacy.upstreamUsage.window")}</th>
-                <th className="px-2 py-1.5 text-right font-medium">{t("legacy.upstreamUsage.used")}</th>
+                <th className="px-3 py-1.5 text-left font-medium">
+                  {t("legacy.upstreamUsage.window")}
+                </th>
+                <th className="px-2 py-1.5 text-right font-medium">
+                  {t("legacy.upstreamUsage.used")}
+                </th>
                 <th className="w-24 px-2 py-1.5 font-medium" />
-                <th className="px-3 py-1.5 text-right font-medium">{t("legacy.upstreamUsage.resetsInCol")}</th>
+                <th className="px-3 py-1.5 text-right font-medium">
+                  {t("legacy.upstreamUsage.resetsInCol")}
+                </th>
               </tr>
             </thead>
             <tbody>
               {windows.map(({ label, w }, i) => {
                 const { pct, color } = pctColorPct(w.used_percent);
                 return (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: codex windows have no stable unique id; label alone can collide when duplicated
                   <tr key={`${label}-${i}`} className="border-b border-border/60 last:border-b-0">
                     <td className="px-3 py-1.5 font-medium">{label}</td>
-                    <td className="px-2 py-1.5 text-right font-mono tabular-nums">{pct != null ? `${pct}%` : "—"}</td>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                      {pct != null ? `${pct}%` : "—"}
+                    </td>
                     <td className="px-2 py-1.5">
                       <div className="h-1.5 rounded-full bg-muted">
-                        <div className={cn("h-full rounded-full", color)} style={{ width: `${pct ?? 0}%` }} />
+                        <div
+                          className={cn("h-full rounded-full", color)}
+                          style={{ width: `${pct ?? 0}%` }}
+                        />
                       </div>
                     </td>
-                    <td className="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">{codexReset(w)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
+                      {codexReset(w)}
+                    </td>
                   </tr>
                 );
               })}
@@ -419,30 +479,39 @@ function CodexUsageBody({
         </div>
       )}
 
-      {credits && (credits.has_credits || credits.unlimited || (credits.balance && credits.balance !== "0")) && (
-        <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
-          <div className="font-medium uppercase text-muted-foreground text-[10px]">Credits</div>
-          <div className="flex items-baseline justify-between">
-            <span className="text-muted-foreground">余额</span>
-            <span className="font-mono tabular-nums">{credits.unlimited ? "∞" : credits.balance ?? "0"}</span>
+      {credits &&
+        (credits.has_credits ||
+          credits.unlimited ||
+          (credits.balance && credits.balance !== "0")) && (
+          <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
+            <div className="font-medium uppercase text-muted-foreground text-[10px]">Credits</div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-muted-foreground">余额</span>
+              <span className="font-mono tabular-nums">
+                {credits.unlimited ? "∞" : (credits.balance ?? "0")}
+              </span>
+            </div>
+            {credits.approx_local_messages && credits.approx_local_messages.length > 0 && (
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted-foreground">本地剩余消息（近似）</span>
+                <span className="font-mono tabular-nums">
+                  {credits.approx_local_messages.join(" – ")}
+                </span>
+              </div>
+            )}
+            {credits.approx_cloud_messages && credits.approx_cloud_messages.length > 0 && (
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted-foreground">云端剩余消息（近似）</span>
+                <span className="font-mono tabular-nums">
+                  {credits.approx_cloud_messages.join(" – ")}
+                </span>
+              </div>
+            )}
+            {credits.overage_limit_reached && (
+              <div className="text-destructive font-mono">已超出 overage 限额</div>
+            )}
           </div>
-          {credits.approx_local_messages && credits.approx_local_messages.length > 0 && (
-            <div className="flex items-baseline justify-between">
-              <span className="text-muted-foreground">本地剩余消息（近似）</span>
-              <span className="font-mono tabular-nums">{credits.approx_local_messages.join(" – ")}</span>
-            </div>
-          )}
-          {credits.approx_cloud_messages && credits.approx_cloud_messages.length > 0 && (
-            <div className="flex items-baseline justify-between">
-              <span className="text-muted-foreground">云端剩余消息（近似）</span>
-              <span className="font-mono tabular-nums">{credits.approx_cloud_messages.join(" – ")}</span>
-            </div>
-          )}
-          {credits.overage_limit_reached && (
-            <div className="text-destructive font-mono">已超出 overage 限额</div>
-          )}
-        </div>
-      )}
+        )}
 
       {spend?.individual_limit != null && (
         <div className="text-xs text-muted-foreground">

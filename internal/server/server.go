@@ -13,10 +13,10 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/CPA-Claude/internal/admin"
-	"github.com/wjsoj/cc-core/clienttoken"
 	"github.com/wjsoj/CPA-Claude/internal/config"
 	"github.com/wjsoj/CPA-Claude/internal/legal"
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/clienttoken"
 	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/cc-core/ratelimit"
 	"github.com/wjsoj/cc-core/requestlog"
@@ -112,8 +112,9 @@ func New(cfg *config.Config, pool *auth.Pool, store *usage.Store, reqLog *reques
 			provider: auth.ProviderAnthropic,
 			primary:  primary == "claude",
 			http: &http.Server{
-				Addr:    fmt.Sprintf("%s:%d", cfg.Endpoints.Claude.Host, cfg.Endpoints.Claude.Port),
-				Handler: eng,
+				Addr:              fmt.Sprintf("%s:%d", cfg.Endpoints.Claude.Host, cfg.Endpoints.Claude.Port),
+				Handler:           eng,
+				ReadHeaderTimeout: 10 * time.Second,
 			},
 		})
 	}
@@ -124,8 +125,9 @@ func New(cfg *config.Config, pool *auth.Pool, store *usage.Store, reqLog *reques
 			provider: auth.ProviderOpenAI,
 			primary:  primary == "codex",
 			http: &http.Server{
-				Addr:    fmt.Sprintf("%s:%d", cfg.Endpoints.Codex.Host, cfg.Endpoints.Codex.Port),
-				Handler: eng,
+				Addr:              fmt.Sprintf("%s:%d", cfg.Endpoints.Codex.Host, cfg.Endpoints.Codex.Port),
+				Handler:           eng,
+				ReadHeaderTimeout: 10 * time.Second,
 			},
 		})
 	}
@@ -140,7 +142,7 @@ func New(cfg *config.Config, pool *auth.Pool, store *usage.Store, reqLog *reques
 func (s *Server) AttachExtraEndpoint(name, addr string, handler http.Handler) {
 	s.endpoints = append(s.endpoints, &endpoint{
 		name: name,
-		http: &http.Server{Addr: addr, Handler: handler},
+		http: &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second},
 	})
 }
 
@@ -418,8 +420,9 @@ func (s *Server) handleStatus(c *gin.Context) {
 		QuotaResetAt  time.Time `json:"quota_reset_at,omitempty"`
 		ExpiresAt     time.Time `json:"expires_at,omitempty"`
 	}
-	var rows []row
-	for _, st := range s.pool.Status() {
+	poolStatus := s.pool.Status()
+	rows := make([]row, 0, len(poolStatus))
+	for _, st := range poolStatus {
 		kind := "oauth"
 		if st.Auth.Kind == auth.KindAPIKey {
 			kind = "apikey"

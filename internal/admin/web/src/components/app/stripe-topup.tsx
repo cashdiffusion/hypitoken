@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { loadStripe, type Stripe, type Appearance } from "@stripe/stripe-js";
 import {
   CheckoutElementsProvider,
-  PaymentElement,
   CurrencySelectorElement,
+  PaymentElement,
   useCheckoutElements,
 } from "@stripe/react-stripe-js/checkout";
-import { useTranslation } from "react-i18next";
+import { type Appearance, loadStripe, type Stripe } from "@stripe/stripe-js";
 import { CreditCard, Loader2, ShieldCheck } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 
 // loadStripe is expensive (injects the Stripe.js script) and must be called
@@ -104,6 +104,7 @@ export function StripeTopUp({ publishableKey, clientSecret, onConfirmed }: Strip
     obs.observe(el, { attributes: true, attributeFilter: ["class"] });
     return () => obs.disconnect();
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dark is an intentional trigger — buildAppearance reads the DOM directly; re-run when dark mode toggles
   const appearance = useMemo(() => buildAppearance(), [dark]);
 
   return (
@@ -178,7 +179,12 @@ function CheckoutForm({ onConfirmed }: { onConfirmed: () => void }) {
       )}
       <PaymentElement options={{ layout: "tabs" }} />
       {err && <p className="text-sm text-destructive">{err}</p>}
-      <Button type="submit" size="lg" className="w-full gap-2" disabled={busy || !checkout.canConfirm}>
+      <Button
+        type="submit"
+        size="lg"
+        className="w-full gap-2"
+        disabled={busy || !checkout.canConfirm}
+      >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
         {busy ? t("billing.stripe.processing") : t("billing.stripe.pay", { amount: payAmount })}
       </Button>

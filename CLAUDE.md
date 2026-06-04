@@ -14,10 +14,18 @@ Derivative of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT).
 make build              # build admin SPA (bun) + Go binary into bin/hypitoken
 make web-dev            # Vite dev server with API proxy to :8317 (frontend hot reload)
 make tidy               # go mod tidy
+make lint               # all linters: golangci-lint (Go) + Biome (admin SPA)
+make lint-go            # golangci-lint run ./...   (config: .golangci.yml, v2 schema)
+make lint-web           # Biome check over internal/admin/web/src
+make fmt                # auto-format: golangci-lint fmt (Go) + Biome write (web)
 go build ./...          # Go-only build (skips SPA; admin panel falls back to embedded /dist)
 go test ./...           # all tests
 go test ./internal/server/... -timeout 30s -v -run TestBootstrap   # single test/group
 ```
+
+**Linting is a CI gate (blocking).** `.github/workflows/ci.yml` runs `lint-go` (golangci-lint v2) and `lint-web` (Biome) as separate required jobs alongside `build`. Keep both green:
+- **Go** — `golangci-lint` **v2** (`.golangci.yml` is v2-schema; the local binary must be v2.x — v1 cannot parse a go1.25 module). Intentional exceptions live as documented `exclusions.rules` in `.golangci.yml` (Z-Pay MD5, sidecar timing `math/rand`, Stripe `client_secret`, the deliberately-unwired Datadog sidecar) or per-line `//nolint:<linter> // reason`.
+- **Web** — **Biome** does both lint + format (replaces ESLint/Prettier), config at `internal/admin/web/biome.json`. Run via `bun run lint` / `bun run lint:fix` / `bun run format`. Strict `recommended` ruleset, zero warnings allowed. `catch` blocks use `errMsg`/`errStatus` from `@/lib/utils` (no `e: any`); shared API shapes live in `@/lib/types`. Hook-dependency exceptions (e.g. intentional `refreshTick` refresh triggers) use a single-line `// biome-ignore lint/correctness/useExhaustiveDependencies: reason` directly above the dependency array.
 
 The admin SPA at `internal/admin/web/` (Preact + Vite + Tailwind, managed with **bun, not npm**) is built into `internal/admin/web/dist/` and embedded via `//go:embed` in `internal/admin/admin.go`. The `//go:generate` directive there runs `bun install --frozen-lockfile && bun run build`. CI (`.github/workflows/ci.yml`) calls `make web` before `go build`, so SPA is mandatory in releases.
 

@@ -1,6 +1,6 @@
-import React from "react";
-import { motion } from "motion/react";
 import { Quote } from "lucide-react";
+import { motion } from "motion/react";
+import React from "react";
 
 export interface Testimonial {
   text: string;
@@ -20,13 +20,20 @@ interface TestimonialsColumnProps {
 // 21st.dev "testimonials-columns-1" block onto the project's `.glass` surface
 // and design tokens. Initials avatars keep it on-brand and free of external
 // image requests.
-export function TestimonialsColumn({ className, testimonials, duration = 10, reduce }: TestimonialsColumnProps) {
+export function TestimonialsColumn({
+  className,
+  testimonials,
+  duration = 10,
+  reduce,
+}: TestimonialsColumnProps) {
   const cards = (
     <>
-      {testimonials.map(({ text, name, role }, i) => (
-        <figure key={i} className="glass w-full max-w-xs rounded-3xl p-7">
+      {testimonials.map(({ text, name, role }) => (
+        <figure key={name} className="glass w-full max-w-xs rounded-3xl p-7">
           <Quote className="h-5 w-5 text-primary/60" aria-hidden />
-          <blockquote className="mt-3 text-sm leading-relaxed text-foreground/85">{text}</blockquote>
+          <blockquote className="mt-3 text-sm leading-relaxed text-foreground/85">
+            {text}
+          </blockquote>
           <figcaption className="mt-6 flex items-center gap-3">
             <Avatar name={name} />
             <div className="flex flex-col">

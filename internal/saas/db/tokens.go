@@ -10,20 +10,20 @@ import (
 )
 
 type UserToken struct {
-	ID             int64
-	UserID         int64
-	Token          string
-	Name           string
-	DailyUSDCap    float64
-	MonthlyUSDCap  float64
-	MaxConcurrent  int
-	RPM            int
-	Disabled       bool
-	LastUsedAt     time.Time
-	CreatedAt      time.Time
+	ID            int64
+	UserID        int64
+	Token         string
+	Name          string
+	DailyUSDCap   float64
+	MonthlyUSDCap float64
+	MaxConcurrent int
+	RPM           int
+	Disabled      bool
+	LastUsedAt    time.Time
+	CreatedAt     time.Time
 	// Groups is the priority-ordered credential-group fallthrough list.
 	// Empty = inherit user.GroupID (legacy single-group routing).
-	Groups         []string
+	Groups []string
 }
 
 const tokenCols = `id, user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at, groups`
@@ -67,12 +67,12 @@ func marshalGroupsJSON(g []string) string {
 }
 
 type TokenParams struct {
-	Name           string
-	DailyUSDCap    float64
-	MonthlyUSDCap  float64
-	MaxConcurrent  int
-	RPM            int
-	Groups         []string
+	Name          string
+	DailyUSDCap   float64
+	MonthlyUSDCap float64
+	MaxConcurrent int
+	RPM           int
+	Groups        []string
 }
 
 func (db *DB) CreateUserToken(ctx context.Context, userID int64, p TokenParams) (*UserToken, error) {
@@ -167,10 +167,10 @@ func (db *DB) TouchUserToken(ctx context.Context, id int64) {
 func GenerateToken() (string, error) {
 	const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 	const n = 48
-	max := big.NewInt(int64(len(alpha)))
+	maxV := big.NewInt(int64(len(alpha)))
 	b := make([]byte, n)
 	for i := 0; i < n; i++ {
-		v, err := rand.Int(rand.Reader, max)
+		v, err := rand.Int(rand.Reader, maxV)
 		if err != nil {
 			return "", err
 		}

@@ -1,29 +1,72 @@
-run:
-  timeout: 3m
-
+version: "2"
 linters:
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - unused
-    - unconvert
-    - unparam
-    - misspell
-    - nilerr
     - bodyclose
     - durationcheck
-    - revive
-    - gocritic
     - errorlint
+    - gocritic
     - gosec
+    - misspell
+    - nilerr
     - prealloc
-
-issues:
-  exclude-dirs:
-    - vendor
-  exclude-rules:
-    # Allow unchecked errors on deferred Close / Flush — standard Go idiom.
-    - linters: [errcheck]
-      source: "defer "
+    - revive
+    - unconvert
+    - unparam
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Unchecked errors on deferred Close / Flush — standard Go idiom.
+      - linters: [errcheck]
+        source: 'defer '
+      # Z-Pay aggregator mandates MD5-signed requests (their API spec), so
+      # crypto/md5 here is a protocol requirement, not a security weakness.
+      - linters: [gosec]
+        path: internal/saas/billing/
+        text: 'G401|G501'
+      # Sidecar timing jitter uses math/rand on purpose — it only randomizes
+      # heartbeat intervals to mimic real client cadence; no security value.
+      - linters: [gosec]
+        path: internal/server/sidecar.go
+        text: 'G404'
+      # Stripe's PaymentIntent/Checkout client_secret is designed to be handed
+      # to the browser to mount Payment Element; sending it is correct usage.
+      - linters: [gosec]
+        path: internal/saas/billing/
+        text: 'G117'
+      # `tokenCols` is a SQL column list that happens to contain the word
+      # "token"; it is not a hardcoded credential.
+      - linters: [gosec]
+        path: internal/saas/db/tokens.go
+        text: 'G101'
+      # unparam is overly strict on test helpers, whose fixed arguments are
+      # intentional for readability.
+      - linters: [unparam]
+        path: _test\.go
+      # The Datadog heartbeat sidecar (consts + runDatadogHeartbeat +
+      # isHeartbeatIdle + heartbeatActiveWindow) is a fully-built but
+      # deliberately-not-wired traffic-emulation feature, retained for future
+      # re-enable — see the sidecar design notes in CLAUDE.md. Keep it out of
+      # the unused report without disabling `unused` for the rest of the file.
+      - linters: [unused]
+        path: internal/server/sidecar.go
+        text: '[Dd]atadog|[Hh]eartbeat'
+    paths:
+      - vendor
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -15,13 +15,13 @@ const (
 )
 
 type WalletTx struct {
-	ID         int64
-	UserID     int64
-	Kind       string
-	AmountUSD  float64
-	Ref        string
-	Note       string
-	CreatedAt  time.Time
+	ID        int64
+	UserID    int64
+	Kind      string
+	AmountUSD float64
+	Ref       string
+	Note      string
+	CreatedAt time.Time
 }
 
 var ErrInsufficientBalance = errors.New("insufficient balance")
@@ -100,43 +100,43 @@ func (db *DB) ListWalletTx(ctx context.Context, userID int64, limit int) ([]*Wal
 // (the latter reflects per-group multipliers and is the truer
 // "we-saved-them-money" number).
 type FleetWalletTotals struct {
-	UserPaidUSD   float64 // sum of -amount_usd, kind='charge', all users
-	TopupsUSD     float64 // sum of  amount_usd, kind='topup',  all users
-	ChargeCount   int64
+	UserPaidUSD float64 // sum of -amount_usd, kind='charge', all users
+	TopupsUSD   float64 // sum of  amount_usd, kind='topup',  all users
+	ChargeCount int64
 }
 
 // AdminDashboardSnapshot is the composite aggregate the admin dashboard
 // renders on first paint — one query trip rather than N round-tripping
 // counts/SUMs from the browser.
 type AdminDashboardSnapshot struct {
-	UsersTotal       int64
-	UsersVerified    int64
-	UsersNew30d      int64
-	UsersDisabled    int64
-	TopupsLifetime   float64
-	Topups30d        float64
-	Topups7d         float64
-	ChargesLifetime  float64
-	Charges30d       float64
-	Charges7d        float64
+	UsersTotal         int64
+	UsersVerified      int64
+	UsersNew30d        int64
+	UsersDisabled      int64
+	TopupsLifetime     float64
+	Topups30d          float64
+	Topups7d           float64
+	ChargesLifetime    float64
+	Charges30d         float64
+	Charges7d          float64
 	BalanceOutstanding float64
-	OrdersPending    int64
+	OrdersPending      int64
 	OrdersPaidLifetime int64
-	DailyRevenue14d  []DailyAmount // last 14 days, oldest first
-	TopSpenders      []UserSpend   // top 5 by lifetime charge
-	RecentTopups     []OrderRow    // last 10 paid orders
-	RecentSignups    []UserRow     // last 5 users
+	DailyRevenue14d    []DailyAmount // last 14 days, oldest first
+	TopSpenders        []UserSpend   // top 5 by lifetime charge
+	RecentTopups       []OrderRow    // last 10 paid orders
+	RecentSignups      []UserRow     // last 5 users
 }
 
 type DailyAmount struct {
-	Day    string  // YYYY-MM-DD UTC
+	Day    string // YYYY-MM-DD UTC
 	Amount float64
 }
 
 type UserSpend struct {
-	UserID   int64
-	Email    string
-	Spent    float64
+	UserID int64
+	Email  string
+	Spent  float64
 }
 
 type OrderRow struct {
@@ -241,7 +241,7 @@ func (db *DB) AdminDashboard(ctx context.Context) (*AdminDashboardSnapshot, erro
 		days := make([]DailyAmount, 14)
 		dayKey := func(t time.Time) string { return t.UTC().Format("2006-01-02") }
 		for i := 0; i < 14; i++ {
-			t := now.Add(time.Duration(-(13-i)) * 24 * time.Hour)
+			t := now.Add(time.Duration(-(13 - i)) * 24 * time.Hour)
 			days[i] = DailyAmount{Day: dayKey(t)}
 		}
 		idx := map[string]int{}

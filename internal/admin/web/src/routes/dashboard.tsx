@@ -1,14 +1,14 @@
+import { Activity, ArrowUpRight, Gauge, KeyRound, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowUpRight, Wallet, KeyRound, Activity, Gauge } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Reveal, RevealStagger, RevealItem } from "@/components/landing/reveal";
+import { Link } from "react-router-dom";
+import { CountUp, GlassPanel, PageHeader, StatTile } from "@/components/app/page-primitives";
 import { SpotlightCard } from "@/components/landing/interactions";
-import { PageHeader, StatTile, CountUp, GlassPanel } from "@/components/app/page-primitives";
+import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { useAuth } from "@/hooks/use-auth";
 import { apiGet } from "@/lib/api";
+import type { UserToken, WalletTx } from "@/lib/types";
 import { fmtUSD } from "@/lib/utils";
-import type { WalletTx, UserToken } from "@/lib/types";
 
 export default function DashboardPage() {
   const { user, group } = useAuth();
@@ -17,21 +17,21 @@ export default function DashboardPage() {
   const [tokens, setTokens] = useState<UserToken[]>([]);
 
   useEffect(() => {
-    apiGet<{ transactions: WalletTx[] }>("/billing/transactions").then((r) => setTx(r.transactions || []));
+    apiGet<{ transactions: WalletTx[] }>("/billing/transactions").then((r) =>
+      setTx(r.transactions || []),
+    );
     apiGet<{ tokens: UserToken[] }>("/tokens").then((r) => setTokens(r.tokens || []));
   }, []);
 
-  const charged = tx.filter((t) => t.kind === "charge").reduce((s, t) => s + Math.abs(t.amount_usd), 0);
+  const charged = tx
+    .filter((t) => t.kind === "charge")
+    .reduce((s, t) => s + Math.abs(t.amount_usd), 0);
   const chargeCount = tx.filter((t) => t.kind === "charge").length;
   const activeTokens = tokens.filter((t) => !t.disabled).length;
 
   return (
     <div className="space-y-8">
-      <PageHeader
-        eyebrow={t("nav.dashboard")}
-        title={t("dashboard.welcome")}
-        sub={user?.email}
-      />
+      <PageHeader eyebrow={t("nav.dashboard")} title={t("dashboard.welcome")} sub={user?.email} />
 
       <RevealStagger className="grid gap-4 md:grid-cols-3">
         <RevealItem className="flex">
@@ -71,11 +71,19 @@ export default function DashboardPage() {
               {t("dashboard.pricingTier")}
             </span>
           }
-          description={`${group?.Name ?? "default"}${group?.Description ? " — " + group.Description : ""}`}
+          description={`${group?.Name ?? "default"}${group?.Description ? ` — ${group.Description}` : ""}`}
         >
           <div className="grid gap-4 md:grid-cols-2">
-            <MultiplierCard label="Claude" value={group?.ClaudeMultiplier} hint={t("dashboard.multiplierExplanation")} />
-            <MultiplierCard label="Codex" value={group?.CodexMultiplier} hint={t("dashboard.multiplierExplanation")} />
+            <MultiplierCard
+              label="Claude"
+              value={group?.ClaudeMultiplier}
+              hint={t("dashboard.multiplierExplanation")}
+            />
+            <MultiplierCard
+              label="Codex"
+              value={group?.CodexMultiplier}
+              hint={t("dashboard.multiplierExplanation")}
+            />
           </div>
         </GlassPanel>
       </Reveal>
@@ -90,19 +98,29 @@ export default function DashboardPage() {
           {tx.length === 0 ? (
             <div className="m-5 rounded-xl border border-dashed border-border-strong p-8 text-center text-sm text-muted-foreground md:m-6">
               {t("dashboard.noTxYet")}{" "}
-              <Link to="/app/billing" className="text-primary underline-offset-4 hover:underline">{t("dashboard.topUpYourWallet")}</Link>
+              <Link to="/app/billing" className="text-primary underline-offset-4 hover:underline">
+                {t("dashboard.topUpYourWallet")}
+              </Link>
               {t("dashboard.toGetStarted")}
             </div>
           ) : (
             <div className="divide-y divide-border/60">
               {tx.slice(0, 10).map((row) => (
-                <div key={row.id} className="flex items-center justify-between px-5 py-3 text-sm transition-colors hover:bg-primary/[0.03] md:px-6">
+                <div
+                  key={row.id}
+                  className="flex items-center justify-between px-5 py-3 text-sm transition-colors hover:bg-primary/[0.03] md:px-6"
+                >
                   <div>
                     <div className="font-medium capitalize">{row.kind}</div>
-                    <div className="text-xs text-muted-foreground">{new Date(row.created_at * 1000).toLocaleString()}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(row.created_at * 1000).toLocaleString()}
+                    </div>
                   </div>
-                  <div className={`font-mono font-medium tabular-nums ${row.amount_usd >= 0 ? "text-success" : "text-foreground"}`}>
-                    {row.amount_usd >= 0 ? "+" : ""}{fmtUSD(row.amount_usd)}
+                  <div
+                    className={`font-mono font-medium tabular-nums ${row.amount_usd >= 0 ? "text-success" : "text-foreground"}`}
+                  >
+                    {row.amount_usd >= 0 ? "+" : ""}
+                    {fmtUSD(row.amount_usd)}
                   </div>
                 </div>
               ))}

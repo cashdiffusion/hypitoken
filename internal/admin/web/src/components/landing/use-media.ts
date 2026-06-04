@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 // ambient layer and other expensive flourishes on phones.
 export function useIsMobile(breakpoint = 640): boolean {
   const [isMobile, setIsMobile] = useState(() =>
-    typeof window === "undefined" ? false : window.innerWidth < breakpoint
+    typeof window === "undefined" ? false : window.innerWidth < breakpoint,
   );
   useEffect(() => {
     const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);

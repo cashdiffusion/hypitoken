@@ -1,7 +1,6 @@
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
-import { useReducedMotion } from "motion/react";
 
 // Live status-page visual for the "health dashboard" feature card. Reads like a
 // real status page: each upstream credential shows its health, latest model
@@ -62,7 +61,9 @@ export function StatusBoard() {
 
   const latency = (r: Row, i: number) => {
     if (down === i) return null;
-    const wobble = reduce ? 0 : Math.round(Math.sin(tick * 1.7 + i) * 9 + (tick % 2 === 0 ? 4 : -3));
+    const wobble = reduce
+      ? 0
+      : Math.round(Math.sin(tick * 1.7 + i) * 9 + (tick % 2 === 0 ? 4 : -3));
     return r.base + wobble;
   };
 
@@ -82,96 +83,113 @@ export function StatusBoard() {
         </span>
       </div>
 
-      {/* credential rows */}
-      <div className="divide-y divide-border/70">
-        {ROWS.map((r, i) => {
-          const isDown = down === i;
-          const isActive = active === i && !isDown;
-          const ms = latency(r, i);
-          return (
-            <div
-              key={r.id}
-              className="relative flex items-center gap-3 px-4 py-3 font-mono text-[12.5px] transition-colors"
-              style={isActive ? { background: "color-mix(in oklch, var(--color-primary) 7%, transparent)" } : undefined}
-            >
-              {/* active rail */}
-              <span
-                aria-hidden
-                className="absolute inset-y-0 left-0 w-0.5 transition-opacity"
-                style={{ background: "var(--color-primary)", opacity: isActive ? 1 : 0 }}
-              />
-
-              {/* health dot */}
-              <span className="relative flex h-2 w-2 shrink-0">
-                {isActive && !reduce && (
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60" />
-                )}
+      {/* credential rows — horizontally scrollable on narrow phones so the
+          rightmost status tag is never clipped; fills the card on desktop. */}
+      <div className="overflow-x-auto">
+        <div className="min-w-[420px] divide-y divide-border/70">
+          {ROWS.map((r, i) => {
+            const isDown = down === i;
+            const isActive = active === i && !isDown;
+            const ms = latency(r, i);
+            return (
+              <div
+                key={r.id}
+                className="relative flex items-center gap-3 px-4 py-3 font-mono text-[12.5px] transition-colors"
+                style={
+                  isActive
+                    ? { background: "color-mix(in oklch, var(--color-primary) 7%, transparent)" }
+                    : undefined
+                }
+              >
+                {/* active rail */}
                 <span
-                  className="relative inline-flex h-2 w-2 rounded-full"
-                  style={{ background: isDown ? "var(--color-destructive)" : isActive ? "var(--color-primary)" : "var(--color-success)" }}
+                  aria-hidden
+                  className="absolute inset-y-0 left-0 w-0.5 transition-opacity"
+                  style={{ background: "var(--color-primary)", opacity: isActive ? 1 : 0 }}
                 />
-              </span>
 
-              {/* credential id */}
-              <span className="w-[120px] shrink-0 truncate text-foreground/90">{r.id}</span>
-
-              {/* model probe */}
-              <span className="flex w-[112px] shrink-0 items-center gap-1.5">
-                <span className="text-muted-foreground">{r.model}</span>
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span
-                    key={isDown ? "down" : ms}
-                    initial={reduce ? false : { opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={reduce ? undefined : { opacity: 0, y: 4 }}
-                    transition={{ duration: 0.25 }}
-                    className={isDown ? "text-destructive" : "text-info"}
-                  >
-                    {isDown ? t("home.status.fail") : `${ms}ms`}
-                  </motion.span>
-                </AnimatePresence>
-              </span>
-
-              {/* per-credential usage */}
-              <div className="flex flex-1 items-center gap-2">
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                  <motion.div
-                    className="h-full rounded-full"
-                    style={{ background: r.usage > 0.7 ? "var(--color-warning)" : "var(--color-primary)" }}
-                    initial={reduce ? false : { width: 0 }}
-                    animate={{ width: `${Math.round(r.usage * 100)}%` }}
-                    transition={{ duration: 0.9, delay: i * 0.08, ease: "easeOut" }}
+                {/* health dot */}
+                <span className="relative flex h-2 w-2 shrink-0">
+                  {isActive && !reduce && (
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60" />
+                  )}
+                  <span
+                    className="relative inline-flex h-2 w-2 rounded-full"
+                    style={{
+                      background: isDown
+                        ? "var(--color-destructive)"
+                        : isActive
+                          ? "var(--color-primary)"
+                          : "var(--color-success)",
+                    }}
                   />
-                </div>
-                <span className="w-9 shrink-0 text-right text-muted-foreground">{Math.round(r.usage * 100)}%</span>
-              </div>
+                </span>
 
-              {/* status tag — keyed remount (no exit) so the pill swaps atomically
+                {/* credential id */}
+                <span className="w-[120px] shrink-0 truncate text-foreground/90">{r.id}</span>
+
+                {/* model probe */}
+                <span className="flex w-[112px] shrink-0 items-center gap-1.5">
+                  <span className="text-muted-foreground">{r.model}</span>
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.span
+                      key={isDown ? "down" : ms}
+                      initial={reduce ? false : { opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={reduce ? undefined : { opacity: 0, y: 4 }}
+                      transition={{ duration: 0.25 }}
+                      className={isDown ? "text-destructive" : "text-info"}
+                    >
+                      {isDown ? t("home.status.fail") : `${ms}ms`}
+                    </motion.span>
+                  </AnimatePresence>
+                </span>
+
+                {/* per-credential usage */}
+                <div className="flex flex-1 items-center gap-2">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                    <motion.div
+                      className="h-full rounded-full"
+                      style={{
+                        background: r.usage > 0.7 ? "var(--color-warning)" : "var(--color-primary)",
+                      }}
+                      initial={reduce ? false : { width: 0 }}
+                      animate={{ width: `${Math.round(r.usage * 100)}%` }}
+                      transition={{ duration: 0.9, delay: i * 0.08, ease: "easeOut" }}
+                    />
+                  </div>
+                  <span className="w-9 shrink-0 text-right text-muted-foreground">
+                    {Math.round(r.usage * 100)}%
+                  </span>
+                </div>
+
+                {/* status tag — keyed remount (no exit) so the pill swaps atomically
                   with the health dot, never lagging a frame behind a state flip */}
-              <span className="w-[64px] shrink-0 text-right">
-                {isDown ? (
-                  <motion.span
-                    key="rot"
-                    initial={reduce ? false : { opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="inline-flex items-center rounded-full bg-destructive/12 px-1.5 py-0.5 text-[10px] text-destructive"
-                  >
-                    {t("home.status.rotated")}
-                  </motion.span>
-                ) : isActive ? (
-                  <motion.span
-                    key="act"
-                    initial={reduce ? false : { opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="inline-flex items-center rounded-full bg-primary/12 px-1.5 py-0.5 text-[10px] text-primary"
-                  >
-                    {t("home.status.active")}
-                  </motion.span>
-                ) : null}
-              </span>
-            </div>
-          );
-        })}
+                <span className="w-[64px] shrink-0 text-right">
+                  {isDown ? (
+                    <motion.span
+                      key="rot"
+                      initial={reduce ? false : { opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="inline-flex items-center rounded-full bg-destructive/12 px-1.5 py-0.5 text-[10px] text-destructive"
+                    >
+                      {t("home.status.rotated")}
+                    </motion.span>
+                  ) : isActive ? (
+                    <motion.span
+                      key="act"
+                      initial={reduce ? false : { opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="inline-flex items-center rounded-full bg-primary/12 px-1.5 py-0.5 text-[10px] text-primary"
+                    >
+                      {t("home.status.active")}
+                    </motion.span>
+                  ) : null}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* footer note */}

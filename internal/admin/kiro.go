@@ -69,8 +69,9 @@ type kiroCredView struct {
 }
 
 func (h *Handler) handleKiroList(c *gin.Context) {
-	out := make([]kiroCredView, 0)
-	for _, e := range h.kiro.Store().List() {
+	kiroList := h.kiro.Store().List()
+	out := make([]kiroCredView, 0, len(kiroList))
+	for _, e := range kiroList {
 		out = append(out, kiroCredView{
 			ID:            e.ID,
 			Label:         e.Label,

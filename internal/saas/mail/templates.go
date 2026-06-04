@@ -97,23 +97,23 @@ func renderShell(siteName, preheader, heading, intro, code, expiryNote, ctaText 
 </table>
 </body>
 </html>`,
-		htmlEsc(siteName),    // 1
-		htmlEsc(heading),     // 2
-		colorBg,              // 3
-		colorText,            // 4
-		htmlEsc(preheader),   // 5
-		colorCard,            // 6
-		colorBorder,          // 7
-		colorAccent,          // 8
-		colorAccentDark,      // 9
-		htmlEsc(ctaText),     // 10 — top-right pill text
-		colorMuted,           // 11
-		htmlEsc(intro),       // 12
-		colorCodeBg,          // 13
-		colorCodeText,        // 14
-		htmlEsc(code),        // 15
-		htmlEsc(expiryNote),  // 16
-		year,                 // 17
+		htmlEsc(siteName),   // 1
+		htmlEsc(heading),    // 2
+		colorBg,             // 3
+		colorText,           // 4
+		htmlEsc(preheader),  // 5
+		colorCard,           // 6
+		colorBorder,         // 7
+		colorAccent,         // 8
+		colorAccentDark,     // 9
+		htmlEsc(ctaText),    // 10 — top-right pill text
+		colorMuted,          // 11
+		htmlEsc(intro),      // 12
+		colorCodeBg,         // 13
+		colorCodeText,       // 14
+		htmlEsc(code),       // 15
+		htmlEsc(expiryNote), // 16
+		year,                // 17
 	)
 }
 

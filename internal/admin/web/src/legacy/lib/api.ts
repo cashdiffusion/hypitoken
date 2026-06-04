@@ -10,9 +10,7 @@ const SAAS_TOKEN_KEY = "hypi.jwt";
 // `setToken` still writes to the legacy store so explicit overrides keep
 // working (operator with the original token but no SaaS account).
 export const getToken = (): string =>
-  localStorage.getItem(SAAS_TOKEN_KEY) ||
-  localStorage.getItem(LEGACY_TOKEN_KEY) ||
-  "";
+  localStorage.getItem(SAAS_TOKEN_KEY) || localStorage.getItem(LEGACY_TOKEN_KEY) || "";
 export const setToken = (t: string): void => {
   if (t) localStorage.setItem(LEGACY_TOKEN_KEY, t);
   else localStorage.removeItem(LEGACY_TOKEN_KEY);
@@ -31,7 +29,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
+export async function api<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = getToken();
   let p = path;
   if (p.startsWith("/admin/")) p = ADMIN_BASE + p.slice("/admin".length);
@@ -44,20 +42,21 @@ export async function api<T = any>(path: string, opts: RequestInit = {}): Promis
     // the SSO bridge sniffs Authorization. Sending both means the same
     // request works whether `token` is a SaaS JWT or the legacy password.
     headers["X-Admin-Token"] = token;
-    if (!headers["Authorization"]) {
-      headers["Authorization"] = "Bearer " + token;
+    if (!headers.Authorization) {
+      headers.Authorization = `Bearer ${token}`;
     }
   }
   const res = await fetch(p, { ...opts, headers });
   const text = await res.text();
-  let data: any = null;
+  let data: Record<string, unknown> | null = null;
   try {
-    data = text ? JSON.parse(text) : null;
+    data = text ? (JSON.parse(text) as Record<string, unknown>) : null;
   } catch {
     data = { raw: text };
   }
   if (!res.ok) {
-    throw new ApiError((data && data.error) || `HTTP ${res.status}`, res.status);
+    const msg = typeof data?.error === "string" ? data.error : `HTTP ${res.status}`;
+    throw new ApiError(msg, res.status);
   }
   return data as T;
 }

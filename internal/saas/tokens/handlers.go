@@ -25,13 +25,13 @@ func (h *Handler) Routes(g *gin.RouterGroup) {
 }
 
 type tokenView struct {
-	ID            int64   `json:"id"`
-	Token         string  `json:"token"`
-	Name          string  `json:"name"`
-	DailyUSDCap   float64 `json:"daily_usd_cap"`
-	MonthlyUSDCap float64 `json:"monthly_usd_cap"`
-	MaxConcurrent int     `json:"max_concurrent"`
-	RPM           int     `json:"rpm"`
+	ID            int64    `json:"id"`
+	Token         string   `json:"token"`
+	Name          string   `json:"name"`
+	DailyUSDCap   float64  `json:"daily_usd_cap"`
+	MonthlyUSDCap float64  `json:"monthly_usd_cap"`
+	MaxConcurrent int      `json:"max_concurrent"`
+	RPM           int      `json:"rpm"`
 	Disabled      bool     `json:"disabled"`
 	LastUsedAt    int64    `json:"last_used_at"`
 	CreatedAt     int64    `json:"created_at"`

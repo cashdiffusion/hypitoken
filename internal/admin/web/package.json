@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "biome check ./src",
+    "lint:fix": "biome check --write ./src",
+    "format": "biome format --write ./src",
+    "check": "biome check ./src"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.2.5",
@@ -51,6 +55,7 @@
     "three": "^0.184.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.10.1",
     "@types/react": "^18.3.12",

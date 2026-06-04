@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 
 export type Theme = "light" | "dark";
 
@@ -44,6 +44,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only bootstrap; apply(theme) seeds the DOM once, setTheme/toggle call apply() themselves on every change
   useEffect(() => {
     apply(theme);
     // Follow OS preference changes only if the user never picked explicitly.
@@ -56,7 +57,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     };
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return <Ctx.Provider value={{ theme, setTheme, toggle }}>{children}</Ctx.Provider>;

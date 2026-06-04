@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/legacy/lib/api";
 import type { HourBucket, HourlyResp, Pricing, RequestsResp, Summary } from "@/legacy/lib/types";
-import {
-  DashboardBoard,
-  type DashboardPool,
-  type DashboardRequestsSlim,
-} from "./dashboard-board";
+import { DashboardBoard, type DashboardPool, type DashboardRequestsSlim } from "./dashboard-board";
 
 interface Props {
   summary: Summary | null;
@@ -55,6 +51,7 @@ export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
       setBusy(false);
     }
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick is a prop-based refresh counter; keeping it triggers reload when the parent increments it
   useEffect(() => {
     load();
   }, [load, refreshTick]);
@@ -77,7 +74,9 @@ export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
     : null;
 
   const slim = (r: RequestsResp | null): DashboardRequestsSlim | null =>
-    r ? { summary: r.summary, by_client: r.by_client, by_model: r.by_model, by_day: r.by_day } : null;
+    r
+      ? { summary: r.summary, by_client: r.by_client, by_model: r.by_model, by_day: r.by_day }
+      : null;
 
   return (
     <DashboardBoard

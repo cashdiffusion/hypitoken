@@ -12,6 +12,7 @@ const BRAND = "HypiToken";
 
 export function useDocumentTitle(i18nKey?: string | null) {
   const { t, i18n } = useTranslation();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: i18n.resolvedLanguage and i18n.language are intentional refresh triggers so title re-renders on language switches
   useEffect(() => {
     if (!i18nKey) {
       document.title = BRAND;

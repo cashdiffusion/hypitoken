@@ -1,23 +1,23 @@
-import { useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  Menu,
-  X,
-  LayoutDashboard,
   KeyRound,
-  Wallet,
-  Receipt,
-  Terminal,
-  Shield,
+  LayoutDashboard,
   LogOut,
+  Menu,
+  Receipt,
+  Shield,
+  Terminal,
   User as UserIcon,
+  Wallet,
+  X,
 } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAuth } from "@/hooks/use-auth";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { LanguageToggle } from "@/components/language-toggle";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/use-auth";
 import { cn, fmtUSD } from "@/lib/utils";
 
 // MobileMenu is the single off-canvas drawer used by every header in the
@@ -145,6 +145,7 @@ export function MobileMenu({ variant }: Props) {
             </Link>
             <DialogPrimitive.Close asChild>
               <button
+                type="button"
                 aria-label="Close menu"
                 className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >

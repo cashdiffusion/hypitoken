@@ -70,7 +70,7 @@ type SMTPConfig struct {
 // ApplyDefaults fills in sensible defaults; called from config.applyDefaults.
 // configDir is the dir of the loaded config.yaml so relative paths can be
 // resolved without leaking that concern out to handlers.
-func (c *Config) ApplyDefaults(configDir string) {
+func (c *Config) ApplyDefaults(_ string) {
 	if c.OrderTTL <= 0 {
 		c.OrderTTL = 30 * time.Minute
 	}

@@ -1,5 +1,5 @@
-import { useEffect, useRef, type CSSProperties } from "react";
 import Hls from "hls.js";
+import { type CSSProperties, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { usePrefersReducedMotion } from "./use-media";
 
@@ -17,7 +17,13 @@ interface HlsVideoProps {
 // Background video that transparently handles HLS. Always muted + looping +
 // inline so mobile browsers allow autoplay. When the user prefers reduced
 // motion we render a static gradient instead of a moving video.
-export function HlsVideo({ src, poster, className, style, fallbackColor = "#05140f" }: HlsVideoProps) {
+export function HlsVideo({
+  src,
+  poster,
+  className,
+  style,
+  fallbackColor = "#05140f",
+}: HlsVideoProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const reduced = usePrefersReducedMotion();
 

@@ -4,8 +4,8 @@
 // flipping the LanguageToggle reflows the title bar without a reload.
 
 import { useEffect } from "react";
-import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useLocation } from "react-router-dom";
 
 const BRAND = "HypiToken";
 
@@ -33,6 +33,7 @@ function matchKey(pathname: string): string | null {
 export function TitleWatcher() {
   const { pathname } = useLocation();
   const { t, i18n } = useTranslation();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: i18n.resolvedLanguage and i18n.language are intentional refresh triggers so title re-renders on language switches
   useEffect(() => {
     const key = matchKey(pathname);
     if (!key) {

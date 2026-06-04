@@ -1,6 +1,6 @@
+import { Canvas, type RootState, useFrame } from "@react-three/fiber";
 import { useRef } from "react";
-import { Canvas, useFrame, type RootState } from "@react-three/fiber";
-import * as THREE from "three";
+import type * as THREE from "three";
 
 // Slow-tumbling wireframe icosahedron — ambient "floating geometry" for a
 // section backdrop. Wireframe + low opacity keeps it as atmosphere, never a

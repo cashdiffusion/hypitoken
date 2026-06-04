@@ -1,4 +1,4 @@
-import { clsx, type ClassValue } from "clsx";
+import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
@@ -36,7 +36,7 @@ export async function copyToClipboard(text: string): Promise<void> {
   document.body.appendChild(ta);
   ta.select();
   // eslint-disable-next-line @typescript-eslint/no-deprecated
-  (document as any).execCommand("copy");
+  (document as unknown as { execCommand(cmd: string): boolean }).execCommand("copy");
   document.body.removeChild(ta);
 }
 
@@ -48,6 +48,7 @@ export function generateSkToken(): string {
   crypto.getRandomValues(buf);
   let out = "sk-";
   for (let i = 0; i < n; i++) {
+    // biome-ignore lint/style/noNonNullAssertion: buf is sized to n, index is guaranteed in-bounds
     out += alphabet[buf[i]! % alphabet.length];
   }
   return out;
@@ -58,7 +59,9 @@ export function isoWeekRange(key: string | undefined | null): string {
   if (!key) return "";
   const m = /^(\d{4})-W(\d{2})$/.exec(key);
   if (!m) return "";
+  // biome-ignore lint/style/noNonNullAssertion: regex guarantees capture groups [1] and [2] exist when m is non-null
   const year = parseInt(m[1]!, 10);
+  // biome-ignore lint/style/noNonNullAssertion: regex guarantees capture groups [1] and [2] exist when m is non-null
   const week = parseInt(m[2]!, 10);
   const jan4 = new Date(Date.UTC(year, 0, 4));
   const jan4Dow = jan4.getUTCDay() || 7;
@@ -77,7 +80,7 @@ export function isoWeekRange(key: string | undefined | null): string {
 export function fmtCountdown(s: string | Date | null | undefined): string {
   if (!s) return "—";
   const d = typeof s === "string" ? new Date(s) : s;
-  if (isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return "—";
   const diff = d.getTime() - Date.now();
   if (diff <= 0) return "ready now";
   const totalSec = Math.floor(diff / 1000);
@@ -96,7 +99,7 @@ export function fmtCountdown(s: string | Date | null | undefined): string {
 export function fmtLocalTime(s: string | Date | null | undefined): string {
   if (!s) return "";
   const d = typeof s === "string" ? new Date(s) : s;
-  if (isNaN(d.getTime())) return "";
+  if (Number.isNaN(d.getTime())) return "";
   const sameYear = d.getFullYear() === new Date().getFullYear();
   return d.toLocaleString(undefined, {
     month: "short",
@@ -110,7 +113,7 @@ export function fmtLocalTime(s: string | Date | null | undefined): string {
 export function fmtDate(s: string | Date | null | undefined): string {
   if (!s) return "—";
   const d = typeof s === "string" ? new Date(s) : s;
-  if (isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return "—";
   const diff = d.getTime() - Date.now();
   const abs = Math.abs(diff);
   const m = Math.round(abs / 60000);

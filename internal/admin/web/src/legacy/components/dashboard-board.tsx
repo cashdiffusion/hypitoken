@@ -1,34 +1,34 @@
+import { Info } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
   Area,
   AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Line,
   LineChart,
-  Cell,
   Pie,
   PieChart,
   XAxis,
   YAxis,
 } from "recharts";
-import { Info } from "lucide-react";
-import { useTranslation } from "react-i18next";
-import type { HourBucket, Pricing, PricingEntry, RequestAgg } from "@/legacy/lib/types";
 import {
+  type ChartConfig,
   ChartContainer,
   ChartLegend,
   ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
-  type ChartConfig,
 } from "@/components/ui/chart";
 import {
-  Tooltip as UITooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  Tooltip as UITooltip,
 } from "@/components/ui/tooltip";
+import type { HourBucket, Pricing, PricingEntry, RequestAgg } from "@/legacy/lib/types";
 import { cn, fmtInt } from "@/legacy/lib/utils";
 
 const DAYS = 14;
@@ -44,34 +44,82 @@ type ConfigBuilder = (t: (k: string) => string) => Record<string, ChartConfig>;
 
 const buildConfigs: ConfigBuilder = (t) => ({
   tokenConfig: {
-    input: { label: t("legacy.chartLegendInput"), theme: { light: "oklch(0.5 0.13 215)", dark: "oklch(0.8 0.16 145)" } },
-    output: { label: t("legacy.chartLegendOutput"), theme: { light: "oklch(0.62 0.15 150)", dark: "oklch(0.72 0.14 215)" } },
-    cacheR: { label: t("legacy.chartLegendCacheR"), theme: { light: "oklch(0.68 0.15 70)", dark: "oklch(0.82 0.16 72)" } },
-    cacheW: { label: t("legacy.chartLegendCacheW"), theme: { light: "oklch(0.55 0.18 25)", dark: "oklch(0.68 0.2 25)" } },
+    input: {
+      label: t("legacy.chartLegendInput"),
+      theme: { light: "oklch(0.5 0.13 215)", dark: "oklch(0.8 0.16 145)" },
+    },
+    output: {
+      label: t("legacy.chartLegendOutput"),
+      theme: { light: "oklch(0.62 0.15 150)", dark: "oklch(0.72 0.14 215)" },
+    },
+    cacheR: {
+      label: t("legacy.chartLegendCacheR"),
+      theme: { light: "oklch(0.68 0.15 70)", dark: "oklch(0.82 0.16 72)" },
+    },
+    cacheW: {
+      label: t("legacy.chartLegendCacheW"),
+      theme: { light: "oklch(0.55 0.18 25)", dark: "oklch(0.68 0.2 25)" },
+    },
   },
   costConfig: {
-    cost_usd: { label: t("legacy.chartLegendCost"), theme: { light: "oklch(0.38 0.09 215)", dark: "oklch(0.82 0.16 145)" } },
+    cost_usd: {
+      label: t("legacy.chartLegendCost"),
+      theme: { light: "oklch(0.38 0.09 215)", dark: "oklch(0.82 0.16 145)" },
+    },
   },
   reqConfig: {
-    requests: { label: t("legacy.chartLegendReq"), theme: { light: "oklch(0.48 0.1 215)", dark: "oklch(0.72 0.14 215)" } },
+    requests: {
+      label: t("legacy.chartLegendReq"),
+      theme: { light: "oklch(0.48 0.1 215)", dark: "oklch(0.72 0.14 215)" },
+    },
   },
   hourlyConfig: {
-    input: { label: t("legacy.chartLegendInput"), theme: { light: "oklch(0.58 0.17 285)", dark: "oklch(0.75 0.17 285)" } },
-    output: { label: t("legacy.chartLegendOutput"), theme: { light: "oklch(0.62 0.19 330)", dark: "oklch(0.78 0.17 330)" } },
-    cacheR: { label: t("legacy.chartLegendCacheR"), theme: { light: "oklch(0.72 0.16 55)", dark: "oklch(0.84 0.16 62)" } },
-    cacheW: { label: t("legacy.chartLegendCacheW"), theme: { light: "oklch(0.6 0.2 15)", dark: "oklch(0.72 0.2 15)" } },
+    input: {
+      label: t("legacy.chartLegendInput"),
+      theme: { light: "oklch(0.58 0.17 285)", dark: "oklch(0.75 0.17 285)" },
+    },
+    output: {
+      label: t("legacy.chartLegendOutput"),
+      theme: { light: "oklch(0.62 0.19 330)", dark: "oklch(0.78 0.17 330)" },
+    },
+    cacheR: {
+      label: t("legacy.chartLegendCacheR"),
+      theme: { light: "oklch(0.72 0.16 55)", dark: "oklch(0.84 0.16 62)" },
+    },
+    cacheW: {
+      label: t("legacy.chartLegendCacheW"),
+      theme: { light: "oklch(0.6 0.2 15)", dark: "oklch(0.72 0.2 15)" },
+    },
   },
   weekConfig: {
-    cost_usd: { label: t("legacy.chartLegendCost"), theme: { light: "oklch(0.45 0.13 260)", dark: "oklch(0.78 0.16 260)" } },
+    cost_usd: {
+      label: t("legacy.chartLegendCost"),
+      theme: { light: "oklch(0.45 0.13 260)", dark: "oklch(0.78 0.16 260)" },
+    },
   },
   monthConfig: {
-    cost_usd: { label: t("legacy.chartLegendCost"), theme: { light: "oklch(0.5 0.12 175)", dark: "oklch(0.8 0.15 175)" } },
+    cost_usd: {
+      label: t("legacy.chartLegendCost"),
+      theme: { light: "oklch(0.5 0.12 175)", dark: "oklch(0.8 0.15 175)" },
+    },
   },
   healthConfig: {
-    healthy: { label: t("legacy.healthy"), theme: { light: "oklch(0.58 0.12 150)", dark: "oklch(0.78 0.16 145)" } },
-    quota: { label: t("legacy.quota"), theme: { light: "oklch(0.68 0.15 70)", dark: "oklch(0.82 0.16 72)" } },
-    unhealthy: { label: t("legacy.unhealthy"), theme: { light: "oklch(0.52 0.18 25)", dark: "oklch(0.68 0.2 25)" } },
-    disabled: { label: t("legacy.disabled"), theme: { light: "oklch(0.7 0.01 85)", dark: "oklch(0.5 0.01 260)" } },
+    healthy: {
+      label: t("legacy.healthy"),
+      theme: { light: "oklch(0.58 0.12 150)", dark: "oklch(0.78 0.16 145)" },
+    },
+    quota: {
+      label: t("legacy.quota"),
+      theme: { light: "oklch(0.68 0.15 70)", dark: "oklch(0.82 0.16 72)" },
+    },
+    unhealthy: {
+      label: t("legacy.unhealthy"),
+      theme: { light: "oklch(0.52 0.18 25)", dark: "oklch(0.68 0.2 25)" },
+    },
+    disabled: {
+      label: t("legacy.disabled"),
+      theme: { light: "oklch(0.7 0.01 85)", dark: "oklch(0.5 0.01 260)" },
+    },
   },
 });
 
@@ -83,10 +131,10 @@ function pad(n: number) {
 const fmtDay = (d: string) => d.slice(5).replace("-", "/");
 
 function fmtTokensCompact(n: number): string {
-  if (!isFinite(n) || n <= 0) return "—";
-  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(2) + "B";
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(Math.round(n));
 }
 
@@ -159,7 +207,15 @@ export function DashboardBoard({
   userPaidUSD = null,
 }: DashboardBoardProps) {
   const { t } = useTranslation();
-  const { tokenConfig, costConfig, reqConfig, hourlyConfig, weekConfig, monthConfig, healthConfig } = buildConfigs(t);
+  const {
+    tokenConfig,
+    costConfig,
+    reqConfig,
+    hourlyConfig,
+    weekConfig,
+    monthConfig,
+    healthConfig,
+  } = buildConfigs(t);
   const lookupPrice = (model: string): PricingEntry | null => {
     if (!pricing) return null;
     const m = (model || "").toLowerCase().trim();
@@ -225,8 +281,8 @@ export function DashboardBoard({
     // Cross-check: server-side wallet_tx aggregate. Should match usersPaid
     // for SaaS-only fleets; deviation hints at admin-token traffic that
     // bypassed the wallet ledger.
-    const userPaidCrossCheck = typeof userPaidUSD === "number" && userPaidUSD > 0
-      ? userPaidUSD : null;
+    const userPaidCrossCheck =
+      typeof userPaidUSD === "number" && userPaidUSD > 0 ? userPaidUSD : null;
     return {
       hitRate,
       usersPaid,
@@ -251,7 +307,14 @@ export function DashboardBoard({
     today.setUTCHours(0, 0, 0, 0);
     const seed = new Map<
       string,
-      { day: string; input: number; output: number; cacheR: number; cacheW: number; requests: number }
+      {
+        day: string;
+        input: number;
+        output: number;
+        cacheR: number;
+        cacheW: number;
+        requests: number;
+      }
     >();
     for (let i = DAYS - 1; i >= 0; i--) {
       const d = new Date(today);
@@ -324,8 +387,18 @@ export function DashboardBoard({
   })();
 
   const weekSeries = (() => {
-    if (!lifetimeData) return [] as { key: string; label: string; monday: string; cost_usd: number; requests: number }[];
-    const bucket = new Map<string, { label: string; monday: string; cost_usd: number; requests: number }>();
+    if (!lifetimeData)
+      return [] as {
+        key: string;
+        label: string;
+        monday: string;
+        cost_usd: number;
+        requests: number;
+      }[];
+    const bucket = new Map<
+      string,
+      { label: string; monday: string; cost_usd: number; requests: number }
+    >();
     for (const [day, agg] of Object.entries(lifetimeData.by_day)) {
       const info = isoWeekInfo(parseIsoDay(day));
       const key = `${info.year}-W${pad(info.week)}`;
@@ -345,7 +418,8 @@ export function DashboardBoard({
   })();
 
   const monthSeries = (() => {
-    if (!lifetimeData) return [] as { key: string; label: string; cost_usd: number; requests: number }[];
+    if (!lifetimeData)
+      return [] as { key: string; label: string; cost_usd: number; requests: number }[];
     const bucket = new Map<string, { cost_usd: number; requests: number }>();
     for (const [day, agg] of Object.entries(lifetimeData.by_day)) {
       const key = day.slice(0, 7);
@@ -379,7 +453,10 @@ export function DashboardBoard({
 
   // Totals used to decide whether each chart has anything to draw.
   const trendTotal = trend.reduce((s, x) => s + x.input + x.output + x.cacheR + x.cacheW, 0);
-  const hourlyTotal = hourlySeries.reduce((s, x) => s + x.input + x.output + x.cacheR + x.cacheW, 0);
+  const hourlyTotal = hourlySeries.reduce(
+    (s, x) => s + x.input + x.output + x.cacheR + x.cacheW,
+    0,
+  );
   const costTotal = costSeries.reduce((s, x) => s + x.cost_usd, 0);
   const reqTotal = costSeries.reduce((s, x) => s + x.requests, 0);
 
@@ -391,15 +468,18 @@ export function DashboardBoard({
           <div>
             <div className="eyebrow mb-1.5">{t("legacy.cacheEyebrow")}</div>
             <h3 className="font-display text-2xl md:text-3xl tracking-tight">
-              {t("legacy.cacheTitleA")} <span className="text-muted-foreground">{t("legacy.cacheTitleB")}</span>
+              {t("legacy.cacheTitleA")}{" "}
+              <span className="text-muted-foreground">{t("legacy.cacheTitleB")}</span>
             </h3>
           </div>
-          <span className="eyebrow tabular opacity-70 hidden sm:inline">{t("legacy.sinceFirst")}</span>
+          <span className="eyebrow tabular opacity-70 hidden sm:inline">
+            {t("legacy.sinceFirst")}
+          </span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
           <CacheCard
             label={t("legacy.cacheHitRate")}
-            value={cacheStats ? (cacheStats.hitRate * 100).toFixed(2) + "%" : busy ? "…" : "—"}
+            value={cacheStats ? `${(cacheStats.hitRate * 100).toFixed(2)}%` : busy ? "…" : "—"}
             ratio={cacheStats?.hitRate ?? 0}
             foot={
               cacheStats ? (
@@ -413,8 +493,8 @@ export function DashboardBoard({
           <CacheCard
             label={t("legacy.savedByUs")}
             value={
-              cacheStats && cacheStats.hasPricing
-                ? "$" + cacheStats.savedByUs.toFixed(2)
+              cacheStats?.hasPricing
+                ? `$${cacheStats.savedByUs.toFixed(2)}`
                 : cacheStats && !cacheStats.hasPricing
                   ? t("legacy.pricingUnavailable")
                   : busy
@@ -422,7 +502,7 @@ export function DashboardBoard({
                     : "—"
             }
             foot={
-              cacheStats && cacheStats.hasPricing ? (
+              cacheStats?.hasPricing ? (
                 <span className="mono tabular text-[10px] leading-relaxed block">
                   {t("legacy.noCacheOfficial", { n: cacheStats.noCacheCost.toFixed(2) })}
                   <br />
@@ -461,10 +541,13 @@ export function DashboardBoard({
           <div>
             <div className="eyebrow mb-1.5">{t("legacy.last14d")}</div>
             <h3 className="font-display text-2xl md:text-3xl tracking-tight">
-              {t("legacy.tokenVolume")} <span className="text-muted-foreground">{t("legacy.byType")}</span>
+              {t("legacy.tokenVolume")}{" "}
+              <span className="text-muted-foreground">{t("legacy.byType")}</span>
             </h3>
           </div>
-          <span className="eyebrow tabular opacity-70 hidden sm:inline">{fmtInt(trendTotal)} tok</span>
+          <span className="eyebrow tabular opacity-70 hidden sm:inline">
+            {fmtInt(trendTotal)} tok
+          </span>
         </div>
         <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
           {trendTotal === 0 ? (
@@ -474,50 +557,66 @@ export function DashboardBoard({
               hint="waiting for the first request in this window"
             />
           ) : (
-          <ChartContainer config={tokenConfig} className="h-[240px] md:h-[280px] aspect-auto w-full">
-            <AreaChart data={trend} margin={{ top: 10, right: 12, left: -8, bottom: 0 }}>
-              <defs>
-                {(["input", "output", "cacheR", "cacheW"] as const).map((k) => (
-                  <linearGradient key={k} id={`grad-${k}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={`var(--color-${k})`} stopOpacity={0.5} />
-                    <stop offset="95%" stopColor={`var(--color-${k})`} stopOpacity={0} />
-                  </linearGradient>
-                ))}
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={10} tickFormatter={fmtDay} minTickGap={16} />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                width={56}
-                tickFormatter={(v: number) =>
-                  v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)
-                }
-              />
-              <ChartTooltip
-                cursor={{ stroke: "var(--border)" }}
-                content={
-                  <ChartTooltipContent
-                    indicator="dot"
-                    labelFormatter={(v) => `Day · ${v}`}
-                    valueFormatter={(v) => (typeof v === "number" ? v.toLocaleString() + " tok" : String(v))}
-                  />
-                }
-              />
-              <ChartLegend content={<ChartLegendContent />} />
-              {(["cacheW", "cacheR", "output", "input"] as const).map((k) => (
-                <Area
-                  key={k}
-                  type="monotone"
-                  dataKey={k}
-                  stackId="1"
-                  stroke={`var(--color-${k})`}
-                  fill={`url(#grad-${k})`}
-                  strokeWidth={1.5}
+            <ChartContainer
+              config={tokenConfig}
+              className="h-[240px] md:h-[280px] aspect-auto w-full"
+            >
+              <AreaChart data={trend} margin={{ top: 10, right: 12, left: -8, bottom: 0 }}>
+                <defs>
+                  {(["input", "output", "cacheR", "cacheW"] as const).map((k) => (
+                    <linearGradient key={k} id={`grad-${k}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={`var(--color-${k})`} stopOpacity={0.5} />
+                      <stop offset="95%" stopColor={`var(--color-${k})`} stopOpacity={0} />
+                    </linearGradient>
+                  ))}
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="day"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={10}
+                  tickFormatter={fmtDay}
+                  minTickGap={16}
                 />
-              ))}
-            </AreaChart>
-          </ChartContainer>
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  width={56}
+                  tickFormatter={(v: number) =>
+                    v >= 1_000_000
+                      ? `${(v / 1_000_000).toFixed(1)}M`
+                      : v >= 1000
+                        ? `${Math.round(v / 1000)}k`
+                        : String(v)
+                  }
+                />
+                <ChartTooltip
+                  cursor={{ stroke: "var(--border)" }}
+                  content={
+                    <ChartTooltipContent
+                      indicator="dot"
+                      labelFormatter={(v) => `Day · ${v}`}
+                      valueFormatter={(v) =>
+                        typeof v === "number" ? `${v.toLocaleString()} tok` : String(v)
+                      }
+                    />
+                  }
+                />
+                <ChartLegend content={<ChartLegendContent />} />
+                {(["cacheW", "cacheR", "output", "input"] as const).map((k) => (
+                  <Area
+                    key={k}
+                    type="monotone"
+                    dataKey={k}
+                    stackId="1"
+                    stroke={`var(--color-${k})`}
+                    fill={`url(#grad-${k})`}
+                    strokeWidth={1.5}
+                  />
+                ))}
+              </AreaChart>
+            </ChartContainer>
           )}
         </div>
       </section>
@@ -528,12 +627,13 @@ export function DashboardBoard({
           <div>
             <div className="eyebrow mb-1.5">{t("legacy.pulse24")}</div>
             <h3 className="font-display text-2xl md:text-3xl tracking-tight">
-              {t("legacy.liveRhythm")} <span className="text-muted-foreground">{t("legacy.rhythm")}</span>
+              {t("legacy.liveRhythm")}{" "}
+              <span className="text-muted-foreground">{t("legacy.rhythm")}</span>
             </h3>
           </div>
           <span className="eyebrow tabular opacity-70 hidden sm:inline">
-            {fmtInt(hourlyTotal)} tok ·{" "}
-            {fmtInt(hourlySeries.reduce((s, x) => s + x.requests, 0))} req
+            {fmtInt(hourlyTotal)} tok · {fmtInt(hourlySeries.reduce((s, x) => s + x.requests, 0))}{" "}
+            req
           </span>
         </div>
         <div className="relative overflow-hidden rounded-md border border-border-strong bg-gradient-to-br from-card via-card to-muted/30 p-4 md:p-5">
@@ -549,34 +649,60 @@ export function DashboardBoard({
               hint="hourly buckets will light up as requests come in"
             />
           ) : (
-          <ChartContainer config={hourlyConfig} className="relative h-[220px] md:h-[260px] aspect-auto w-full">
-            <BarChart data={hourlySeries} margin={{ top: 10, right: 8, left: -8, bottom: 0 }} barCategoryGap={2}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.6} />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} minTickGap={24} fontSize={11} />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                width={56}
-                tickFormatter={(v: number) =>
-                  v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)
-                }
-              />
-              <ChartTooltip
-                cursor={{ fill: "var(--muted)", opacity: 0.4 }}
-                content={
-                  <ChartTooltipContent
-                    indicator="dot"
-                    labelFormatter={(v) => `${v}`}
-                    valueFormatter={(v) => (typeof v === "number" ? v.toLocaleString() + " tok" : String(v))}
+            <ChartContainer
+              config={hourlyConfig}
+              className="relative h-[220px] md:h-[260px] aspect-auto w-full"
+            >
+              <BarChart
+                data={hourlySeries}
+                margin={{ top: 10, right: 8, left: -8, bottom: 0 }}
+                barCategoryGap={2}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.6} />
+                <XAxis
+                  dataKey="label"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={10}
+                  minTickGap={24}
+                  fontSize={11}
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  width={56}
+                  tickFormatter={(v: number) =>
+                    v >= 1_000_000
+                      ? `${(v / 1_000_000).toFixed(1)}M`
+                      : v >= 1000
+                        ? `${Math.round(v / 1000)}k`
+                        : String(v)
+                  }
+                />
+                <ChartTooltip
+                  cursor={{ fill: "var(--muted)", opacity: 0.4 }}
+                  content={
+                    <ChartTooltipContent
+                      indicator="dot"
+                      labelFormatter={(v) => `${v}`}
+                      valueFormatter={(v) =>
+                        typeof v === "number" ? `${v.toLocaleString()} tok` : String(v)
+                      }
+                    />
+                  }
+                />
+                <ChartLegend content={<ChartLegendContent />} />
+                {(["input", "output", "cacheR", "cacheW"] as const).map((k, i, arr) => (
+                  <Bar
+                    key={k}
+                    dataKey={k}
+                    stackId="h"
+                    fill={`var(--color-${k})`}
+                    radius={i === arr.length - 1 ? [3, 3, 0, 0] : 0}
                   />
-                }
-              />
-              <ChartLegend content={<ChartLegendContent />} />
-              {(["input", "output", "cacheR", "cacheW"] as const).map((k, i, arr) => (
-                <Bar key={k} dataKey={k} stackId="h" fill={`var(--color-${k})`} radius={i === arr.length - 1 ? [3, 3, 0, 0] : 0} />
-              ))}
-            </BarChart>
-          </ChartContainer>
+                ))}
+              </BarChart>
+            </ChartContainer>
           )}
         </div>
       </section>
@@ -588,40 +714,50 @@ export function DashboardBoard({
             <div>
               <div className="eyebrow mb-1">{t("legacy.dailyCost")}</div>
               <h3 className="font-display text-xl tracking-tight">
-                {t("legacy.spend")} <span className="text-muted-foreground">· {t("legacy.spend14d")}</span>
+                {t("legacy.spend")}{" "}
+                <span className="text-muted-foreground">· {t("legacy.spend14d")}</span>
               </h3>
             </div>
             <span className="eyebrow tabular opacity-70">${costTotal.toFixed(2)}</span>
           </div>
           {costTotal === 0 ? (
-            <ChartEmpty
-              className="h-[220px] w-full"
-              label="no spend in the last 14 days"
-            />
+            <ChartEmpty className="h-[220px] w-full" label="no spend in the last 14 days" />
           ) : (
-          <ChartContainer config={costConfig} className={cn("h-[220px] aspect-auto w-full", busy && "opacity-70")}>
-            <BarChart data={costSeries} margin={{ top: 8, right: 4, left: -12, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} tickFormatter={fmtDay} minTickGap={20} />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                width={48}
-                tickFormatter={(v: number) => `$${v < 1 ? v.toFixed(2) : Math.round(v)}`}
-              />
-              <ChartTooltip
-                cursor={{ fill: "var(--muted)", opacity: 0.5 }}
-                content={
-                  <ChartTooltipContent
-                    indicator="dot"
-                    labelFormatter={(v) => `Day · ${v}`}
-                    valueFormatter={(v) => (typeof v === "number" ? `$${v.toFixed(4)}` : String(v))}
-                  />
-                }
-              />
-              <Bar dataKey="cost_usd" fill="var(--color-cost_usd)" radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ChartContainer>
+            <ChartContainer
+              config={costConfig}
+              className={cn("h-[220px] aspect-auto w-full", busy && "opacity-70")}
+            >
+              <BarChart data={costSeries} margin={{ top: 8, right: 4, left: -12, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="day"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  tickFormatter={fmtDay}
+                  minTickGap={20}
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  width={48}
+                  tickFormatter={(v: number) => `$${v < 1 ? v.toFixed(2) : Math.round(v)}`}
+                />
+                <ChartTooltip
+                  cursor={{ fill: "var(--muted)", opacity: 0.5 }}
+                  content={
+                    <ChartTooltipContent
+                      indicator="dot"
+                      labelFormatter={(v) => `Day · ${v}`}
+                      valueFormatter={(v) =>
+                        typeof v === "number" ? `$${v.toFixed(4)}` : String(v)
+                      }
+                    />
+                  }
+                />
+                <Bar dataKey="cost_usd" fill="var(--color-cost_usd)" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ChartContainer>
           )}
         </div>
 
@@ -629,48 +765,54 @@ export function DashboardBoard({
           <div className="flex items-baseline justify-between mb-3 gap-2">
             <div>
               <div className="eyebrow mb-1">{t("legacy.dailyReq")}</div>
-              <h3 className="font-display text-xl tracking-tight">
-                {t("legacy.traffic14d")}
-              </h3>
+              <h3 className="font-display text-xl tracking-tight">{t("legacy.traffic14d")}</h3>
             </div>
             <span className="eyebrow tabular opacity-70">{fmtInt(reqTotal)} req</span>
           </div>
           {reqTotal === 0 ? (
-            <ChartEmpty
-              className="h-[220px] w-full"
-              label="no requests in the last 14 days"
-            />
+            <ChartEmpty className="h-[220px] w-full" label="no requests in the last 14 days" />
           ) : (
-          <ChartContainer config={reqConfig} className="h-[220px] aspect-auto w-full">
-            <LineChart data={costSeries} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} tickFormatter={fmtDay} minTickGap={20} />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                width={48}
-                tickFormatter={(v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)))}
-              />
-              <ChartTooltip
-                cursor={{ stroke: "var(--border)" }}
-                content={
-                  <ChartTooltipContent
-                    indicator="dot"
-                    labelFormatter={(v) => `Day · ${v}`}
-                    valueFormatter={(v) => (typeof v === "number" ? v.toLocaleString() + " req" : String(v))}
-                  />
-                }
-              />
-              <Line
-                type="monotone"
-                dataKey="requests"
-                stroke="var(--color-requests)"
-                strokeWidth={2}
-                dot={{ r: 3, strokeWidth: 0, fill: "var(--color-requests)" }}
-                activeDot={{ r: 5 }}
-              />
-            </LineChart>
-          </ChartContainer>
+            <ChartContainer config={reqConfig} className="h-[220px] aspect-auto w-full">
+              <LineChart data={costSeries} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="day"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  tickFormatter={fmtDay}
+                  minTickGap={20}
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  width={48}
+                  tickFormatter={(v: number) =>
+                    v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v))
+                  }
+                />
+                <ChartTooltip
+                  cursor={{ stroke: "var(--border)" }}
+                  content={
+                    <ChartTooltipContent
+                      indicator="dot"
+                      labelFormatter={(v) => `Day · ${v}`}
+                      valueFormatter={(v) =>
+                        typeof v === "number" ? `${v.toLocaleString()} req` : String(v)
+                      }
+                    />
+                  }
+                />
+                <Line
+                  type="monotone"
+                  dataKey="requests"
+                  stroke="var(--color-requests)"
+                  strokeWidth={2}
+                  dot={{ r: 3, strokeWidth: 0, fill: "var(--color-requests)" }}
+                  activeDot={{ r: 5 }}
+                />
+              </LineChart>
+            </ChartContainer>
           )}
         </div>
       </section>
@@ -681,7 +823,9 @@ export function DashboardBoard({
           <div className="mb-4">
             <div className="eyebrow mb-1">{t("legacy.poolHealth")}</div>
             <h3 className="font-display text-xl tracking-tight">
-              <span className="text-muted-foreground">{t("legacy.poolCount", { n: pool?.total ?? 0 })}</span>
+              <span className="text-muted-foreground">
+                {t("legacy.poolCount", { n: pool?.total ?? 0 })}
+              </span>
             </h3>
           </div>
           {health.length === 0 ? (
@@ -718,7 +862,12 @@ export function DashboardBoard({
               ? Object.entries(reqData.by_model)
                   .sort(([, a], [, b]) => b.cost_usd - a.cost_usd)
                   .slice(0, 6)
-                  .map(([k, v]) => ({ k, v: v.cost_usd, meta: `${fmtInt(v.count)} req`, fmt: "cost" as const }))
+                  .map(([k, v]) => ({
+                    k,
+                    v: v.cost_usd,
+                    meta: `${fmtInt(v.count)} req`,
+                    fmt: "cost" as const,
+                  }))
               : []
           }
         />
@@ -750,7 +899,8 @@ export function DashboardBoard({
             <div>
               <div className="eyebrow mb-1">{t("legacy.billingWeek")}</div>
               <h3 className="font-display text-xl tracking-tight">
-                {t("legacy.weekly")} <span className="text-muted-foreground">{t("legacy.spend")}</span>
+                {t("legacy.weekly")}{" "}
+                <span className="text-muted-foreground">{t("legacy.spend")}</span>
               </h3>
             </div>
             <span className="eyebrow tabular opacity-70">
@@ -773,7 +923,14 @@ export function DashboardBoard({
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} fontSize={11} />
+                <XAxis
+                  dataKey="label"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  minTickGap={24}
+                  fontSize={11}
+                />
                 <YAxis
                   tickLine={false}
                   axisLine={false}
@@ -789,7 +946,9 @@ export function DashboardBoard({
                         const row = p?.[0]?.payload as { monday?: string } | undefined;
                         return row?.monday ? `Week of ${row.monday}` : String(v);
                       }}
-                      valueFormatter={(v) => (typeof v === "number" ? `$${v.toFixed(2)}` : String(v))}
+                      valueFormatter={(v) =>
+                        typeof v === "number" ? `$${v.toFixed(2)}` : String(v)
+                      }
                     />
                   }
                 />
@@ -804,7 +963,8 @@ export function DashboardBoard({
             <div>
               <div className="eyebrow mb-1">{t("legacy.calendarMonth")}</div>
               <h3 className="font-display text-xl tracking-tight">
-                {t("legacy.monthly")} <span className="text-muted-foreground">{t("legacy.spend")}</span>
+                {t("legacy.monthly")}{" "}
+                <span className="text-muted-foreground">{t("legacy.spend")}</span>
               </h3>
             </div>
             <span className="eyebrow tabular opacity-70">
@@ -823,7 +983,14 @@ export function DashboardBoard({
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} fontSize={11} />
+                <XAxis
+                  dataKey="label"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  minTickGap={24}
+                  fontSize={11}
+                />
                 <YAxis
                   tickLine={false}
                   axisLine={false}
@@ -836,7 +1003,9 @@ export function DashboardBoard({
                     <ChartTooltipContent
                       indicator="dot"
                       labelFormatter={(v) => `Month · ${v}`}
-                      valueFormatter={(v) => (typeof v === "number" ? `$${v.toFixed(2)}` : String(v))}
+                      valueFormatter={(v) =>
+                        typeof v === "number" ? `$${v.toFixed(2)}` : String(v)
+                      }
                     />
                   }
                 />
@@ -956,7 +1125,10 @@ function TopList({
                 <span className="eyebrow opacity-60 tabular shrink-0">{r.meta}</span>
               </div>
               <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
-                <div className="h-full bg-primary/70 group-hover:bg-primary transition-all" style={{ width: `${Math.round((r.v / max) * 100)}%` }} />
+                <div
+                  className="h-full bg-primary/70 group-hover:bg-primary transition-all"
+                  style={{ width: `${Math.round((r.v / max) * 100)}%` }}
+                />
               </div>
             </li>
           ))}
@@ -975,6 +1147,7 @@ function PseudonymHint() {
       <UITooltip>
         <TooltipTrigger asChild>
           <span
+            role="img"
             className="inline-flex items-center gap-0.5 rounded-sm border border-border/60 bg-muted/40 px-1 py-0.5 text-[9px] font-medium tracking-wider uppercase text-muted-foreground cursor-help"
             aria-label="Pseudonyms"
           >

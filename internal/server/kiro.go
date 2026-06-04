@@ -139,7 +139,7 @@ func (s *Server) tryKiro(
 		areq.Model = model
 	}
 
-	counts, _, derr := s.kiro.disp.Forward(c, c.Request.Context(), &areq, chosen.Entry, chosen.Entry.Cred.ProfileARN)
+	counts, _, derr := s.kiro.disp.Forward(c.Request.Context(), c, &areq, chosen.Entry, chosen.Entry.Cred.ProfileARN)
 	if derr != nil {
 		// Decide a client-visible status. If kiroapi returned an HTTPError we
 		// surface its upstream status so the client sees 429 as 429 (not 500
@@ -160,7 +160,7 @@ func (s *Server) tryKiro(
 			AuthKind:  "kiro",
 			Model:     model, Stream: stream, Path: path,
 			Status: status, DurationMs: time.Since(start).Milliseconds(),
-			Error:  derr.Error(),
+			Error: derr.Error(),
 		})
 		// Only write a response when nothing has been sent yet — Forward
 		// returns errors BEFORE writeSSE/writeOneShot fires, so this is the
@@ -225,6 +225,8 @@ func (s *Server) tryKiro(
 }
 
 // counts2json is a small helper for diagnostics.
+//
+//nolint:unused // retained diagnostics helper, used ad hoc when debugging usage accounting.
 func counts2json(c usage.Counts) string {
 	b, _ := json.Marshal(c)
 	return string(b)

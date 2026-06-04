@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { MotionPathPlugin } from "gsap/MotionPathPlugin";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 gsap.registerPlugin(MotionPathPlugin);
@@ -43,6 +43,7 @@ export function RoutingDiagram() {
   const inPaths = ROWS.map((y) => `M${CLIENT_X + NODE_W},${y} C190,${y} 196,160 224,160`);
   const outPaths = ROWS.map((y) => `M296,160 C324,160 330,${y} ${CRED_X},${y}`);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: inPaths/outPaths are derived from module-level constants and never change; the dep array tracks their serialized form for correctness
   useEffect(() => {
     const svg = ref.current;
     if (!svg) return;
@@ -88,41 +89,78 @@ export function RoutingDiagram() {
     >
       {/* connectors */}
       <g fill="none" strokeWidth="1.5">
-        {[...inPaths, ...outPaths].map((d, i) => (
-          <path key={i} d={d} stroke="var(--color-border-strong)" strokeOpacity="0.7" />
+        {[...inPaths, ...outPaths].map((d) => (
+          <path key={d} d={d} stroke="var(--color-border-strong)" strokeOpacity="0.7" />
         ))}
       </g>
 
       {/* packets */}
-      {ROWS.map((_, i) => (
-        <circle key={`in-${i}`} className={`pkt-in-${i}`} r="3.2" fill="var(--color-primary)" />
+      {ROWS.map((y, i) => (
+        <circle key={`in-${y}`} className={`pkt-in-${i}`} r="3.2" fill="var(--color-primary)" />
       ))}
-      {ROWS.map((_, i) => (
-        <circle key={`out-${i}`} className={`pkt-out-${i}`} r="3.2" fill="var(--color-success)" />
+      {ROWS.map((y, i) => (
+        <circle key={`out-${y}`} className={`pkt-out-${i}`} r="3.2" fill="var(--color-success)" />
       ))}
 
       {/* client nodes */}
       {clients.map((n, i) => (
-        <NodeBox key={`c-${i}`} x={CLIENT_X} y={ROWS[i] - NODE_H / 2} node={n} />
+        <NodeBox key={n.label} x={CLIENT_X} y={ROWS[i] - NODE_H / 2} node={n} />
       ))}
 
       {/* gateway */}
       <g>
-        <rect x={224} y={120} width={72} height={80} rx={14} fill="color-mix(in oklch, var(--color-primary) 12%, var(--color-card))" stroke="color-mix(in oklch, var(--color-primary) 45%, transparent)" strokeWidth="1.5" />
-        <text x={260} y={156} textAnchor="middle" className="fill-[var(--color-primary)] font-mono" fontSize="12" fontWeight="600">GW</text>
-        <text x={260} y={172} textAnchor="middle" className="fill-[var(--color-muted-foreground)]" fontSize="8">pool</text>
+        <rect
+          x={224}
+          y={120}
+          width={72}
+          height={80}
+          rx={14}
+          fill="color-mix(in oklch, var(--color-primary) 12%, var(--color-card))"
+          stroke="color-mix(in oklch, var(--color-primary) 45%, transparent)"
+          strokeWidth="1.5"
+        />
+        <text
+          x={260}
+          y={156}
+          textAnchor="middle"
+          className="fill-[var(--color-primary)] font-mono"
+          fontSize="12"
+          fontWeight="600"
+        >
+          GW
+        </text>
+        <text
+          x={260}
+          y={172}
+          textAnchor="middle"
+          className="fill-[var(--color-muted-foreground)]"
+          fontSize="8"
+        >
+          pool
+        </text>
       </g>
 
       {/* credential nodes */}
       {creds.slice(0, 3).map((label, i) => (
-        <g key={`cr-${i}`}>
+        <g key={label}>
           {i === 1 && (
-            <circle className="sticky-pulse" cx={CRED_X + 14} cy={ROWS[i]} r="9" fill="var(--color-success)" opacity="0.5" />
+            <circle
+              className="sticky-pulse"
+              cx={CRED_X + 14}
+              cy={ROWS[i]}
+              r="9"
+              fill="var(--color-success)"
+              opacity="0.5"
+            />
           )}
           <NodeBox
             x={CRED_X}
             y={ROWS[i] - NODE_H / 2}
-            node={{ label, tone: i === 2 ? "muted" : "success", sub: i === 1 ? t("home.archStickyTag") : undefined }}
+            node={{
+              label,
+              tone: i === 2 ? "muted" : "success",
+              sub: i === 1 ? t("home.archStickyTag") : undefined,
+            }}
             dot
           />
         </g>
@@ -156,7 +194,12 @@ function NodeBox({ x, y, node, dot }: { x: number; y: number; node: Node; dot?: 
         {node.label}
       </text>
       {node.sub && (
-        <text x={dot ? x + 26 : x + 14} y={y + 36} fontSize="9" fill="var(--color-muted-foreground)">
+        <text
+          x={dot ? x + 26 : x + 14}
+          y={y + 36}
+          fontSize="9"
+          fill="var(--color-muted-foreground)"
+        >
           {node.sub}
         </text>
       )}

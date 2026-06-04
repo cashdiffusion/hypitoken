@@ -27,8 +27,8 @@ type Config struct {
 	// JWTSecret is the HS256 signing key. If empty on first start, a 32-byte
 	// random secret is generated and persisted to <DBPath>.jwt_secret (mode
 	// 0600) so subsequent starts reuse it.
-	JWTSecret    string        `yaml:"jwt_secret"`
-	JWTTTL       time.Duration `yaml:"jwt_ttl"`
+	JWTSecret     string        `yaml:"jwt_secret"`
+	JWTTTL        time.Duration `yaml:"jwt_ttl"`
 	JWTRefreshTTL time.Duration `yaml:"jwt_refresh_ttl"`
 
 	// Site identity (used in emails and the frontend).
@@ -70,7 +70,7 @@ type Config struct {
 	Stripe StripeConfig `yaml:"stripe"`
 
 	// Exchange rate source. Empty = built-in fawazahmed0 currency-api.
-	ExchangeRateURL string  `yaml:"exchange_rate_url"`
+	ExchangeRateURL   string  `yaml:"exchange_rate_url"`
 	FallbackCNYPerUSD float64 `yaml:"fallback_cny_per_usd"`
 
 	// HealthCheck cadence for API-key credentials.
@@ -132,12 +132,12 @@ type StripeConfig struct {
 }
 
 type AlipayConfig struct {
-	AppID            string `yaml:"app_id"`
-	PrivateKey       string `yaml:"private_key"`         // PEM (multiline) or @path/to/file
-	AlipayPublicKey  string `yaml:"alipay_public_key"`   // PEM or @path
-	IsProduction     bool   `yaml:"is_production"`
-	NotifyURL        string `yaml:"notify_url"`          // public webhook URL
-	ReturnURL        string `yaml:"return_url"`          // browser redirect after pay
+	AppID           string `yaml:"app_id"`
+	PrivateKey      string `yaml:"private_key"`       // PEM (multiline) or @path/to/file
+	AlipayPublicKey string `yaml:"alipay_public_key"` // PEM or @path
+	IsProduction    bool   `yaml:"is_production"`
+	NotifyURL       string `yaml:"notify_url"` // public webhook URL
+	ReturnURL       string `yaml:"return_url"` // browser redirect after pay
 }
 
 // ApplyDefaults fills in zero-value fields with sensible defaults. configDir

@@ -46,9 +46,9 @@ export interface UserToken {
 // Powers the per-token "渠道" dropdown so users only see options that
 // actually have credentials behind them.
 export interface Channel {
-  name: string;        // group filter name ("default", "kiro-anthropic", ...)
+  name: string; // group filter name ("default", "kiro-anthropic", ...)
   providers: string[]; // distinct providers backing this channel
-  count: number;       // usable credential count
+  count: number; // usable credential count
 }
 
 export interface WalletTx {
@@ -88,4 +88,82 @@ export interface ModelHealth {
 export interface ExchangeRate {
   cny_per_usd: number;
   as_of: number;
+}
+
+// UsageCounts mirrors cc-core usage.Counts (token + request tallies).
+export interface UsageCounts {
+  requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  errors: number;
+}
+
+// UsageDay is one entry in the 14-day per-credential daily series.
+export interface UsageDay {
+  day: string;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+// CredentialUsage mirrors the Go usageSummary struct attached to each
+// credential row (total / rolling windows / daily series / lifetime cost).
+export interface CredentialUsage {
+  total: UsageCounts;
+  sum_24h: UsageCounts;
+  sum_5h: UsageCounts;
+  last_used?: string;
+  daily: UsageDay[];
+  total_cost_usd: number;
+}
+
+// Credential mirrors the Go authRow struct served by
+// /api/v2/admin/credentials. Time fields arrive as RFC3339 strings.
+export interface Credential {
+  id: string;
+  kind: string; // "oauth" | "apikey"
+  provider: string; // "anthropic" | "openai"
+  plan_type?: string;
+  label: string;
+  email?: string;
+  proxy_url: string;
+  base_url?: string;
+  group?: string;
+  max_concurrent: number;
+  active_clients: number;
+  client_tokens: string[];
+  disabled: boolean;
+  quota_exceeded: boolean;
+  quota_reset_at?: string;
+  expires_at?: string;
+  file_backed: boolean;
+  healthy: boolean;
+  hard_failure: boolean;
+  failure_reason?: string;
+  refresh_suspended?: boolean;
+  refresh_suspended_reason?: string;
+  last_client_cancel?: string;
+  client_cancel_reason?: string;
+  model_map?: Record<string, string>;
+  usage?: CredentialUsage;
+  codex_rate_limits?: Record<string, string>;
+  codex_rate_limits_at?: string;
+  // Kiro-specific extras surfaced on the same row.
+  active?: number;
+  plan?: string;
+}
+
+// AdminOrder mirrors the Go db.AlipayOrder struct (no json tags → PascalCase)
+// served by /admin/orders. Time fields arrive as RFC3339 strings.
+export interface AdminOrder {
+  OutTradeNo: string;
+  UserID: number;
+  CNYAmount: number;
+  USDCredit: number;
+  Rate: number;
+  Status: string;
+  TradeNo: string;
+  QRCode: string;
+  CreatedAt: string;
+  PaidAt: string;
 }

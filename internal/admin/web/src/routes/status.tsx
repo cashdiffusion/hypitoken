@@ -1,8 +1,8 @@
+import { Activity, AlertTriangle, CheckCircle2, Clock, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { CheckCircle2, AlertTriangle, XCircle, Clock, Activity } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { PublicHeader } from "@/components/layout/shell";
 import { Reveal } from "@/components/landing/reveal";
+import { PublicHeader } from "@/components/layout/shell";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -52,6 +52,7 @@ export default function StatusPage({ embedded }: Props) {
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only; reload is defined inline and would change every render
   useEffect(() => {
     reload();
     const id = setInterval(reload, 120_000);
@@ -80,7 +81,9 @@ export default function StatusPage({ embedded }: Props) {
       )}
 
       <p className="text-center text-xs text-muted-foreground">
-        {t("status.refreshHint", { n: Math.max(0, Math.round(120 - ((Date.now() / 1000 - asOf) % 120))) })}
+        {t("status.refreshHint", {
+          n: Math.max(0, Math.round(120 - ((Date.now() / 1000 - asOf) % 120))),
+        })}
       </p>
     </div>
   );
@@ -99,7 +102,9 @@ export default function StatusPage({ embedded }: Props) {
       <div className="mx-auto max-w-3xl px-4 py-12 md:px-6 md:py-16">
         <Reveal>
           <span className="eyebrow text-primary">{t("nav.status")}</span>
-          <h1 className="mt-3 font-display text-4xl font-semibold tracking-tight md:text-5xl">{t("status.title")}</h1>
+          <h1 className="mt-3 font-display text-4xl font-semibold tracking-tight md:text-5xl">
+            {t("status.title")}
+          </h1>
           <p className="mt-2 text-muted-foreground">{t("status.sub")}</p>
         </Reveal>
         <div className="mt-10">{content}</div>
@@ -136,7 +141,9 @@ function OverallBanner({ overall, asOf }: { overall: Overall; asOf: number }) {
       <div className="flex items-center gap-3">
         <Icon className="h-5 w-5 shrink-0" />
         <span className="text-base font-medium md:text-lg">{t(key)}</span>
-        <span className="ml-auto hidden text-xs text-white/80 sm:block">{t("status.updated", { when: since })}</span>
+        <span className="ml-auto hidden text-xs text-white/80 sm:block">
+          {t("status.updated", { when: since })}
+        </span>
       </div>
     </div>
   );
@@ -169,19 +176,32 @@ function ProviderCard({ p }: { p: ProviderMon }) {
         <div className="mt-5 space-y-5">
           <UptimeStrip
             label={t("status.recentWindow")}
-            slots={p.recent.map((s) => ({ ok: s.ok, total: s.total, ts: s.from, kind: "slot" as const }))}
+            slots={p.recent.map((s) => ({
+              ok: s.ok,
+              total: s.total,
+              ts: s.from,
+              kind: "slot" as const,
+            }))}
             slotCount={144}
           />
           <UptimeStrip
             label={t("status.dailyWindow")}
-            slots={p.daily.map((d) => ({ ok: d.ok, total: d.total, ts: d.date, kind: "day" as const }))}
+            slots={p.daily.map((d) => ({
+              ok: d.ok,
+              total: d.total,
+              ts: d.date,
+              kind: "day" as const,
+            }))}
             slotCount={p.daily.length || 30}
             wide
           />
         </div>
 
         {age !== null && (
-          <p className="mt-4 text-right text-[11px] text-muted-foreground" title={new Date(p.checked_at * 1000).toLocaleString()}>
+          <p
+            className="mt-4 text-right text-[11px] text-muted-foreground"
+            title={new Date(p.checked_at * 1000).toLocaleString()}
+          >
             {age < 1 ? t("status.justNow") : t("status.minAgo", { n: Math.round(age) })}
           </p>
         )}
@@ -193,10 +213,22 @@ function ProviderCard({ p }: { p: ProviderMon }) {
 function ProviderPill({ operational }: { operational: ProviderMon["operational"] }) {
   const { t } = useTranslation();
   if (operational === "operational")
-    return <span className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-mono uppercase tracking-wider text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400">{t("status.pillOperational")}</span>;
+    return (
+      <span className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-mono uppercase tracking-wider text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400">
+        {t("status.pillOperational")}
+      </span>
+    );
   if (operational === "degraded")
-    return <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-mono uppercase tracking-wider text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-400">{t("status.pillDegraded")}</span>;
-  return <span className="rounded-full border border-red-300 bg-red-50 px-3 py-1 text-xs font-mono uppercase tracking-wider text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-400">{t("status.pillDown")}</span>;
+    return (
+      <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-mono uppercase tracking-wider text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-400">
+        {t("status.pillDegraded")}
+      </span>
+    );
+  return (
+    <span className="rounded-full border border-red-300 bg-red-50 px-3 py-1 text-xs font-mono uppercase tracking-wider text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-400">
+      {t("status.pillDown")}
+    </span>
+  );
 }
 
 interface StripSlot {
@@ -218,7 +250,17 @@ function slotFill(s: StripSlot): string {
   return s.ok > 0 ? FILL_OK : FILL_FAIL;
 }
 
-function UptimeStrip({ label, slots, slotCount, wide }: { label: string; slots: StripSlot[]; slotCount: number; wide?: boolean }) {
+function UptimeStrip({
+  label,
+  slots,
+  slotCount,
+  wide,
+}: {
+  label: string;
+  slots: StripSlot[];
+  slotCount: number;
+  wide?: boolean;
+}) {
   const { t } = useTranslation();
   const BAR_W = wide ? 14 : 3;
   const BAR_GAP = wide ? 4 : 2;
@@ -252,7 +294,15 @@ function UptimeStrip({ label, slots, slotCount, wide }: { label: string; slots: 
           {uptimePct === null ? t("status.awaitingData") : `${uptimePct.toFixed(2)} %`}
         </span>
       </div>
-      <svg className="block w-full" style={{ height: BAR_H }} preserveAspectRatio="none" viewBox={`0 0 ${vbW} ${BAR_H}`} height={BAR_H}>
+      {/* biome-ignore lint/a11y/noSvgWithoutTitle: decorative bar chart; individual bars carry <title> elements for tooltip text */}
+      <svg
+        aria-hidden
+        className="block w-full"
+        style={{ height: BAR_H }}
+        preserveAspectRatio="none"
+        viewBox={`0 0 ${vbW} ${BAR_H}`}
+        height={BAR_H}
+      >
         {padded.map((s, i) => {
           const x = i * (BAR_W + BAR_GAP);
           const fill = s == null ? FILL_NONE : slotFill(s);
@@ -260,9 +310,13 @@ function UptimeStrip({ label, slots, slotCount, wide }: { label: string; slots: 
           if (s) {
             const when = new Date(s.ts * 1000).toLocaleString();
             const pct = s.total > 0 ? Math.round((s.ok / s.total) * 100) : null;
-            title = s.total === 0 ? `${when} — ${t("status.noData")}` : `${when} — ${pct}% (${s.ok}/${s.total})`;
+            title =
+              s.total === 0
+                ? `${when} — ${t("status.noData")}`
+                : `${when} — ${pct}% (${s.ok}/${s.total})`;
           }
           return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: positional bar chart — index IS the stable position (left=oldest, right=newest)
             <rect key={i} x={x} y={0} width={BAR_W} height={BAR_H} rx={wide ? 2 : 0} fill={fill}>
               <title>{title}</title>
             </rect>

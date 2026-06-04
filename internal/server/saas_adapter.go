@@ -44,7 +44,7 @@ type SaaSTokenInfo struct {
 	TokenID       int64
 	UserID        int64
 	Email         string
-	Name          string  // token's friendly name
+	Name          string // token's friendly name
 	GroupID       int64
 	BalanceUSD    float64
 	MaxConcurrent int

@@ -269,19 +269,20 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	writeResponseHeaders(c, resp)
 	var counts usage.Counts
 	var errSnippet string
-	if resp.StatusCode >= 400 {
+	switch {
+	case resp.StatusCode >= 400:
 		errBody, _ := io.ReadAll(resp.Body)
-		c.Writer.Write(errBody)
+		_, _ = c.Writer.Write(errBody)
 		errSnippet = truncate(errBody, 500)
 		log.Warnf("codex proxy(apikey): %s returned %d — body=%s", a.ID, resp.StatusCode, errSnippet)
-	} else if stream && strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+	case stream && strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream"):
 		streamSSEOpenAI(c, resp, &counts, rewriteClientModel)
-	} else {
+	default:
 		respBody, _ := io.ReadAll(resp.Body)
 		if rewriteClientModel != "" {
 			respBody = rewriteResponseModel(respBody, rewriteClientModel)
 		}
-		c.Writer.Write(respBody)
+		_, _ = c.Writer.Write(respBody)
 		counts.Add(extractOpenAIUsageFromJSON(respBody))
 	}
 	_ = resp.Body.Close()
@@ -383,6 +384,8 @@ func (s *Server) cooldownCodexAPIKey(a *auth.Auth, status int, resetAt time.Time
 // ensureStreamOptionsIncludeUsage rewrites the JSON request body so that
 // `stream_options.include_usage` is true unless the client already set it.
 // Leaves non-JSON bodies untouched. No-op when the field is already present.
+//
+//nolint:unused // retained helper: re-enabled when usage backfill for non-stream-options clients is turned on.
 func ensureStreamOptionsIncludeUsage(body []byte) ([]byte, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(body, &raw); err != nil {
@@ -432,7 +435,7 @@ func streamSSEOpenAI(c *gin.Context, resp *http.Response, counts *usage.Counts, 
 					counts.Add(extractOpenAIUsageFromJSON(payload))
 				}
 			}
-			c.Writer.Write(outLine)
+			_, _ = c.Writer.Write(outLine)
 			if flusher != nil {
 				flusher.Flush()
 			}

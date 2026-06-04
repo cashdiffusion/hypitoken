@@ -18,14 +18,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
 	// used in Anthropic usage proxy below
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wjsoj/CPA-Claude/internal/config"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/clienttoken"
-	"github.com/wjsoj/CPA-Claude/internal/config"
 	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/usage"
@@ -265,27 +266,27 @@ func (h *Handler) adminAuth() gin.HandlerFunc {
 // ---- responses ----
 
 type authRow struct {
-	ID            string        `json:"id"`
-	Kind          string        `json:"kind"`
-	Provider      string        `json:"provider"` // "anthropic" | "openai"
-	PlanType      string        `json:"plan_type,omitempty"`
-	Label         string        `json:"label"`
-	Email         string        `json:"email,omitempty"`
-	ProxyURL      string        `json:"proxy_url"`
-	BaseURL       string        `json:"base_url,omitempty"`
-	Group         string        `json:"group,omitempty"`
-	MaxConcurrent int           `json:"max_concurrent"`
-	ActiveClients int           `json:"active_clients"`
-	ClientTokens  []string      `json:"client_tokens"`
-	Disabled      bool          `json:"disabled"`
-	QuotaExceeded bool          `json:"quota_exceeded"`
-	QuotaResetAt  *time.Time    `json:"quota_reset_at,omitempty"`
-	ExpiresAt     *time.Time    `json:"expires_at,omitempty"`
-	LastFailure   string        `json:"last_failure,omitempty"`
-	FileBacked    bool          `json:"file_backed"`
-	Healthy       bool          `json:"healthy"`
-	HardFailure   bool          `json:"hard_failure"`
-	FailureReason string        `json:"failure_reason,omitempty"`
+	ID            string     `json:"id"`
+	Kind          string     `json:"kind"`
+	Provider      string     `json:"provider"` // "anthropic" | "openai"
+	PlanType      string     `json:"plan_type,omitempty"`
+	Label         string     `json:"label"`
+	Email         string     `json:"email,omitempty"`
+	ProxyURL      string     `json:"proxy_url"`
+	BaseURL       string     `json:"base_url,omitempty"`
+	Group         string     `json:"group,omitempty"`
+	MaxConcurrent int        `json:"max_concurrent"`
+	ActiveClients int        `json:"active_clients"`
+	ClientTokens  []string   `json:"client_tokens"`
+	Disabled      bool       `json:"disabled"`
+	QuotaExceeded bool       `json:"quota_exceeded"`
+	QuotaResetAt  *time.Time `json:"quota_reset_at,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	LastFailure   string     `json:"last_failure,omitempty"`
+	FileBacked    bool       `json:"file_backed"`
+	Healthy       bool       `json:"healthy"`
+	HardFailure   bool       `json:"hard_failure"`
+	FailureReason string     `json:"failure_reason,omitempty"`
 	// RefreshSuspended is true when the background OAuth refresher
 	// (cc-core/auth Pool.RefreshExpiring) will deliberately skip this
 	// credential — i.e. it is disabled or hard-failed. The frontend uses
@@ -423,32 +424,32 @@ func (h *Handler) buildAuthRows() []authRow {
 			}
 		}
 		rows = append(rows, authRow{
-			ID:            st.Auth.ID,
-			Kind:          kind,
-			Provider:      provider,
-			PlanType:      planType,
-			Label:         st.Auth.Label,
-			Email:         st.Auth.Email,
-			ProxyURL:      st.Auth.ProxyURL,
-			BaseURL:       st.Auth.BaseURL,
-			Group:         st.Auth.Group,
-			MaxConcurrent: st.Auth.MaxConcurrent,
-			ActiveClients: st.ActiveClients,
-			ClientTokens:  h.resolveClientTokenLabels(st.ClientTokens),
-			Disabled:      st.Auth.Disabled,
-			QuotaExceeded: !st.Auth.QuotaExceededAt.IsZero(),
-			QuotaResetAt:  quotaReset,
-			ExpiresAt:     expAt,
-			FileBacked:    strings.TrimSpace(st.Auth.FilePath) != "",
+			ID:                     st.Auth.ID,
+			Kind:                   kind,
+			Provider:               provider,
+			PlanType:               planType,
+			Label:                  st.Auth.Label,
+			Email:                  st.Auth.Email,
+			ProxyURL:               st.Auth.ProxyURL,
+			BaseURL:                st.Auth.BaseURL,
+			Group:                  st.Auth.Group,
+			MaxConcurrent:          st.Auth.MaxConcurrent,
+			ActiveClients:          st.ActiveClients,
+			ClientTokens:           h.resolveClientTokenLabels(st.ClientTokens),
+			Disabled:               st.Auth.Disabled,
+			QuotaExceeded:          !st.Auth.QuotaExceededAt.IsZero(),
+			QuotaResetAt:           quotaReset,
+			ExpiresAt:              expAt,
+			FileBacked:             strings.TrimSpace(st.Auth.FilePath) != "",
 			Healthy:                healthy,
 			HardFailure:            hardFail,
 			FailureReason:          failReason,
 			RefreshSuspended:       refreshSuspended,
 			RefreshSuspendedReason: refreshSuspendedReason,
-			LastClientCancel:   cancelAt,
-			ClientCancelReason: cancelReason,
-			ModelMap:           st.Auth.ModelMap,
-			Usage:              u,
+			LastClientCancel:       cancelAt,
+			ClientCancelReason:     cancelReason,
+			ModelMap:               st.Auth.ModelMap,
+			Usage:                  u,
 			CodexRateLimits: func() map[string]string {
 				if live == nil {
 					return nil
@@ -571,19 +572,19 @@ type clientRow struct {
 	// Full token; only set for rows that correspond to a registered client
 	// token (not for the synthetic IP-keyed rows in open mode). The panel
 	// needs this to build PATCH/DELETE URLs — admin auth covers exposure.
-	FullToken   string            `json:"full_token,omitempty"`
-	Label       string            `json:"label,omitempty"`
-	WeeklyUSD   float64           `json:"weekly_usd"`
-	WeeklyLimit float64           `json:"weekly_limit"`
-	Blocked     bool              `json:"blocked"`
-	FromConfig  bool              `json:"from_config,omitempty"`
-	Managed     bool              `json:"managed,omitempty"` // true = panel can edit/delete
-	Group       string            `json:"group,omitempty"`
+	FullToken   string  `json:"full_token,omitempty"`
+	Label       string  `json:"label,omitempty"`
+	WeeklyUSD   float64 `json:"weekly_usd"`
+	WeeklyLimit float64 `json:"weekly_limit"`
+	Blocked     bool    `json:"blocked"`
+	FromConfig  bool    `json:"from_config,omitempty"`
+	Managed     bool    `json:"managed,omitempty"` // true = panel can edit/delete
+	Group       string  `json:"group,omitempty"`
 	// RPM is the per-token requests-per-minute override. 0 = use global default.
-	RPM         int               `json:"rpm,omitempty"`
-	Total       usage.ClientCost  `json:"total"`
-	Weekly      []usage.WeekEntry `json:"weekly,omitempty"`
-	LastUsed    *time.Time        `json:"last_used,omitempty"`
+	RPM      int               `json:"rpm,omitempty"`
+	Total    usage.ClientCost  `json:"total"`
+	Weekly   []usage.WeekEntry `json:"weekly,omitempty"`
+	LastUsed *time.Time        `json:"last_used,omitempty"`
 }
 
 func maskToken(t string) string {
@@ -1138,7 +1139,7 @@ func (h *Handler) handleRequestsHourly(c *gin.Context) {
 	}
 	hours := 24
 	if v := strings.TrimSpace(c.Query("hours")); v != "" {
-		fmt.Sscanf(v, "%d", &hours)
+		_, _ = fmt.Sscanf(v, "%d", &hours)
 		if hours < 1 {
 			hours = 1
 		}
@@ -1215,13 +1216,13 @@ func (h *Handler) handleRequestsQuery(c *gin.Context) {
 		}
 	}
 	if v := c.Query("limit"); v != "" {
-		fmt.Sscanf(v, "%d", &f.Limit)
+		_, _ = fmt.Sscanf(v, "%d", &f.Limit)
 	}
 	if v := c.Query("offset"); v != "" {
-		fmt.Sscanf(v, "%d", &f.Offset)
+		_, _ = fmt.Sscanf(v, "%d", &f.Offset)
 	}
 	if v := c.Query("status"); v != "" {
-		fmt.Sscanf(v, "%d", &f.Status)
+		_, _ = fmt.Sscanf(v, "%d", &f.Status)
 	}
 	res, err := h.cachedQuery(f)
 	if err != nil {

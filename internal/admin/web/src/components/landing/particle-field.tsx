@@ -1,5 +1,5 @@
+import { Canvas, type RootState, useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
-import { Canvas, useFrame, type RootState } from "@react-three/fiber";
 import * as THREE from "three";
 
 // A slow-drifting shell of green points — ambient depth behind the hero,
@@ -11,7 +11,7 @@ function Points({ count, color }: { count: number; color: string }) {
   const positions = useMemo(() => {
     const arr = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      const r = 3.5 + Math.pow(Math.random(), 0.6) * 7;
+      const r = 3.5 + Math.random() ** 0.6 * 7;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
       arr[i * 3] = r * Math.sin(phi) * Math.cos(theta);
@@ -50,7 +50,13 @@ function Points({ count, color }: { count: number; color: string }) {
   );
 }
 
-export default function ParticleField({ color = "#34d399", count = 2600 }: { color?: string; count?: number }) {
+export default function ParticleField({
+  color = "#34d399",
+  count = 2600,
+}: {
+  color?: string;
+  count?: number;
+}) {
   return (
     <Canvas
       camera={{ position: [0, 0, 9], fov: 60 }}

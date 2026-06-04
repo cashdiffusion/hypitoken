@@ -33,8 +33,8 @@ function buildCSSVars(config: ChartConfig, isDark: boolean): Record<string, stri
 }
 
 function useIsDark(): boolean {
-  const [isDark, setIsDark] = React.useState(() =>
-    typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
+  const [isDark, setIsDark] = React.useState(
+    () => typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
   );
   React.useEffect(() => {
     const obs = new MutationObserver(() => {
@@ -87,7 +87,7 @@ type TooltipEntry = {
   name?: string | number;
   value?: number | string;
   color?: string;
-  payload?: Record<string, any>;
+  payload?: Record<string, unknown>;
 };
 
 export const ChartTooltipContent = React.forwardRef<
@@ -98,7 +98,10 @@ export const ChartTooltipContent = React.forwardRef<
     label?: string | number;
     hideLabel?: boolean;
     indicator?: "line" | "dot" | "dashed";
-    labelFormatter?: (value: any, payload: TooltipEntry[]) => React.ReactNode;
+    labelFormatter?: (
+      value: string | number | undefined,
+      payload: TooltipEntry[],
+    ) => React.ReactNode;
     valueFormatter?: (value: number | string) => React.ReactNode;
   }
 >(
@@ -135,19 +138,20 @@ export const ChartTooltipContent = React.forwardRef<
       >
         {labelNode}
         <div className="grid gap-1.5">
-          {payload.map((item, i) => {
+          {payload.map((item) => {
             const key = `${item.dataKey || item.name || "value"}`;
             const itemConfig = config[key];
             const color = item.color || itemConfig?.color || `var(--color-${key})`;
             const v = item.value;
             return (
-              <div key={`${item.dataKey}-${i}`} className="flex items-center gap-2">
+              <div key={key} className="flex items-center gap-2">
                 <div
                   className={cn(
                     "shrink-0 rounded-[2px]",
                     indicator === "dot" && "h-2.5 w-2.5",
                     indicator === "line" && "h-2.5 w-1",
-                    indicator === "dashed" && "h-2.5 w-2.5 border-[1.5px] border-dashed bg-transparent",
+                    indicator === "dashed" &&
+                      "h-2.5 w-2.5 border-[1.5px] border-dashed bg-transparent",
                   )}
                   style={{
                     background: indicator === "dashed" ? "transparent" : color,
@@ -181,7 +185,7 @@ export const ChartLegend = RechartsPrimitive.Legend;
 export const ChartLegendContent = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<"div"> & {
-    payload?: { value?: any; dataKey?: any; color?: string }[];
+    payload?: { value?: string | number; dataKey?: string | number; color?: string }[];
     verticalAlign?: "top" | "bottom" | "middle";
   }
 >(({ className, payload, verticalAlign = "bottom" }, ref) => {

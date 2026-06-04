@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
+import { GlassPanel } from "@/components/app/page-primitives";
+import { SpotlightCard } from "@/components/landing/interactions";
+import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { apiGet } from "@/lib/api";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { fmtInt, fmtUSD } from "@/lib/utils";
+import type { Credential } from "@/lib/types";
+import { cn, fmtInt, fmtUSD } from "@/lib/utils";
 import { Sparkline, type SparkPoint } from "./sparkline";
 
 interface RequestAgg {
@@ -68,7 +71,7 @@ export function OverviewPanel({ refreshTick }: { refreshTick: number }) {
         apiGet<RequestsResp>(`/admin/requests?limit=1&from=${from}&to=${to}`),
         apiGet<RequestsResp>(`/admin/requests?limit=1`),
         apiGet<{ buckets: HourBucket[] }>(`/admin/requests/hourly?hours=24`),
-        apiGet<{ credentials: any[] }>(`/admin/credentials`),
+        apiGet<{ credentials: Credential[] }>(`/admin/credentials`),
       ]);
       setReqData(d);
       setLifetime(all);
@@ -94,12 +97,13 @@ export function OverviewPanel({ refreshTick }: { refreshTick: number }) {
     }
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick is the intentional parent-driven refresh trigger; load is stable (useCallback []).
   useEffect(() => {
     load();
   }, [load, refreshTick]);
 
   const sparkData: SparkPoint[] = hourly.map((b) => ({
-    label: b.hour.slice(11, 16) + " UTC",
+    label: `${b.hour.slice(11, 16)} UTC`,
     value: b.cost_usd || 0,
   }));
 
@@ -116,135 +120,142 @@ export function OverviewPanel({ refreshTick }: { refreshTick: number }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <MetricCard
-          label="Pool"
-          value={pool ? `${pool.healthy}/${pool.total}` : "—"}
-          unit="healthy"
-          hint={
-            pool
-              ? `${pool.quota || 0} quota · ${pool.unhealthy || 0} fail · ${pool.disabled || 0} off`
-              : busy
-              ? "loading…"
-              : "no data"
-          }
-        />
-        <MetricCard
-          label={`Cost ${DAYS}d`}
-          value={fmtUSD(reqData?.summary.cost_usd)}
-          unit="usd"
-          hint={reqData ? `${fmtInt(reqData.summary.count)} req` : ""}
-        />
-        <MetricCard
-          label="Cost lifetime"
-          value={fmtUSD(lifetime?.summary.cost_usd)}
-          unit="usd"
-          hint={lifetime ? `${fmtInt(lifetime.summary.count)} req` : ""}
-        />
-        <MetricCard
-          label="Errors 14d"
-          value={fmtInt(reqData?.summary.errors)}
-          unit=""
-          hint={reqData ? `${fmtInt(reqData.summary.input_tokens)} in / ${fmtInt(reqData.summary.output_tokens)} out` : ""}
-        />
-      </div>
+      <RevealStagger className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <RevealItem className="flex">
+          <MetricTile
+            label="Pool"
+            value={pool ? `${pool.healthy}/${pool.total}` : "—"}
+            unit="healthy"
+            accent
+            hint={
+              pool
+                ? `${pool.quota || 0} quota · ${pool.unhealthy || 0} fail · ${pool.disabled || 0} off`
+                : busy
+                  ? "loading…"
+                  : "no data"
+            }
+          />
+        </RevealItem>
+        <RevealItem className="flex">
+          <MetricTile
+            label={`Cost ${DAYS}d`}
+            value={fmtUSD(reqData?.summary.cost_usd)}
+            unit="usd"
+            hint={reqData ? `${fmtInt(reqData.summary.count)} req` : ""}
+          />
+        </RevealItem>
+        <RevealItem className="flex">
+          <MetricTile
+            label="Cost lifetime"
+            value={fmtUSD(lifetime?.summary.cost_usd)}
+            unit="usd"
+            hint={lifetime ? `${fmtInt(lifetime.summary.count)} req` : ""}
+          />
+        </RevealItem>
+        <RevealItem className="flex">
+          <MetricTile
+            label="Errors 14d"
+            value={fmtInt(reqData?.summary.errors)}
+            hint={
+              reqData
+                ? `${fmtInt(reqData.summary.input_tokens)} in / ${fmtInt(reqData.summary.output_tokens)} out`
+                : ""
+            }
+          />
+        </RevealItem>
+      </RevealStagger>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-baseline justify-between">
-            <div>
-              <CardTitle>24h activity</CardTitle>
-              <CardDescription>Hourly cost (USD) — sparkline below</CardDescription>
-            </div>
-            <span className="text-sm text-muted-foreground font-mono">
+      <Reveal>
+        <GlassPanel
+          title="24h activity"
+          description="Hourly cost (USD) — sparkline below"
+          action={
+            <span className="font-mono text-sm text-muted-foreground tabular-nums">
               {hourly.length > 0 ? fmtUSD(hourly.reduce((s, h) => s + (h.cost_usd || 0), 0)) : "—"}
             </span>
-          </div>
-        </CardHeader>
-        <CardContent>
+          }
+        >
           <Sparkline data={sparkData} />
-        </CardContent>
-      </Card>
+        </GlassPanel>
+      </Reveal>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Card>
-          <CardHeader>
-            <CardTitle>Top clients · 14d</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {topClients.length === 0 ? (
-              <div className="text-sm text-muted-foreground">—</div>
-            ) : (
-              <table className="w-full text-sm">
-                <tbody>
-                  {topClients.map(([k, a]) => (
-                    <tr key={k} className="border-b last:border-0">
-                      <td className="py-1.5 pr-3 font-medium">
-                        {k || <span className="text-muted-foreground">(unnamed)</span>}
-                      </td>
-                      <td className="py-1.5 font-mono text-right">{fmtUSD(a.cost_usd)}</td>
-                      <td className="py-1.5 font-mono text-right text-muted-foreground w-20">
-                        {fmtInt(a.count)} req
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Top models · 14d</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {topModels.length === 0 ? (
-              <div className="text-sm text-muted-foreground">—</div>
-            ) : (
-              <table className="w-full text-sm">
-                <tbody>
-                  {topModels.map(([k, a]) => (
-                    <tr key={k} className="border-b last:border-0">
-                      <td className="py-1.5 pr-3 font-mono">{k}</td>
-                      <td className="py-1.5 font-mono text-right">{fmtUSD(a.cost_usd)}</td>
-                      <td className="py-1.5 font-mono text-right text-muted-foreground w-20">
-                        {fmtInt(a.count)} req
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <Reveal>
+          <GlassPanel title="Top clients · 14d">
+            <TopTable rows={topClients} mono={false} />
+          </GlassPanel>
+        </Reveal>
+        <Reveal delay={0.05}>
+          <GlassPanel title="Top models · 14d">
+            <TopTable rows={topModels} mono />
+          </GlassPanel>
+        </Reveal>
       </div>
     </div>
   );
 }
 
-function MetricCard({
+function TopTable({ rows, mono }: { rows: [string, RequestAgg][]; mono: boolean }) {
+  if (rows.length === 0) return <div className="text-sm text-muted-foreground">—</div>;
+  return (
+    <table className="w-full text-sm">
+      <tbody>
+        {rows.map(([k, a]) => (
+          <tr
+            key={k}
+            className="border-b border-border/50 transition-colors last:border-0 hover:bg-primary/[0.03]"
+          >
+            <td className={cn("py-1.5 pr-3", mono ? "font-mono" : "font-medium")}>
+              {k || <span className="text-muted-foreground">(unnamed)</span>}
+            </td>
+            <td className="py-1.5 text-right font-mono tabular-nums">{fmtUSD(a.cost_usd)}</td>
+            <td className="w-20 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
+              {fmtInt(a.count)} req
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function MetricTile({
   label,
   value,
   unit,
   hint,
+  accent,
 }: {
   label: string;
   value: string | number;
   unit?: string;
   hint?: string;
+  accent?: boolean;
 }) {
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-        <div className="mt-2 flex items-baseline gap-1.5">
-          <span className="font-mono text-2xl md:text-3xl leading-none font-medium tracking-tight tabular-nums">
-            {value}
+    <SpotlightCard
+      tiltDeg={0}
+      className={cn("h-full w-full p-4", accent && "ring-1 ring-primary/30")}
+    >
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-2 flex items-baseline gap-1.5">
+        <span
+          className={cn(
+            "font-mono text-2xl font-semibold leading-none tracking-tight tabular-nums md:text-3xl",
+            accent ? "text-primary" : "text-foreground",
+          )}
+        >
+          {value}
+        </span>
+        {unit && (
+          <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            {unit}
           </span>
-          {unit && <span className="font-mono text-xs text-muted-foreground uppercase">{unit}</span>}
-        </div>
-        {hint && <div className="mt-2 text-xs font-mono text-muted-foreground tabular-nums">{hint}</div>}
-      </CardContent>
-    </Card>
+        )}
+      </div>
+      {hint && (
+        <div className="mt-2 font-mono text-[11px] tabular-nums text-muted-foreground">{hint}</div>
+      )}
+    </SpotlightCard>
   );
 }

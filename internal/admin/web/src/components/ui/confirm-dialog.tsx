@@ -1,8 +1,15 @@
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
+import { createContext, type ReactNode, useCallback, useContext, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export interface ConfirmOptions {
   title?: ReactNode;
@@ -63,7 +70,10 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             <Button variant="outline" onClick={() => settle(false)}>
               {opts.cancelLabel ?? t("common.cancel")}
             </Button>
-            <Button variant={opts.destructive ? "destructive" : "default"} onClick={() => settle(true)}>
+            <Button
+              variant={opts.destructive ? "destructive" : "default"}
+              onClick={() => settle(true)}
+            >
               {opts.confirmLabel ?? t("common.confirm")}
             </Button>
           </DialogFooter>

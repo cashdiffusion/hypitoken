@@ -1,7 +1,11 @@
-import { useRef, type ReactNode } from "react";
 import {
-  motion, useMotionValue, useSpring, useMotionTemplate, useReducedMotion,
+  motion,
+  useMotionTemplate,
+  useMotionValue,
+  useReducedMotion,
+  useSpring,
 } from "motion/react";
+import { type ReactNode, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 /* SpotlightCard — a glass card with a cursor-following primary-tinted glow and
@@ -54,15 +58,22 @@ export function SpotlightCard({
       style={reduce ? undefined : { rotateX: rx, rotateY: ry, transformPerspective: 1000 }}
       className={cn(
         "glass group relative overflow-hidden rounded-2xl p-6 transition-shadow duration-300 hover:shadow-[0_20px_60px_-24px_color-mix(in_oklch,var(--primary)_45%,transparent)]",
-        className
+        className,
       )}
     >
-      <motion.div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: glow, opacity: glowOpacity }} />
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{ background: glow, opacity: glowOpacity }}
+      />
       {/* hairline top highlight that brightens on hover */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-px opacity-60 transition-opacity duration-300 group-hover:opacity-100"
-        style={{ background: "linear-gradient(90deg, transparent, color-mix(in oklch, var(--primary) 60%, transparent), transparent)" }}
+        style={{
+          background:
+            "linear-gradient(90deg, transparent, color-mix(in oklch, var(--primary) 60%, transparent), transparent)",
+        }}
       />
       <div className="relative">{children}</div>
     </motion.div>
@@ -71,7 +82,15 @@ export function SpotlightCard({
 
 /* Magnetic — wraps an interactive element so it drifts toward the cursor, then
  * springs back on leave. Subtle by default; honours reduced motion. */
-export function Magnetic({ children, strength = 0.35, className }: { children: ReactNode; strength?: number; className?: string }) {
+export function Magnetic({
+  children,
+  strength = 0.35,
+  className,
+}: {
+  children: ReactNode;
+  strength?: number;
+  className?: string;
+}) {
   const reduce = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
   const x = useSpring(0, { stiffness: 220, damping: 16 });
@@ -104,7 +123,15 @@ export function Magnetic({ children, strength = 0.35, className }: { children: R
 
 /* Marquee — seamless infinite horizontal scroll. Duplicates its children and
  * translates -50%; edges fade via a mask. Pauses on hover. */
-export function Marquee({ children, durationSec = 32, className }: { children: ReactNode; durationSec?: number; className?: string }) {
+export function Marquee({
+  children,
+  durationSec = 32,
+  className,
+}: {
+  children: ReactNode;
+  durationSec?: number;
+  className?: string;
+}) {
   const reduce = useReducedMotion();
   return (
     <div
@@ -115,11 +142,16 @@ export function Marquee({ children, durationSec = 32, className }: { children: R
       }}
     >
       <div
-        className={cn("flex w-max items-center gap-12", !reduce && "animate-marquee group-hover/marquee:[animation-play-state:paused]")}
+        className={cn(
+          "flex w-max items-center gap-12",
+          !reduce && "animate-marquee group-hover/marquee:[animation-play-state:paused]",
+        )}
         style={{ ["--marquee-dur" as string]: `${durationSec}s` }}
       >
         <div className="flex shrink-0 items-center gap-12">{children}</div>
-        <div className="flex shrink-0 items-center gap-12" aria-hidden>{children}</div>
+        <div className="flex shrink-0 items-center gap-12" aria-hidden>
+          {children}
+        </div>
       </div>
     </div>
   );

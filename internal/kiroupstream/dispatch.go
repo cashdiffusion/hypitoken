@@ -95,8 +95,11 @@ func (d *Dispatcher) PickCredential(ctx context.Context, excludeIDs map[string]b
 		d.Quota = newQuotaCache()
 	}
 
-	// Round-robin offset then linear scan; first usable wins.
-	start := int(atomic.AddUint64(&d.rrCounter, 1)-1) % len(all)
+	// Round-robin offset then linear scan; first usable wins. Take the modulo
+	// in uint64 space so the result is always in [0, len(all)) — this both
+	// avoids a uint64→int overflow and rules out a negative index.
+	//nolint:gosec // value is taken mod len(all), so it is always in [0, len(all)) and fits in int.
+	start := int((atomic.AddUint64(&d.rrCounter, 1) - 1) % uint64(len(all)))
 	var firstErr error
 	for i := 0; i < len(all); i++ {
 		e := all[(start+i)%len(all)]
@@ -132,7 +135,7 @@ func (d *Dispatcher) PickCredential(ctx context.Context, excludeIDs map[string]b
 //
 // Returns the accumulated usage counters for billing. The Anthropic
 // message_id from message_start is also returned so the caller can log it.
-func (d *Dispatcher) Forward(c *gin.Context, ctx context.Context, areq *kirobridge.AnthropicRequest, cred *kirocreds.Entry, profileARN string) (usage.Counts, string, error) {
+func (d *Dispatcher) Forward(ctx context.Context, c *gin.Context, areq *kirobridge.AnthropicRequest, cred *kirocreds.Entry, profileARN string) (usage.Counts, string, error) {
 	if areq == nil {
 		return usage.Counts{}, "", errors.New("kiroupstream: nil request")
 	}
@@ -313,11 +316,12 @@ func (d *Dispatcher) writeOneShot(c *gin.Context, tr *kirobridge.StreamTranslato
 		t := toolByIdx[idx]
 		var input json.RawMessage
 		buf := strings.TrimSpace(t.Buf)
-		if buf == "" {
+		switch {
+		case buf == "":
 			input = json.RawMessage(`{}`)
-		} else if json.Valid([]byte(buf)) {
+		case json.Valid([]byte(buf)):
 			input = json.RawMessage(buf)
-		} else {
+		default:
 			// Last-resort: wrap as a string so downstream sees something.
 			b, _ := json.Marshal(buf)
 			input = b
@@ -384,17 +388,12 @@ func newMessageID() string {
 	return "msg_" + randHex24()
 }
 
-var mu sync.Mutex
-var seed uint64
-
 func randHex24() string {
 	// 12 random bytes → 24 hex chars. Use rand.Read via a one-off io.Reader.
 	b := make([]byte, 12)
-	if _, err := io.ReadFull(cryptoRand{}, b); err != nil {
-		mu.Lock()
-		seed++
-		mu.Unlock()
-	}
+	// crypto reads effectively never fail; on the off chance one does we fall
+	// through with the zero-filled buffer rather than crash.
+	_, _ = io.ReadFull(cryptoRand{}, b)
 	const hex = "0123456789abcdef"
 	out := make([]byte, 24)
 	for i, by := range b {
