@@ -33,6 +33,14 @@ jobs:
         with:
           go-version: "1.25"
           cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # golangci-lint runs the Go typechecker, which evaluates the
+      # //go:embed all:web/dist directive in internal/admin/admin.go. Build
+      # the SPA first so that embed pattern resolves (mirrors the build job).
+      - name: Build admin SPA
+        run: make web
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
