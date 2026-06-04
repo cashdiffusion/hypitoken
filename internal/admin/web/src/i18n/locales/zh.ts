@@ -184,7 +184,7 @@ export default {
 
   billing: {
     title: "账单",
-    sub: "通过支付宝充值 USD 钱包。",
+    sub: "充值你的 USD 钱包。",
     currentBalance: "当前余额",
     lifetimeUsage: "累计使用",
     requestsBilledTopups: "{{r}} 次请求 · {{t}} 次充值",
@@ -209,7 +209,7 @@ export default {
     },
     dialog: {
       title: "充值钱包",
-      sub: "按实时 USD/CNY 汇率通过支付宝付款，钱包以 USD 入账。",
+      sub: "通过 Stripe 安全支付，钱包以 USD 入账。",
       amountLabel: "金额 (USD)",
       youPay: "实付 (CNY)",
       walletCredit: "钱包到账",
@@ -248,6 +248,7 @@ export default {
       secured: "由 Stripe 保障 · 符合 PCI-DSS",
       success: "支付成功",
       failed: "支付未能完成。",
+      unavailable: "支付暂时不可用，请稍后再试。",
       methods: {
         card: "银行卡",
         crypto: "加密货币",

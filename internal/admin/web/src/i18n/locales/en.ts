@@ -186,7 +186,7 @@ export default {
 
   billing: {
     title: "Billing",
-    sub: "Top up your USD wallet with Alipay.",
+    sub: "Top up your USD wallet.",
     currentBalance: "Current balance",
     lifetimeUsage: "Lifetime usage",
     requestsBilledTopups: "{{r}} requests billed · {{t}} top-ups",
@@ -211,7 +211,7 @@ export default {
     },
     dialog: {
       title: "Top up wallet",
-      sub: "Pay in CNY with Alipay at the live USD/CNY rate. Your wallet is credited in USD.",
+      sub: "Pay securely via Stripe. Your wallet is credited in USD.",
       amountLabel: "Amount (USD)",
       youPay: "You pay (CNY)",
       walletCredit: "Wallet credit",
@@ -250,6 +250,7 @@ export default {
       secured: "Secured by Stripe · PCI-DSS",
       success: "Payment successful",
       failed: "Payment could not be completed.",
+      unavailable: "Payment is temporarily unavailable, please try again later.",
       methods: {
         card: "Card",
         crypto: "Crypto",

@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useTranslation, Trans } from "react-i18next";
-import { QRCodeSVG } from "qrcode.react";
-import { Wallet, RefreshCw, Lock, TrendingUp, CreditCard, QrCode, CheckCircle2, Loader2 } from "lucide-react";
+import { Wallet, RefreshCw, TrendingUp, CheckCircle2, Loader2 } from "lucide-react";
 import { StripeTopUp } from "@/components/app/stripe-topup";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -193,7 +192,7 @@ export default function BillingPage() {
         </GlassPanel>
       </Reveal>
 
-      <TopUpDialog open={open} onOpenChange={setOpen} rate={rate} onPaid={async () => { await reload(); await refresh(); }} />
+      <TopUpDialog open={open} onOpenChange={setOpen} onPaid={async () => { await reload(); await refresh(); }} />
     </div>
   );
 }
@@ -216,7 +215,7 @@ type ProvidersInfo = {
   qr: { enabled: boolean };
 };
 
-function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
+function TopUpDialog({ open, onOpenChange, onPaid }: any) {
   const { t } = useTranslation();
   const [usd, setUsd] = useState("10");
   const [order, setOrder] = useState<any>(null);
@@ -224,61 +223,27 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
   const [polling, setPolling] = useState(false);
   const [paid, setPaid] = useState(false);
 
-  // Which rails are available + which one is selected. Stripe is preferred
-  // when enabled; the QR rail (Z-Pay / Alipay) stays as a fallback.
+  // Stripe is the only top-up rail (USD wallet; Adaptive Pricing localizes the
+  // buyer's currency at checkout so Alipay et al. work). The legacy QR/Z-Pay
+  // rail is no longer surfaced in the UI.
   const [providers, setProviders] = useState<ProvidersInfo | null>(null);
-  const [provider, setProvider] = useState<"stripe" | "qr">("stripe");
-
-  // Live CNY rate (only relevant for the QR rail; Stripe charges 1:1 in USD).
-  const [liveRate, setLiveRate] = useState<ExchangeRate | null>(initialRate);
-  const [rateAge, setRateAge] = useState(0);
 
   useEffect(() => {
     if (!open) return;
     apiGet<ProvidersInfo>("/billing/providers")
-      .then((p) => {
-        setProviders(p);
-        setProvider(p.stripe?.enabled ? "stripe" : "qr");
-      })
-      .catch(() => setProviders({ stripe: { enabled: false }, qr: { enabled: true } }));
+      .then(setProviders)
+      .catch(() => setProviders({ stripe: { enabled: false }, qr: { enabled: false } }));
   }, [open]);
-
-  useEffect(() => {
-    // Live CNY rate is only needed for the QR rail (Stripe charges USD 1:1 and
-    // localizes the buyer's currency itself via Adaptive Pricing).
-    if (!open || order || provider !== "qr") return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const r = await apiGet<ExchangeRate>("/billing/rate");
-        if (!cancelled) { setLiveRate(r); setRateAge(0); }
-      } catch {}
-    };
-    tick();
-    const fetchT = setInterval(tick, 30_000);
-    const ageT = setInterval(() => setRateAge((a) => a + 1), 1000);
-    return () => { cancelled = true; clearInterval(fetchT); clearInterval(ageT); };
-  }, [open, order, provider, providers]);
-  const rate = liveRate;
 
   const amount = parseFloat(usd || "0");
   const stripeEnabled = !!providers?.stripe?.enabled;
-  const qrEnabled = !!providers?.qr?.enabled;
 
   const create = async () => {
     setBusy(true);
     try {
-      const body = provider === "stripe"
-        ? { usd: amount, provider: "stripe" }
-        : { usd: amount, method: "alipay" };
-      const r = await apiPost<any>("/billing/topup", body);
+      const r = await apiPost<any>("/billing/topup", { usd: amount, provider: "stripe" });
       setOrder(r);
-      if (provider !== "stripe") {
-        // QR rail settles asynchronously — start polling immediately.
-        setPolling(true);
-        pollOrder(r.out_trade_no);
-      }
-      // Stripe rail: wait for the PaymentElement to confirm before polling.
+      // Wait for the Checkout Element to confirm before polling.
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -318,8 +283,6 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
     setUsd("10");
   };
 
-  const isStripeOrder = order && order.provider === "stripe";
-
   return (
     <Dialog open={open} onOpenChange={(v) => (!v ? close() : onOpenChange(true))}>
       <DialogContent className="sm:max-w-[520px]">
@@ -340,63 +303,26 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
                 ))}
               </div>
 
-              {/* Rail selector — only shown when both rails are available. */}
-              {stripeEnabled && qrEnabled && (
-                <div className="grid grid-cols-2 gap-2">
-                  <RailButton
-                    active={provider === "stripe"}
-                    onClick={() => setProvider("stripe")}
-                    icon={<CreditCard className="h-4 w-4" />}
-                    title={t("billing.provider.stripe")}
-                    sub={t("billing.provider.stripeSub")}
-                  />
-                  <RailButton
-                    active={provider === "qr"}
-                    onClick={() => setProvider("qr")}
-                    icon={<QrCode className="h-4 w-4" />}
-                    title={t("billing.provider.qr")}
-                    sub={t("billing.provider.qrSub")}
-                  />
+              <div className="space-y-3">
+                <MethodChips />
+                <div className="rounded-md border border-border-strong bg-muted/30 p-3 text-sm">
+                  <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.stripe.youPay")}</span><span className="font-mono tabular-nums">{fmtUSD(amount)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.dialog.walletCredit")}</span><span className="font-mono tabular-nums">{fmtUSD(amount)}</span></div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">{t("billing.stripe.localizeNote")}</div>
                 </div>
-              )}
-
-              {provider === "stripe" ? (
-                <div className="space-y-3">
-                  <MethodChips />
-                  <div className="rounded-md border border-border-strong bg-muted/30 p-3 text-sm">
-                    <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.stripe.youPay")}</span><span className="font-mono tabular-nums">{fmtUSD(amount)}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.dialog.walletCredit")}</span><span className="font-mono tabular-nums">{fmtUSD(amount)}</span></div>
-                    <div className="mt-1 text-[11px] text-muted-foreground">{t("billing.stripe.localizeNote")}</div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <AlipayBadge />
-                  <div className="rounded-md border border-border-strong bg-muted/30 p-3 text-sm">
-                    <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.dialog.youPay")}</span><span className="font-mono tabular-nums">¥{(amount * (rate?.cny_per_usd || 7.2)).toFixed(2)}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">{t("billing.dialog.walletCredit")}</span><span className="font-mono tabular-nums">{fmtUSD(amount)}</span></div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground inline-flex items-center gap-1.5">
-                        <span className="relative inline-flex h-1.5 w-1.5">
-                          <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75 animate-ping" />
-                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        </span>
-                        {t("billing.dialog.liveRate")}{rateAge > 1 ? t("billing.dialog.rateSecondsAgo", { n: rateAge }) : ""}
-                      </span>
-                      <span className="font-mono text-muted-foreground">{t("billing.dialog.ratePrefix")}{rate?.cny_per_usd.toFixed(4)}</span>
-                    </div>
-                  </div>
-                </>
-              )}
+                {providers && !stripeEnabled && (
+                  <p className="text-sm text-destructive">{t("billing.stripe.unavailable")}</p>
+                )}
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={close}>{t("billing.dialog.cancel")}</Button>
-              <Button onClick={create} disabled={busy || !(amount >= 1) || !providers}>{busy ? t("billing.dialog.creating") : t("billing.dialog.create")}</Button>
+              <Button onClick={create} disabled={busy || !(amount >= 1) || !stripeEnabled}>{busy ? t("billing.dialog.creating") : t("billing.dialog.create")}</Button>
             </DialogFooter>
           </>
         ) : paid ? (
           <PaidState usd={order.usd_credit} />
-        ) : isStripeOrder ? (
+        ) : (
           <>
             <DialogHeader>
               <DialogTitle>{t("billing.stripe.payTitle")}</DialogTitle>
@@ -423,59 +349,9 @@ function TopUpDialog({ open, onOpenChange, rate: initialRate, onPaid }: any) {
               </DialogFooter>
             )}
           </>
-        ) : (
-          <>
-            <DialogHeader>
-              <DialogTitle>{t("billing.dialog.payTitle")}</DialogTitle>
-              <DialogDescription>
-                {order.pay_url ? t("billing.dialog.payDescWithUrl") : t("billing.dialog.payDescNoUrl")}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex flex-col items-center gap-4 py-4">
-              <AlipayBadge />
-              <div className="rounded-lg border border-border-strong bg-white p-4">
-                {order.img ? (
-                  <img src={order.img} alt="Alipay QR" width={220} height={220} className="block" />
-                ) : (
-                  <QRCodeSVG value={order.pay_url || order.qr_code} size={220} level="M" />
-                )}
-              </div>
-              <div className="text-center">
-                <div className="font-mono text-2xl font-semibold tabular-nums">¥{order.cny_amount.toFixed(2)}</div>
-                <div className="text-sm text-muted-foreground">{t("billing.dialog.walletCreditApprox", { n: order.usd_credit })}</div>
-                <div className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground font-mono">
-                  <Lock className="h-3 w-3" />
-                  {t("billing.dialog.rateLocked", { rate: order.rate.toFixed(4) })}
-                </div>
-              </div>
-              {order.pay_url && (
-                <a href={order.pay_url} target="_blank" rel="noreferrer noopener" className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90">
-                  {t("billing.dialog.openInAlipay")}
-                </a>
-              )}
-              <div className="text-xs text-muted-foreground">{polling ? t("billing.dialog.waiting") : t("billing.dialog.timeout")}</div>
-              <code className="text-xs text-muted-foreground">{order.out_trade_no}</code>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={close}>{t("common.close")}</Button>
-            </DialogFooter>
-          </>
         )}
       </DialogContent>
     </Dialog>
-  );
-}
-
-function RailButton({ active, onClick, icon, title, sub }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; sub: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition ${active ? "border-primary bg-primary/[0.06] ring-1 ring-primary/30" : "border-border-strong hover:border-primary/40"}`}
-    >
-      <span className={`inline-flex items-center gap-2 text-sm font-medium ${active ? "text-primary" : "text-foreground"}`}>{icon}{title}</span>
-      <span className="text-[11px] text-muted-foreground">{sub}</span>
-    </button>
   );
 }
 
@@ -508,21 +384,3 @@ function PaidState({ usd }: { usd: number }) {
   );
 }
 
-function AlipayBadge() {
-  const { t } = useTranslation();
-  return (
-    <div className="flex items-center gap-2.5 rounded-md border border-[#1677FF]/30 bg-[#1677FF]/[0.06] px-3 py-2">
-      <span
-        aria-hidden="true"
-        className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[#1677FF] font-display text-sm font-semibold text-white"
-        style={{ fontFamily: '"PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif' }}
-      >
-        支
-      </span>
-      <div className="flex min-w-0 flex-col leading-tight">
-        <span className="text-sm font-semibold text-foreground">Alipay 支付宝</span>
-        <span className="text-[11px] text-muted-foreground">{t("billing.dialog.onlySupported")}</span>
-      </div>
-    </div>
-  );
-}
