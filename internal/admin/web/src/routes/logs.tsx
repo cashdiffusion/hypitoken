@@ -5,6 +5,9 @@ import { api } from "@/lib/api";
 import { lookupPriceCard } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Reveal, RevealStagger, RevealItem } from "@/components/landing/reveal";
+import { SpotlightCard } from "@/components/landing/interactions";
+import { PageHeader } from "@/components/app/page-primitives";
 import { cn } from "@/lib/utils";
 
 interface PriceCard {
@@ -120,33 +123,28 @@ export default function LogsPage() {
   const pricing = data?.pricing || {};
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="font-display text-3xl font-semibold tracking-tight">
-            <Receipt className="inline-block h-7 w-7 align-[-3px] text-primary" /> {t("logs.title")}
-          </h1>
-          <p className="mt-2 text-sm text-muted-foreground max-w-2xl">{t("logs.sub")}</p>
-        </div>
-        <Button
-          variant="outline"
-          onClick={() => reload(offset)}
-          disabled={busy}
-          className="gap-2"
-        >
-          <RefreshCw className={cn("h-4 w-4", busy && "animate-spin")} />
-          {t("common.refresh")}
-        </Button>
-      </header>
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow={t("nav.logs")}
+        icon={Receipt}
+        title={t("logs.title")}
+        sub={t("logs.sub")}
+        action={
+          <Button variant="outline" onClick={() => reload(offset)} disabled={busy} className="gap-2">
+            <RefreshCw className={cn("h-4 w-4", busy && "animate-spin")} />
+            {t("common.refresh")}
+          </Button>
+        }
+      />
 
       {sum && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <SumTile label={t("logs.summary.requests")} value={sum.count.toLocaleString()} />
-          <SumTile label={t("logs.summary.sumIn")} value={fmtTokens(sum.input_tokens)} />
-          <SumTile label={t("logs.summary.sumOut")} value={fmtTokens(sum.output_tokens)} />
-          <SumTile label={t("logs.summary.cacheRead")} value={fmtTokens(sum.cache_read_tokens)} />
-          <SumTile label={t("logs.summary.totalBilled")} value={fmtUSD(sum.cost_usd)} accent />
-        </div>
+        <RevealStagger className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <RevealItem className="flex"><SumTile label={t("logs.summary.requests")} value={sum.count.toLocaleString()} /></RevealItem>
+          <RevealItem className="flex"><SumTile label={t("logs.summary.sumIn")} value={fmtTokens(sum.input_tokens)} /></RevealItem>
+          <RevealItem className="flex"><SumTile label={t("logs.summary.sumOut")} value={fmtTokens(sum.output_tokens)} /></RevealItem>
+          <RevealItem className="flex"><SumTile label={t("logs.summary.cacheRead")} value={fmtTokens(sum.cache_read_tokens)} /></RevealItem>
+          <RevealItem className="flex"><SumTile label={t("logs.summary.totalBilled")} value={fmtUSD(sum.cost_usd)} accent /></RevealItem>
+        </RevealStagger>
       )}
 
       {err && (
@@ -155,7 +153,7 @@ export default function LogsPage() {
         </div>
       )}
 
-      <div className="rounded-xl border border-border overflow-hidden">
+      <Reveal className="glass overflow-hidden rounded-2xl">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/30 text-xs text-muted-foreground uppercase tracking-wider">
@@ -214,7 +212,7 @@ export default function LogsPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </Reveal>
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
@@ -254,12 +252,7 @@ export default function LogsPage() {
 
 function SumTile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div
-      className={cn(
-        "rounded-lg border p-3",
-        accent ? "border-primary/30 bg-primary/5" : "border-border bg-card",
-      )}
-    >
+    <SpotlightCard tiltDeg={0} className={cn("w-full rounded-xl p-3.5", accent && "ring-1 ring-primary/30")}>
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div
         className={cn(
@@ -269,7 +262,7 @@ function SumTile({ label, value, accent }: { label: string; value: string; accen
       >
         {value}
       </div>
-    </div>
+    </SpotlightCard>
   );
 }
 

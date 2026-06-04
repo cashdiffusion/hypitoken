@@ -131,6 +131,54 @@ func (db *DB) CreditPaidOrder(ctx context.Context, outTradeNo, tradeNo string, u
 	return bal, nil
 }
 
+// CreditStripeOrder is the Stripe analogue of CreditPaidOrder. The settlement
+// source is an amount-verified PaymentIntent (retrieved live or delivered by a
+// signature-checked webhook), which is authoritative — so unlike the Alipay
+// path it credits an order that is pending OR expired. A slow redirect-based
+// method (Alipay / WeChat / crypto via Stripe) can settle after the 15-minute
+// sweeper already flipped the order to expired; without this the money would be
+// taken but never credited. Still fully idempotent: a paid order is a no-op
+// returning ErrOrderNotPending, so webhook + poll racing can't double-credit.
+func (db *DB) CreditStripeOrder(ctx context.Context, outTradeNo, tradeNo string, userID int64, usdCredit float64, ref, note string) (float64, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	now := time.Now().Unix()
+
+	// Flip (pending|expired) → paid. The `status != 'paid'` guard keeps the
+	// double-credit window closed while still rescuing expired orders.
+	res, err := tx.ExecContext(ctx, `UPDATE alipay_orders SET status = ?, trade_no = ?, paid_at = ? WHERE out_trade_no = ? AND status != ?`,
+		OrderPaid, tradeNo, now, outTradeNo, OrderPaid)
+	if err != nil {
+		return 0, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return 0, ErrOrderNotPending
+	}
+
+	var bal float64
+	if err := tx.QueryRowContext(ctx, `SELECT balance_usd FROM users WHERE id = ?`, userID).Scan(&bal); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
+	bal += usdCredit
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET balance_usd = ?, updated_at = ? WHERE id = ?`, bal, now, userID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx (user_id, kind, amount_usd, ref, note, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		userID, TxKindTopup, usdCredit, ref, note, now); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return bal, nil
+}
+
 func (db *DB) MarkOrderExpired(ctx context.Context, outTradeNo string) error {
 	_, err := db.ExecContext(ctx, `UPDATE alipay_orders SET status = ? WHERE out_trade_no = ? AND status = ?`,
 		OrderExpired, outTradeNo, OrderPending)

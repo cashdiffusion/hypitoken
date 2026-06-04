@@ -167,17 +167,20 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	}
 
 	// API-key passthrough. We do not inject any Codex-CLI mimicry, do not
-	// use uTLS, do not normalize the request body (compact whitelist /
-	// stream_options injection), and do not retry across credentials.
-	// Whatever the upstream returns is forwarded to the client verbatim.
-	// The only allowed request-side change is the per-credential model
-	// rewrite (and matching response-side rewrite) so model_map'd relay
-	// vendors keep working.
+	// use uTLS, and do not normalize the request body (compact whitelist /
+	// stream_options injection). The only allowed request-side change is the
+	// per-credential model rewrite (and matching response-side rewrite) so
+	// model_map'd relay vendors keep working.
 	//
-	// Health tracking is intentionally minimal: success → MarkSuccess,
-	// 401/403 → MarkHardFailure (sticky Unhealthy in admin). Transient
-	// 5xx / 429 / network errors are NOT recorded — we don't want a brief
-	// upstream flap to flip the credential into a "degraded" yellow state.
+	// Health tracking: success → MarkSuccess, 401/403 → MarkHardFailure
+	// (sticky Unhealthy in admin), and these forward to the client verbatim.
+	// Retryable upstream failures — 429, 5xx, and transport/gateway errors,
+	// the signature of a relay vendor that's down or throttling — are NOT
+	// relayed: we roll back to the forward loop (retry=true) so it excludes
+	// this credential and tries the next, and briefly cool the bad relay down
+	// so it stops being picked. This is what keeps one dead relay (e.g. a
+	// reseller returning a 502 page) from surfacing 502s to every client when
+	// healthy Codex credentials are available. See cooldownCodexAPIKey.
 	snap := a.Snapshot()
 	baseURL := strings.TrimRight(snap.BaseURL, "/")
 	if baseURL == "" {
@@ -229,15 +232,38 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 			})
 			return false, true
 		}
-		log.Warnf("codex proxy(apikey): upstream transport error via %s: %v", a.ID, err)
-		c.AbortWithStatusJSON(502, gin.H{"error": err.Error()})
+		// Transport/gateway failure — treat like a retryable 5xx: cool the
+		// credential down and roll back to the loop to try the next one
+		// instead of handing the client a bare 502.
+		log.Warnf("codex proxy(apikey): upstream transport error via %s: %v — rotating to next credential", a.ID, err)
+		s.cooldownCodexAPIKey(a, http.StatusBadGateway, time.Time{})
 		s.emitLog(requestlog.Record{
 			Client: clientName, ClientToken: maskClientToken(clientToken),
 			Provider: auth.ProviderOpenAI, AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
 			Model: model, Stream: stream, Path: path, Status: 502,
 			DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: err.Error(),
 		})
-		return false, true
+		return true, false
+	}
+
+	// Retryable upstream failure (throttle / overload / gateway down): don't
+	// relay it. Read+discard the body, cool the relay down, and roll back to
+	// the loop to try the next credential. Nothing has been written to the
+	// client yet, so the retry is transparent.
+	if isCodexRetryableStatus(resp.StatusCode) {
+		errBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		snippet := truncate(errBody, 500)
+		log.Warnf("codex proxy(apikey): %s returned %d — rotating to next credential. body=%s", a.ID, resp.StatusCode, snippet)
+		s.cooldownCodexAPIKey(a, resp.StatusCode, parseRetryAfter(resp.Header))
+		s.emitLog(requestlog.Record{
+			Client: clientName, ClientToken: maskClientToken(clientToken),
+			Provider: auth.ProviderOpenAI, AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
+			Model: model, Stream: stream, Path: path, Status: resp.StatusCode,
+			DurationMs: time.Since(start).Milliseconds(), Attempts: attempts,
+			Error: fmt.Sprintf("upstream %d: %s", resp.StatusCode, truncate(errBody, 200)),
+		})
+		return true, false
 	}
 
 	writeResponseHeaders(c, resp)
@@ -318,6 +344,40 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		Error:       errField,
 	})
 	return false, true
+}
+
+// codexAPIKey5xxCooldown is how long a Codex API-key relay is taken out of
+// rotation after a 5xx / gateway failure. Short on purpose: long enough to
+// cover the in-request retry sweep and the immediately-following requests so
+// a dead relay stops serving errors, short enough that a relay which recovers
+// is picked back up within a minute without manual intervention. 429s use the
+// pool's own growing backoff instead (which honors Retry-After).
+const codexAPIKey5xxCooldown = 45 * time.Second
+
+// isCodexRetryableStatus reports whether an upstream status from a Codex
+// API-key relay should be retried on a different credential rather than
+// forwarded to the client. Throttling (429) and server/gateway failures
+// (5xx) are the transient classes worth rotating away from; every other 4xx
+// (400/401/403/404/422 …) is the client's or the credential's own answer and
+// is forwarded verbatim.
+func isCodexRetryableStatus(status int) bool {
+	return status == http.StatusTooManyRequests || status >= 500
+}
+
+// cooldownCodexAPIKey records a retryable upstream failure on a Codex API-key
+// relay and takes it out of rotation so it stops being selected while broken.
+// A 429 goes through the pool's normal 429 path (growing backoff, Retry-After
+// aware); a 5xx / transport failure gets MarkFailure (admin-visible counter)
+// plus a short fixed cooldown — ReportUpstreamError deliberately applies no
+// cooldown for 5xx on API keys, which is exactly what let a persistently-dead
+// relay keep getting picked.
+func (s *Server) cooldownCodexAPIKey(a *auth.Auth, status int, resetAt time.Time) {
+	if status == http.StatusTooManyRequests {
+		s.pool.ReportUpstreamError(a, status, resetAt)
+		return
+	}
+	a.MarkFailure(fmt.Sprintf("upstream %d", status))
+	a.MarkQuotaExceeded(time.Now().Add(codexAPIKey5xxCooldown))
 }
 
 // ensureStreamOptionsIncludeUsage rewrites the JSON request body so that

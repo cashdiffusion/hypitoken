@@ -25,8 +25,13 @@ func (db *DB) UpsertModelHealth(ctx context.Context, h ModelHealth) error {
 	return err
 }
 
+// historyRetentionRows caps per-(auth_id,model) history. At the ~10-minute
+// probe cadence this is ~31 days, enough to back the status page's 30-day
+// daily uptime strip (the router aggregates these per provider).
+const historyRetentionRows = 4500
+
 // AppendModelHealthHistory appends a probe result to the history table and
-// prunes the per-(auth_id,model) history to the most recent 90 rows.
+// prunes the per-(auth_id,model) history to historyRetentionRows rows.
 func (db *DB) AppendModelHealthHistory(ctx context.Context, h ModelHealth) error {
 	now := time.Now().Unix()
 	_, err := db.ExecContext(ctx,
@@ -40,9 +45,37 @@ func (db *DB) AppendModelHealthHistory(ctx context.Context, h ModelHealth) error
 			SELECT id FROM model_health_history
 			WHERE auth_id=? AND model=?
 			ORDER BY checked_at DESC
-			LIMIT -1 OFFSET 90
-		)`, h.AuthID, h.Model)
+			LIMIT -1 OFFSET ?
+		)`, h.AuthID, h.Model, historyRetentionRows)
 	return err
+}
+
+// ProviderHealthSamples returns every history sample for a provider (across all
+// credentials and probe models) since `since`, oldest-first. Powers the status
+// page's per-provider aggregation: one Claude line and one Codex line, no
+// per-credential breakdown. Deleted credentials are pruned from history each
+// checker cycle, so this reflects only live creds.
+func (db *DB) ProviderHealthSamples(ctx context.Context, provider string, since time.Time) ([]*ModelHealth, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT status, checked_at FROM model_health_history
+		 WHERE provider=? AND checked_at>=?
+		 ORDER BY checked_at ASC`, provider, since.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*ModelHealth
+	for rows.Next() {
+		var h ModelHealth
+		var c int64
+		if err := rows.Scan(&h.Status, &c); err != nil {
+			return nil, err
+		}
+		h.Provider = provider
+		h.CheckedAt = time.Unix(c, 0)
+		out = append(out, &h)
+	}
+	return out, rows.Err()
 }
 
 // ListModelHealthHistory returns the last `limit` probe results for a specific

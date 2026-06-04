@@ -391,7 +391,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	// Only runs on /v1/messages (count_tokens isn't billed and shouldn't
 	// be modified). Haiku requests skip mimicry inside the function.
 	id := SimIdentity{
-		AccountKey:  a.AccountKey(),
+		AccountKey:  accountAnchorFor(a),
 		AccountUUID: a.AccountUUIDValue(),
 		ClientToken: clientToken,
 	}
@@ -1032,6 +1032,27 @@ func writeResponseHeaders(c *gin.Context, resp *http.Response) {
 //   - Accept-Encoding stays "identity" for both stream and non-stream because
 //     our response path streams raw bytes without decompression. Real Claude
 //     Code sends "gzip, deflate, br, zstd" on non-stream requests.
+// accountAnchorFor returns a never-empty, per-credential anchor used to
+// derive the device_id (and session_id) for one OAuth account. AccountKey()
+// already falls back account_uuid > email > file-basename, and the basename
+// is always set, so in practice this equals AccountKey() for every real
+// credential — a no-op that does NOT rotate any live account's device_id.
+// It exists purely as an explicit last line of defense: should every account
+// field somehow be blank, anchor on the credential's stable ID rather than
+// let the empty string collapse multiple credentials onto one shared
+// device_id (which would make distinct accounts look like one device — a
+// ban signal). Keeps the "one credential = one device_id" guarantee local
+// to this package instead of depending on cc-core's ID=basename detail.
+func accountAnchorFor(a *auth.Auth) string {
+	if k := strings.TrimSpace(a.AccountKey()); k != "" {
+		return k
+	}
+	if id := strings.TrimSpace(a.ID); id != "" {
+		return id
+	}
+	return "cpa-unknown-account"
+}
+
 func applyAnthropicHeaders(req *http.Request, a *auth.Auth, stream, isAnthropicBase bool, id SimIdentity, body []byte) {
 	token, kind := a.Credentials()
 

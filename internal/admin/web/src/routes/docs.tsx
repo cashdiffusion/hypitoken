@@ -9,7 +9,11 @@ import { useTranslation } from "react-i18next";
 import { PublicHeader } from "@/components/layout/shell";
 import { cn, copyToClipboard } from "@/lib/utils";
 import { docsFor, slugify, type DocSection } from "@/lib/docs";
+import { OSProvider, useOS, isOSGroup, OS_VALUES, type OS } from "@/lib/use-os";
 import "highlight.js/styles/github-dark.css";
+
+// Icons for the global OS switcher.
+const OS_ICONS: Record<OS, string> = { macOS: "", Windows: "⊞", Linux: "🐧" };
 
 export default function DocsLayout() {
   const params = useParams();
@@ -25,6 +29,9 @@ export default function DocsLayout() {
 
   // Extract h2/h3 from the markdown body for the right-hand TOC.
   const headings = useMemo(() => collectHeadings(section.body), [section.slug]);
+  // Only surface the global OS switcher on pages that actually contain
+  // OS-specific tab blocks — elsewhere it would have nothing to control.
+  const hasOSContent = useMemo(() => /data-tab="(macOS|Windows|Linux)"/.test(section.body), [section.slug]);
   const [activeID, setActiveID] = useState<string>(headings[0]?.id ?? "");
 
   useEffect(() => {
@@ -46,13 +53,14 @@ export default function DocsLayout() {
   }, [headings]);
 
   return (
+    <OSProvider>
     <div className="min-h-dvh bg-background text-foreground">
       <PublicHeader />
       <div className="mx-auto max-w-7xl px-4 md:px-6">
         <div className="grid gap-10 py-10 md:grid-cols-[14rem_minmax(0,1fr)_12rem] md:gap-12 lg:gap-16">
           {/* Sidebar */}
           <aside className="hidden md:block">
-            <nav className="sticky top-20 space-y-6">
+            <nav className="sticky top-24 space-y-6">
               {groups.map((g) => (
                 <div key={g}>
                   <div className="mb-2 px-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">{g}</div>
@@ -82,11 +90,14 @@ export default function DocsLayout() {
 
           {/* Main */}
           <main className="min-w-0">
-            <div className="mb-8 flex items-center gap-2 text-xs text-muted-foreground">
-              <BookOpen className="h-3.5 w-3.5" />
-              <span>{section.group}</span>
-              <ChevronRight className="h-3.5 w-3.5" />
-              <span className="text-foreground">{section.title}</span>
+            <div className="mb-8 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <BookOpen className="h-3.5 w-3.5" />
+                <span>{section.group}</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+                <span className="text-foreground">{section.title}</span>
+              </div>
+              {hasOSContent && <OSSwitcher className="shrink-0" />}
             </div>
             <h1 className="font-display text-4xl font-semibold tracking-tight md:text-5xl">{section.title}</h1>
             {section.intro && <p className="mt-4 text-lg text-muted-foreground">{section.intro}</p>}
@@ -103,13 +114,13 @@ export default function DocsLayout() {
 
             <div className="mt-16 grid gap-3 sm:grid-cols-2">
               {prev ? (
-                <Link to={`/docs/${prev.slug}`} className="rounded-lg border border-border p-4 transition-colors hover:bg-accent">
+                <Link to={`/docs/${prev.slug}`} className="glass rounded-xl p-4 transition-transform hover:-translate-y-0.5">
                   <div className="text-xs uppercase tracking-wider text-muted-foreground">← Previous</div>
                   <div className="mt-1 font-display text-lg font-medium">{prev.title}</div>
                 </Link>
               ) : <div />}
               {next ? (
-                <Link to={`/docs/${next.slug}`} className="rounded-lg border border-border p-4 text-right transition-colors hover:bg-accent">
+                <Link to={`/docs/${next.slug}`} className="glass rounded-xl p-4 text-right transition-transform hover:-translate-y-0.5">
                   <div className="text-xs uppercase tracking-wider text-muted-foreground">Next →</div>
                   <div className="mt-1 font-display text-lg font-medium">{next.title}</div>
                 </Link>
@@ -119,7 +130,7 @@ export default function DocsLayout() {
 
           {/* TOC */}
           <aside className="hidden lg:block">
-            <div className="sticky top-20">
+            <div className="sticky top-24">
               {headings.length > 0 && (
                 <>
                   <div className="mb-3 px-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">On this page</div>
@@ -145,6 +156,36 @@ export default function DocsLayout() {
             </div>
           </aside>
         </div>
+      </div>
+    </div>
+    </OSProvider>
+  );
+}
+
+// Global OS switcher — a segmented control bound to the shared OS context. One
+// click re-renders every OS tab block across the page to the chosen platform.
+function OSSwitcher({ className }: { className?: string }) {
+  const { os, setOS } = useOS();
+  const { i18n } = useTranslation();
+  const label = (i18n.resolvedLanguage || i18n.language || "en").toLowerCase().startsWith("zh") ? "系统" : "System";
+  return (
+    <div className={cn("inline-flex items-center gap-1", className)}>
+      <span className="mr-1 hidden text-xs text-muted-foreground sm:inline">{label}</span>
+      <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
+        {OS_VALUES.map((o) => (
+          <button
+            key={o}
+            onClick={() => setOS(o)}
+            aria-pressed={os === o}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+              os === o ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {OS_ICONS[o] && <span aria-hidden>{OS_ICONS[o]}</span>}
+            {o}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -235,6 +276,18 @@ const mdComponents = {
     return <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.875em] text-primary">{children}</code>;
   },
   pre: ({ children }: any) => <CodeBlockShell>{children}</CodeBlockShell>,
+  // Screenshots: framed like a real console capture, with the alt text shown as
+  // a caption underneath. Uses block-displayed spans (not <figure>) because
+  // react-markdown wraps standalone images in a <p>, and <figure> inside <p>
+  // is invalid nesting. Lazy-loaded; click to open full size in a new tab.
+  img: ({ src, alt }: any) => (
+    <span className="mt-5 block">
+      <a href={src} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl border border-border-strong shadow-lg">
+        <img src={src} alt={alt || ""} loading="lazy" className="block w-full" />
+      </a>
+      {alt && <span className="mt-2 block text-center text-xs text-muted-foreground">{alt}</span>}
+    </span>
+  ),
   hr: () => <hr className="my-8 border-border" />,
   div: ({ children, ...props }: any) => {
     const isTabsRoot = "data-tabs" in props;
@@ -287,7 +340,11 @@ function MdTabPanel({ children }: { label: string; children: ReactNode }) {
   return <>{children}</>;
 }
 
-// MdTabs renders a tab bar from child MdTabPanel elements.
+// MdTabs renders a tab bar from child MdTabPanel elements. When the panel
+// labels are OS names (macOS/Windows/Linux) the active tab is driven by the
+// global OS context instead of local state, so every OS block on the page
+// switches together. Non-OS tab groups (e.g. "Permanent" / "Temporary") keep
+// independent local state.
 function MdTabs({ children }: { children: ReactNode }) {
   const panels = useMemo(() => {
     const arr: Array<{ label: string; content: ReactNode }> = [];
@@ -307,8 +364,25 @@ function MdTabs({ children }: { children: ReactNode }) {
     return arr;
   }, [children]);
 
-  const [active, setActive] = useState(0);
+  const labels = panels.map((p) => p.label);
+  const osControlled = isOSGroup(labels);
+  const { os, setOS } = useOS();
+  const [localActive, setLocalActive] = useState(0);
+
   if (!panels.length) return null;
+
+  // For OS groups, resolve the active panel from the global OS (falling back to
+  // the first panel if this particular block doesn't include the chosen OS).
+  let active = localActive;
+  if (osControlled) {
+    const idx = panels.findIndex((p) => p.label === os);
+    active = idx >= 0 ? idx : 0;
+  }
+
+  const onTab = (i: number) => {
+    if (osControlled) setOS(panels[i]!.label as OS);
+    else setLocalActive(i);
+  };
 
   return (
     <div className="mt-4 overflow-hidden rounded-lg border border-border">
@@ -316,7 +390,7 @@ function MdTabs({ children }: { children: ReactNode }) {
         {panels.map((p, i) => (
           <button
             key={p.label}
-            onClick={() => setActive(i)}
+            onClick={() => onTab(i)}
             className={cn(
               "px-4 py-2 text-sm font-medium transition-colors",
               active === i

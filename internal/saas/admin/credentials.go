@@ -40,16 +40,18 @@ func (c *CredHandler) Routes(g *gin.RouterGroup) {
 	g.POST("/credentials/apikey", c.createAPIKey)
 	g.POST("/credentials/oauth/start", c.oauthStart)
 	g.POST("/credentials/oauth/finish", c.oauthFinish)
+	g.POST("/credentials/oauth/session-cookie", c.sessionCookie)
 	g.DELETE("/credentials/:id", c.remove)
 }
 
 type apikeyReq struct {
-	Provider string `json:"provider"`
-	Key      string `json:"key"`
-	Label    string `json:"label"`
-	BaseURL  string `json:"base_url"`
-	ProxyURL string `json:"proxy_url"`
-	Group    string `json:"group"`
+	Provider string            `json:"provider"`
+	Key      string            `json:"key"`
+	Label    string            `json:"label"`
+	BaseURL  string            `json:"base_url"`
+	ProxyURL string            `json:"proxy_url"`
+	Group    string            `json:"group"`
+	ModelMap map[string]string `json:"model_map"`
 }
 
 func (c *CredHandler) createAPIKey(ctx *gin.Context) {
@@ -90,6 +92,17 @@ func (c *CredHandler) createAPIKey(ctx *gin.Context) {
 	}
 	if g := auth.NormalizeGroup(req.Group); g != "" {
 		raw["group"] = g
+	}
+	if len(req.ModelMap) > 0 {
+		mm := make(map[string]any, len(req.ModelMap))
+		for k, v := range req.ModelMap {
+			if strings.TrimSpace(k) != "" && strings.TrimSpace(v) != "" {
+				mm[strings.TrimSpace(k)] = strings.TrimSpace(v)
+			}
+		}
+		if len(mm) > 0 {
+			raw["model_map"] = mm
+		}
 	}
 	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
@@ -194,6 +207,41 @@ func (c *CredHandler) oauthFinish(ctx *gin.Context) {
 	cctx, cancel := context.WithTimeout(ctx.Request.Context(), 30*time.Second)
 	defer cancel()
 	a, err := auth.FinishLogin(cctx, req.SessionID, code, state, c.AuthDir, req.MaxConcurrent, c.UseUTLS, req.Group)
+	if err != nil {
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.Pool.AddOAuth(a)
+	ctx.JSON(http.StatusOK, gin.H{"id": a.ID, "email": a.Email})
+}
+
+// ---- Session-cookie login (Anthropic only) ----
+
+type sessionCookieReq struct {
+	SessionCookie string `json:"session_cookie"`
+	ProxyURL      string `json:"proxy_url"`
+	Label         string `json:"label"`
+	Group         string `json:"group"`
+	MaxConcurrent int    `json:"max_concurrent"`
+}
+
+// sessionCookie drives the claude.com sessionKey login: it exchanges a
+// sk-ant-sid… cookie for a usable OAuth credential. A proxy is required because
+// driving claude.com from a server IP without browser-grade TLS fails
+// Cloudflare's bot challenge — cc-core forces uTLS for this path.
+func (c *CredHandler) sessionCookie(ctx *gin.Context) {
+	var req sessionCookieReq
+	if err := ctx.BindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		return
+	}
+	if c.AuthDir == "" {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "auth_dir not configured"})
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx.Request.Context(), 60*time.Second)
+	defer cancel()
+	a, err := auth.LoginWithSessionCookie(cctx, req.SessionCookie, req.ProxyURL, req.Label, req.Group, req.MaxConcurrent, c.AuthDir)
 	if err != nil {
 		ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return

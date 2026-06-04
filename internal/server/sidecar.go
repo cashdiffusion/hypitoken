@@ -240,7 +240,7 @@ func (m *sidecarMgr) Notify(a *auth.Auth, clientToken string) <-chan struct{} {
 		return nil
 	}
 	now := time.Now().UnixNano()
-	accountKey := a.AccountKey()
+	accountKey := accountAnchorFor(a)
 	anchor := m.anchorFor(accountKey)
 
 	fresh := &sidecarSession{bootstrapReady: make(chan struct{})}
@@ -655,7 +655,7 @@ func (m *sidecarMgr) sendBootstrapStep(parent context.Context, a *auth.Auth, ses
 // "default_claude_max_20x" only on the very first ever bootstrap pass
 // (or for credentials whose org tier we've never observed).
 func buildGrowthBookBody(a *auth.Auth, sessionID string) ([]byte, error) {
-	deviceID := DeviceIDFor(a.AccountKey())
+	deviceID := DeviceIDFor(accountAnchorFor(a))
 	subType, rateLimitTier := subscriptionAttrsFor(a)
 	body := map[string]any{
 		"attributes": map[string]any{
@@ -734,7 +734,7 @@ func handleBootstrapResponse(a *auth.Auth, body []byte) {
 // carrying the same identity (device, account, session) the rest of the
 // bootstrap traffic uses.
 func buildQuotaProbeBody(a *auth.Auth, sessionID string) ([]byte, error) {
-	deviceID := DeviceIDFor(a.AccountKey())
+	deviceID := DeviceIDFor(accountAnchorFor(a))
 	uid := buildJSONUserID(deviceID, a.AccountUUIDValue(), sessionID)
 	body := map[string]any{
 		"model":      quotaProbeModel,
@@ -960,7 +960,7 @@ func buildStartupHeartbeatBody(a *auth.Auth, sessionID string) ([]byte, error) {
 // out so the steady-state and startup-batch paths share one source of
 // truth for every field that's stable across event_names.
 func buildHeartbeatEvent(a *auth.Auth, sessionID, eventName string, ts time.Time) (map[string]any, error) {
-	deviceID := DeviceIDFor(a.AccountKey())
+	deviceID := DeviceIDFor(accountAnchorFor(a))
 
 	processMetrics := map[string]any{
 		"uptime":            time.Since(processStart).Seconds(),

@@ -428,6 +428,110 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 		c.JSON(http.StatusOK, gin.H{"checks": out, "as_of": time.Now().Unix()})
 	})
 
+	// Public per-provider availability monitor. Aggregates ALL credentials of a
+	// provider into a single line (no oauth/api or per-model split), exposing
+	// two uptime strips: a fine-grained recent timeline (10-minute slots over
+	// the last 24h) and a daily rollup (last 14 days). This is the status-page
+	// data source; it answers "is Claude / Codex usable right now and how has
+	// availability looked" without leaking per-credential detail.
+	v2.GET("/health/monitor", func(c *gin.Context) {
+		const (
+			recentSlots  = 144 // 24h / 10min
+			recentSlotS  = int64(600)
+			dailyDays    = 30
+			daySec       = int64(86400)
+		)
+		now := time.Now()
+		nowU := now.Unix()
+		recentStart := nowU - int64(recentSlots)*recentSlotS
+
+		// Current status per provider from the live model_health rows.
+		curr, _ := store.ListModelHealth(c.Request.Context())
+		type pcount struct{ ok, total int; checkedAt int64 }
+		cur := map[string]*pcount{}
+		for _, r := range curr {
+			p := cur[r.Provider]
+			if p == nil {
+				p = &pcount{}
+				cur[r.Provider] = p
+			}
+			p.total++
+			if r.Status == "ok" {
+				p.ok++
+			}
+			if r.CheckedAt.Unix() > p.checkedAt {
+				p.checkedAt = r.CheckedAt.Unix()
+			}
+		}
+
+		providers := []struct{ key, name string }{
+			{auth.ProviderAnthropic, "Claude"},
+			{auth.ProviderOpenAI, "Codex"},
+		}
+		out := make([]gin.H, 0, len(providers))
+		for _, pv := range providers {
+			cc := cur[pv.key]
+			if cc == nil || cc.total == 0 {
+				continue // no credentials for this provider — omit the card
+			}
+			operational := "down"
+			switch {
+			case cc.ok == cc.total:
+				operational = "operational"
+			case cc.ok > 0:
+				operational = "degraded"
+			}
+
+			samples, _ := store.ProviderHealthSamples(c.Request.Context(), pv.key, time.Unix(recentStart, 0).Add(-time.Duration(dailyDays)*24*time.Hour))
+
+			// Recent 10-minute slots (a slot is "up" if ANY credential was ok in it).
+			recent := make([]gin.H, recentSlots)
+			rOK := make([]int, recentSlots)
+			rTot := make([]int, recentSlots)
+			// Daily rollup.
+			dayOK := map[int64]int{}
+			dayTot := map[int64]int{}
+			for _, s := range samples {
+				ts := s.CheckedAt.Unix()
+				if ts >= recentStart && ts <= nowU {
+					idx := int((ts - recentStart) / recentSlotS)
+					if idx >= 0 && idx < recentSlots {
+						rTot[idx]++
+						if s.Status == "ok" {
+							rOK[idx]++
+						}
+					}
+				}
+				d := (ts / daySec) * daySec
+				dayTot[d]++
+				if s.Status == "ok" {
+					dayOK[d]++
+				}
+			}
+			for i := 0; i < recentSlots; i++ {
+				recent[i] = gin.H{"from": recentStart + int64(i)*recentSlotS, "ok": rOK[i], "total": rTot[i]}
+			}
+			todayMidnight := (nowU / daySec) * daySec
+			daily := make([]gin.H, dailyDays)
+			for i := 0; i < dailyDays; i++ {
+				d := todayMidnight - int64(dailyDays-1-i)*daySec
+				daily[i] = gin.H{"date": d, "ok": dayOK[d], "total": dayTot[d]}
+			}
+
+			out = append(out, gin.H{
+				"key":           pv.key,
+				"name":          pv.name,
+				"operational":   operational,
+				"healthy_creds": cc.ok,
+				"total_creds":   cc.total,
+				"checked_at":    cc.checkedAt,
+				"recent":        recent,
+				"daily":         daily,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"providers": out, "as_of": nowU})
+	})
+
 	// Fleet-wide wallet aggregate is exposed to any signed-in user — it
 	// powers the "Saved by us" tile on the operator console which itself
 	// is open to all users (per the SSO design). No PII, just sums.

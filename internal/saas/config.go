@@ -62,6 +62,13 @@ type Config struct {
 	// without a business license.
 	ZPay ZPayConfig `yaml:"zpay"`
 
+	// Stripe gateway — runs *alongside* the QR gateway above (zpay/alipay),
+	// not instead of it. When enabled it powers the embedded Payment Element
+	// top-up surface (card / Alipay / WeChat Pay / crypto, all charged 1:1 in
+	// USD). The QR gateway stays available as a fallback so a Stripe outage or
+	// an Alipay-method restriction never takes down top-ups entirely.
+	Stripe StripeConfig `yaml:"stripe"`
+
 	// Exchange rate source. Empty = built-in fawazahmed0 currency-api.
 	ExchangeRateURL string  `yaml:"exchange_rate_url"`
 	FallbackCNYPerUSD float64 `yaml:"fallback_cny_per_usd"`
@@ -87,6 +94,40 @@ type ZPayConfig struct {
 	PID       string `yaml:"pid"`                // 商户ID
 	Key       string `yaml:"key"`                // 商户密钥, or @/path/to/file
 	NotifyURL string `yaml:"notify_url"`         // public webhook
+	ReturnURL string `yaml:"return_url,omitempty"`
+}
+
+// StripeConfig configures the Stripe Payment Element top-up surface. Secret
+// fields accept the @path/to/file form so they stay out of the YAML committed
+// to git. Stripe charges the wallet top-up amount 1:1 in Currency (USD by
+// default) — no exchange-rate coupling.
+type StripeConfig struct {
+	Enabled bool `yaml:"enabled"`
+
+	// SecretKey is the sk_(test|live)_… key — backend only. @path supported.
+	SecretKey string `yaml:"secret_key"`
+	// PublishableKey is the pk_(test|live)_… key, handed to the browser to
+	// mount the Payment Element. Public by design, but kept in config so test
+	// and live keys move together.
+	PublishableKey string `yaml:"publishable_key"`
+	// WebhookSecret is the whsec_… signing secret for the
+	// /billing/stripe/webhook endpoint. @path supported. Optional: the poll
+	// path (orderStatus retrieves the PaymentIntent live) credits orders even
+	// without a delivered webhook, so this can be omitted in local dev.
+	WebhookSecret string `yaml:"webhook_secret"`
+
+	// Currency is the ISO presentment currency. Default "usd" — credits the
+	// USD wallet 1:1. Lowercase.
+	Currency string `yaml:"currency,omitempty"`
+
+	// PaymentMethodConfiguration optionally pins a specific
+	// pmc_… payment-method configuration (the set of enabled rails: card,
+	// alipay, wechat_pay, crypto). Empty = use the account's default
+	// dashboard configuration via automatic_payment_methods.
+	PaymentMethodConfiguration string `yaml:"payment_method_configuration,omitempty"`
+
+	// ReturnURL is where redirect-based methods (Alipay/WeChat/crypto) send
+	// the browser back after authorization. Empty = SiteURL + "/app/billing".
 	ReturnURL string `yaml:"return_url,omitempty"`
 }
 
@@ -123,6 +164,11 @@ func (c *Config) ApplyDefaults(configDir string) {
 	}
 	if c.FallbackCNYPerUSD <= 0 {
 		c.FallbackCNYPerUSD = 7.2
+	}
+	if strings.TrimSpace(c.Stripe.Currency) == "" {
+		c.Stripe.Currency = "usd"
+	} else {
+		c.Stripe.Currency = strings.ToLower(strings.TrimSpace(c.Stripe.Currency))
 	}
 	if c.HealthCheckInterval == 0 {
 		c.HealthCheckInterval = 10 * time.Minute

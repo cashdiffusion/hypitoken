@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
@@ -199,6 +200,7 @@ function AdjustBalanceButton({ userID, onDone }: { userID: number; onDone: () =>
 
 function GroupsTab() {
   const { t } = useTranslation();
+  const confirm = useConfirm();
   const [groups, setGroups] = useState<PricingGroup[]>([]);
   const reload = async () => {
     const r = await apiGet<{ groups: PricingGroup[] }>("/admin/groups");
@@ -237,7 +239,7 @@ function GroupsTab() {
                 <TableCell className="text-right">
                   {!g.IsDefault && (
                     <Button size="sm" variant="ghost" className="text-destructive" onClick={async () => {
-                      if (!confirm(t("admin.groups.confirmDelete", { name: g.Name }))) return;
+                      if (!(await confirm({ title: t("common.delete"), description: t("admin.groups.confirmDelete", { name: g.Name }), confirmLabel: t("common.delete"), destructive: true }))) return;
                       await apiDelete(`/admin/groups/${g.ID}`);
                       toast.success(t("admin.groups.deleted"));
                       reload();
@@ -300,9 +302,12 @@ function CreateGroupButton({ onDone }: { onDone: () => void }) {
 
 function CredentialsTab() {
   const { t } = useTranslation();
+  const confirm = useConfirm();
   const [creds, setCreds] = useState<any[]>([]);
   const [openKey, setOpenKey] = useState(false);
   const [openOAuth, setOpenOAuth] = useState<null | "anthropic" | "openai">(null);
+  const [openSession, setOpenSession] = useState(false);
+  const [openUpload, setOpenUpload] = useState(false);
   const [usageFor, setUsageFor] = useState<{ id: string; label: string; provider: string } | null>(null);
   const [providerTab, setProviderTab] = useState<"anthropic" | "openai" | "kiro">("anthropic");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -398,6 +403,10 @@ function CredentialsTab() {
               <Button onClick={() => setOpenKey(true)}>{t("admin.creds.addApiKey")}</Button>
               <Button variant="outline" onClick={() => setOpenOAuth("anthropic")}>{t("admin.creds.addOauthClaude")}</Button>
               <Button variant="outline" onClick={() => setOpenOAuth("openai")}>{t("admin.creds.addOauthCodex")}</Button>
+              {providerTab === "anthropic" && (
+                <Button variant="outline" onClick={() => setOpenSession(true)}>{t("admin.creds.addSessionCookie")}</Button>
+              )}
+              <Button variant="outline" onClick={() => setOpenUpload(true)}>{t("admin.creds.uploadJson")}</Button>
             </div>
           </div>
         </CardHeader>
@@ -548,8 +557,8 @@ function CredentialsTab() {
                                 <CheckCircle2 className="size-3.5 text-success" />
                               </Button>
                             )}
-                            <Button size="sm" variant="ghost" className="text-destructive" title="删除" onClick={async () => {
-                              if (!confirm(t("admin.creds.confirmRemove", { name: c.label }))) return;
+                            <Button size="sm" variant="ghost" className="text-destructive" title={t("common.delete")} onClick={async () => {
+                              if (!(await confirm({ title: t("common.delete"), description: t("admin.creds.confirmRemove", { name: c.label }), confirmLabel: t("common.delete"), destructive: true }))) return;
                               await apiDelete(`/admin/credentials/${encodeURIComponent(c.id)}`);
                               toast.success(t("admin.creds.removed"));
                               reload();
@@ -578,6 +587,8 @@ function CredentialsTab() {
 
       <AddAPIKeyDialog open={openKey} onOpenChange={setOpenKey} onCreated={reload} />
       <AddOAuthDialog provider={openOAuth} onClose={() => setOpenOAuth(null)} onCreated={reload} />
+      <SessionCookieDialog open={openSession} onOpenChange={setOpenSession} onCreated={reload} />
+      <UploadJSONDialog open={openUpload} onOpenChange={setOpenUpload} provider={providerTab === "openai" ? "openai" : "anthropic"} onCreated={reload} />
       <UpstreamUsageDialog
         authId={usageFor?.id ?? null}
         authLabel={usageFor?.label || ""}
@@ -1198,6 +1209,7 @@ function AddAPIKeyDialog({ open, onOpenChange, onCreated }: any) {
   const [base, setBase] = useState("");
   const [proxy, setProxy] = useState("");
   const [group, setGroup] = useState("");
+  const [modelMap, setModelMap] = useState("");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
@@ -1217,19 +1229,131 @@ function AddAPIKeyDialog({ open, onOpenChange, onCreated }: any) {
             <div className="space-y-2"><Label>Proxy URL</Label><Input value={proxy} onChange={(e) => setProxy(e.target.value)} /></div>
           </div>
           <div className="space-y-2"><Label>{t("admin.creds.cols.group")}</Label><Input value={group} onChange={(e) => setGroup(e.target.value)} /></div>
+          <div className="space-y-2">
+            <Label>{t("admin.creds.modelMapLabel")}</Label>
+            <Textarea value={modelMap} onChange={(e) => setModelMap(e.target.value)} placeholder={'{\n  "claude-opus-4-6": "claude-opus-4-8"\n}'} className="font-mono text-xs min-h-[72px]" />
+            <p className="text-[11px] text-muted-foreground">{t("admin.creds.modelMapHint")}</p>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
           <Button onClick={async () => {
             if (!key) { toast.error(t("common.error")); return; }
+            let model_map: Record<string, string> = {};
+            if (modelMap.trim() !== "") {
+              try { model_map = JSON.parse(modelMap); }
+              catch (e: any) { toast.error(t("admin.creds.modelMapParseError", { msg: e.message })); return; }
+            }
             try {
-              await apiPost("/admin/credentials/apikey", { provider, key, label, base_url: base, proxy_url: proxy, group });
+              await apiPost("/admin/credentials/apikey", { provider, key, label, base_url: base, proxy_url: proxy, group, model_map });
               toast.success(t("admin.creds.newApiCreated"));
               onCreated();
               onOpenChange(false);
-              setKey(""); setLabel(""); setBase(""); setProxy(""); setGroup("");
+              setKey(""); setLabel(""); setBase(""); setProxy(""); setGroup(""); setModelMap("");
             } catch (e: any) { toast.error(e.message); }
           }}>{t("common.add")}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// SessionCookieDialog drives the claude.com sessionKey login: paste an
+// sk-ant-sid… cookie + a proxy and the backend exchanges it for an OAuth
+// credential. Anthropic-only.
+function SessionCookieDialog({ open, onOpenChange, onCreated }: any) {
+  const { t } = useTranslation();
+  const [cookie, setCookie] = useState("");
+  const [proxy, setProxy] = useState("");
+  const [label, setLabel] = useState("");
+  const [group, setGroup] = useState("");
+  const [maxc, setMaxc] = useState("");
+  const [busy, setBusy] = useState(false);
+  const reset = () => { setCookie(""); setProxy(""); setLabel(""); setGroup(""); setMaxc(""); };
+  const submit = async () => {
+    if (!cookie.trim().startsWith("sk-ant-sid")) { toast.error(t("admin.creds.sessionCookieInvalid")); return; }
+    if (!proxy.trim()) { toast.error(t("admin.creds.sessionCookieProxyRequired")); return; }
+    setBusy(true);
+    try {
+      const r = await apiPost<any>("/admin/credentials/oauth/session-cookie", {
+        session_cookie: cookie.trim(), proxy_url: proxy.trim(), label: label.trim(),
+        group: group.trim(), max_concurrent: parseInt(maxc) || 0,
+      });
+      toast.success(t("admin.creds.sessionCookieAdded", { email: r.email || r.id }));
+      onCreated(); onOpenChange(false); reset();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>{t("admin.creds.sessionCookieTitle")}</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <p className="text-xs text-muted-foreground">{t("admin.creds.sessionCookieDesc")}</p>
+          <div className="space-y-2"><Label>Session cookie (sk-ant-sid…)</Label><Input type="password" value={cookie} onChange={(e) => setCookie(e.target.value)} placeholder="sk-ant-sid01-…" className="font-mono" /></div>
+          <div className="space-y-2"><Label>Proxy URL <span className="text-destructive">*</span></Label><Input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="socks5://… or http://…" className="font-mono" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2"><Label>{t("admin.creds.cols.label")}</Label><Input value={label} onChange={(e) => setLabel(e.target.value)} /></div>
+            <div className="space-y-2"><Label>{t("admin.creds.cols.group")}</Label><Input value={group} onChange={(e) => setGroup(e.target.value)} /></div>
+          </div>
+          <div className="space-y-2"><Label>{t("admin.creds.maxConcurrent")}</Label><Input type="number" min="0" value={maxc} onChange={(e) => setMaxc(e.target.value)} placeholder="0 = default" /></div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+          <Button disabled={busy} onClick={submit}>{busy ? t("admin.creds.sessionCookieBusy") : t("common.add")}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// UploadJSONDialog persists a raw credential JSON (exported from another
+// instance) into the pool. Works for both OAuth and API-key shapes — the
+// backend infers the kind from the JSON's `type` field.
+function UploadJSONDialog({ open, onOpenChange, provider, onCreated }: any) {
+  const { t } = useTranslation();
+  const [content, setContent] = useState("");
+  const [label, setLabel] = useState("");
+  const [proxy, setProxy] = useState("");
+  const [group, setGroup] = useState("");
+  const [busy, setBusy] = useState(false);
+  const reset = () => { setContent(""); setLabel(""); setProxy(""); setGroup(""); };
+  const submit = async () => {
+    if (!content.trim()) { toast.error(t("admin.creds.uploadEmpty")); return; }
+    let parsed: any;
+    try { parsed = JSON.parse(content); }
+    catch (e: any) { toast.error(t("admin.creds.uploadParseError", { msg: e.message })); return; }
+    setBusy(true);
+    try {
+      const r = await apiPost<any>("/admin/credentials/upload", {
+        content: parsed, provider, label: label.trim(), proxy_url: proxy.trim(), group: group.trim(),
+      });
+      toast.success(t("admin.creds.uploaded", { label: r.label || r.id || "" }));
+      onCreated(); onOpenChange(false); reset();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>{t("admin.creds.uploadTitle", { provider: provider === "openai" ? "Codex" : "Claude" })}</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <p className="text-xs text-muted-foreground">{t("admin.creds.uploadDesc")}</p>
+          <div className="space-y-2">
+            <Label>{t("admin.creds.uploadContentLabel")}</Label>
+            <Textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder={'{\n  "type": "oauth",\n  "provider": "anthropic",\n  …\n}'} className="font-mono text-xs min-h-[160px]" />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-2"><Label>{t("admin.creds.cols.label")}</Label><Input value={label} onChange={(e) => setLabel(e.target.value)} /></div>
+            <div className="space-y-2"><Label>Proxy URL</Label><Input value={proxy} onChange={(e) => setProxy(e.target.value)} /></div>
+            <div className="space-y-2"><Label>{t("admin.creds.cols.group")}</Label><Input value={group} onChange={(e) => setGroup(e.target.value)} /></div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+          <Button disabled={busy} onClick={submit}>{busy ? t("admin.creds.uploadBusy") : t("admin.creds.uploadConfirm")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1264,6 +1388,8 @@ function KiroCredentialsPanel() {
     remaining?: number;
     reset_at?: string;
   };
+  const { t } = useTranslation();
+  const confirm = useConfirm();
   const [creds, setCreds] = useState<Entry[]>([]);
   const [balances, setBalances] = useState<Record<string, Balance>>({});
   const [adding, setAdding] = useState(false);
@@ -1379,7 +1505,7 @@ function KiroCredentialsPanel() {
                           size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:bg-destructive/10"
                           disabled={busy}
                           onClick={async () => {
-                            if (!confirm(`删除 ${c.label || c.id} ?该 Kiro 账户的 refresh chain 不会被撤销 - 如需主动 logout 请使用 kirortrip 工具。`)) return;
+                            if (!(await confirm({ title: t("common.delete"), description: t("admin.creds.kiroConfirmDelete", { name: c.label || c.id }), confirmLabel: t("common.delete"), destructive: true }))) return;
                             setBusyID(c.id);
                             try {
                               await apiDelete(`/admin/kiro/credentials/${c.id}`);

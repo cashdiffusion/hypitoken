@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Plus, RefreshCw, Trash2, Copy, Check, Eye, EyeOff, Terminal, Pencil, X, ChevronUp, ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Reveal } from "@/components/landing/reveal";
+import { PageHeader, GlassPanel } from "@/components/app/page-primitives";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -23,6 +25,7 @@ function detectOS(): "Windows" | "macOS" | "Linux" {
 
 export default function TokensPage() {
   const { t: tt } = useTranslation();
+  const confirm = useConfirm();
   const [tokens, setTokens] = useState<UserToken[]>([]);
   const [open, setOpen] = useState(false);
   const [reveal, setReveal] = useState<Record<number, boolean>>({});
@@ -36,17 +39,16 @@ export default function TokensPage() {
   useEffect(() => { refresh(); }, []);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-3xl font-semibold tracking-tight">{tt("tokens.title")}</h1>
-          <p className="text-muted-foreground">{tt("tokens.sub")}</p>
-        </div>
-        <Button onClick={() => setOpen(true)} className="gap-2"><Plus className="h-4 w-4" /> {tt("tokens.newToken")}</Button>
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow={tt("nav.tokens")}
+        title={tt("tokens.title")}
+        sub={tt("tokens.sub")}
+        action={<Button onClick={() => setOpen(true)} className="gap-2"><Plus className="h-4 w-4" /> {tt("tokens.newToken")}</Button>}
+      />
 
-      <Card>
-        <CardContent className="p-0">
+      <Reveal>
+        <GlassPanel bodyClassName="p-0">
           {tokens.length === 0 ? (
             <div className="p-12 text-center text-sm text-muted-foreground">{tt("tokens.none")}</div>
           ) : (
@@ -106,7 +108,7 @@ export default function TokensPage() {
                           <RefreshCw className="h-3.5 w-3.5" />
                         </Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={async () => {
-                          if (!confirm(tt("tokens.confirmDelete"))) return;
+                          if (!(await confirm({ title: tt("common.delete"), description: tt("tokens.confirmDelete"), confirmLabel: tt("common.delete"), destructive: true }))) return;
                           await apiDelete(`/tokens/${t.id}`);
                           toast.success(tt("tokens.deleted"));
                           refresh();
@@ -120,8 +122,8 @@ export default function TokensPage() {
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+        </GlassPanel>
+      </Reveal>
 
       <CreateTokenDialog open={open} onOpenChange={setOpen} onCreated={refresh} />
       <EditTokenDialog token={editToken} onClose={() => setEditToken(null)} onSaved={refresh} />

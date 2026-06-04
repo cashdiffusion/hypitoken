@@ -44,9 +44,24 @@ interface AnthropicResponse {
 // ---- Codex shape (chatgpt.com/backend-api/wham/usage) ----
 interface CodexUsageRateWindow {
   used_percent?: number;
-  limit_window_seconds?: number;
-  reset_after_seconds?: number;
-  reset_at?: number; // unix seconds
+  limit_window_seconds?: number; // 18000 = 5h, 604800 = 7d, …
+  reset_after_seconds?: number; // relative countdown — present even when not limited
+  reset_at?: number; // absolute unix seconds — often 0 until the limit is reached
+}
+
+interface CodexRateLimit {
+  allowed?: boolean;
+  limit_reached?: boolean;
+  primary_window?: CodexUsageRateWindow;
+  secondary_window?: CodexUsageRateWindow;
+}
+
+// additional_rate_limits[] carries per-feature limiters (each with its own
+// primary/secondary windows). Some plans surface the weekly window here.
+interface CodexAdditionalRateLimit {
+  limit_name?: string;
+  metered_feature?: string;
+  rate_limit?: CodexRateLimit;
 }
 
 interface CodexUsageResponse {
@@ -56,12 +71,9 @@ interface CodexUsageResponse {
     email?: string;
     plan_type?: string;
     updated?: string;
-    rate_limit?: {
-      allowed?: boolean;
-      limit_reached?: boolean;
-      primary_window?: CodexUsageRateWindow;
-      secondary_window?: CodexUsageRateWindow;
-    };
+    rate_limit?: CodexRateLimit;
+    additional_rate_limits?: CodexAdditionalRateLimit[];
+    rate_limit_reset_credits?: { available_count?: number };
     credits?: {
       has_credits?: boolean;
       unlimited?: boolean;
@@ -76,6 +88,63 @@ interface CodexUsageResponse {
     };
     rate_limit_reached_type?: string | null;
   };
+}
+
+// fmtWindowSeconds turns a limit_window_seconds value into a human label
+// ("5h", "7d", "30d") so each window is named by its real duration rather than
+// a hard-coded "primary/secondary" guess.
+function fmtWindowSeconds(s?: number): string | null {
+  if (!s || s <= 0) return null;
+  if (s % 86400 === 0) return `${s / 86400}d`;
+  if (s % 3600 === 0) return `${s / 3600}h`;
+  if (s % 60 === 0) return `${s / 60}m`;
+  return `${s}s`;
+}
+
+// codexReset renders a window's reset countdown. Prefers reset_after_seconds
+// (relative — populated even when the window isn't exhausted) and falls back to
+// the absolute reset_at. This is why reset times previously didn't show: the
+// portal returns reset_after_seconds while reset_at stays 0 until you hit the
+// cap.
+function codexReset(w?: CodexUsageRateWindow): string {
+  if (!w) return "—";
+  let ms: number | null = null;
+  if (typeof w.reset_after_seconds === "number" && w.reset_after_seconds > 0) {
+    ms = w.reset_after_seconds * 1000;
+  } else if (typeof w.reset_at === "number" && w.reset_at > 0) {
+    ms = w.reset_at * 1000 - Date.now();
+  }
+  if (ms == null) return "—";
+  if (ms < 0) return "now";
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor((ms % 86400000) / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+// collectCodexWindows flattens the main rate_limit and every
+// additional_rate_limits[] entry into a single labelled list, so all windows —
+// including the weekly one wherever the portal puts it — render.
+function collectCodexWindows(u: CodexUsageResponse["usage"]): { label: string; w: CodexUsageRateWindow }[] {
+  const out: { label: string; w: CodexUsageRateWindow }[] = [];
+  const push = (w: CodexUsageRateWindow | undefined, fallback: string, prefix?: string) => {
+    if (!w) return;
+    const lbl = fmtWindowSeconds(w.limit_window_seconds) || fallback;
+    out.push({ label: prefix ? `${prefix} · ${lbl}` : lbl, w });
+  };
+  const rl = u?.rate_limit;
+  if (rl) {
+    push(rl.primary_window, "5h");
+    push(rl.secondary_window, "7d");
+  }
+  for (const a of u?.additional_rate_limits ?? []) {
+    const name = a.limit_name || a.metered_feature || "extra";
+    push(a.rate_limit?.primary_window, "5h", name);
+    push(a.rate_limit?.secondary_window, "7d", name);
+  }
+  return out;
 }
 
 const ANTHROPIC_WINDOWS: [keyof NonNullable<NonNullable<AnthropicResponse["usage"]>["body"]>, string][] = [
@@ -276,14 +345,13 @@ function CodexUsageBody({
   err: string;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   const u = data?.usage;
   const rl = u?.rate_limit;
   const credits = u?.credits;
   const spend = u?.spend_control;
-  const primary = rl?.primary_window;
-  const secondary = rl?.secondary_window;
-  const primaryPct = pctColorPct(primary?.used_percent);
-  const secondaryPct = pctColorPct(secondary?.used_percent);
+  const resetCredits = u?.rate_limit_reset_credits?.available_count;
+  const windows = collectCodexWindows(u);
 
   return (
     <div className="space-y-3">
@@ -313,36 +381,41 @@ function CodexUsageBody({
 
       {err && <div className="rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{err}</div>}
 
-      {rl && (
-        <div className="space-y-3">
-          {primary && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-medium">主窗口（5h）</span>
-                <span className="font-mono text-muted-foreground">
-                  {primaryPct.pct != null ? `${primaryPct.pct}%` : "—"}
-                  {primary.reset_at ? ` · 重置于 ${fmtCountdown(primary.reset_at)}` : ""}
-                </span>
-              </div>
-              <div className="h-2 rounded-full bg-muted">
-                <div className={cn("h-full rounded-full", primaryPct.color)} style={{ width: `${primaryPct.pct ?? 0}%` }} />
-              </div>
-            </div>
-          )}
-          {secondary && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-medium">次窗口（7d）</span>
-                <span className="font-mono text-muted-foreground">
-                  {secondaryPct.pct != null ? `${secondaryPct.pct}%` : "—"}
-                  {secondary.reset_at ? ` · 重置于 ${fmtCountdown(secondary.reset_at)}` : ""}
-                </span>
-              </div>
-              <div className="h-2 rounded-full bg-muted">
-                <div className={cn("h-full rounded-full", secondaryPct.color)} style={{ width: `${secondaryPct.pct ?? 0}%` }} />
-              </div>
-            </div>
-          )}
+      {windows.length > 0 && (
+        <div className="overflow-hidden rounded-md border border-border">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-3 py-1.5 text-left font-medium">{t("legacy.upstreamUsage.window")}</th>
+                <th className="px-2 py-1.5 text-right font-medium">{t("legacy.upstreamUsage.used")}</th>
+                <th className="w-24 px-2 py-1.5 font-medium" />
+                <th className="px-3 py-1.5 text-right font-medium">{t("legacy.upstreamUsage.resetsInCol")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {windows.map(({ label, w }, i) => {
+                const { pct, color } = pctColorPct(w.used_percent);
+                return (
+                  <tr key={`${label}-${i}`} className="border-b border-border/60 last:border-b-0">
+                    <td className="px-3 py-1.5 font-medium">{label}</td>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums">{pct != null ? `${pct}%` : "—"}</td>
+                    <td className="px-2 py-1.5">
+                      <div className="h-1.5 rounded-full bg-muted">
+                        <div className={cn("h-full rounded-full", color)} style={{ width: `${pct ?? 0}%` }} />
+                      </div>
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">{codexReset(w)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {typeof resetCredits === "number" && resetCredits > 0 && (
+        <div className="text-xs text-muted-foreground">
+          {t("legacy.upstreamUsage.resetCredits", { n: resetCredits })}
         </div>
       )}
 

@@ -206,6 +206,21 @@ saas:
     notify_url: ""         # public URL for Alipay webhooks
     return_url: ""         # browser redirect after pay
 
+  # Stripe Payment Element top-up surface. Runs *alongside* the QR gateway
+  # above (zpay/alipay), not instead of it. Secret fields accept @path so the
+  # secret stays out of this file. The poll path settles orders even without a
+  # delivered webhook, so webhook_secret is optional in local dev.
+  stripe:
+    enabled: false
+    secret_key: ""          # sk_(test|live)_… or @/path/to/file
+    publishable_key: ""     # pk_(test|live)_… (public, handed to the browser)
+    webhook_secret: ""      # whsec_… or @/path/to/file (optional)
+    # Presentment currency. "cny" charges in CNY via the live exchange rate and
+    # credits the USD wallet (required for Alipay on a non-US Stripe account —
+    # Alipay can only present USD on US-based accounts). "usd" charges 1:1.
+    currency: "cny"
+    # return_url: ""        # redirect-method return; default <site_url>/app/billing
+
   # Live USD/CNY rate source. Default is the public fawazahmed0
   # currency-api (no key, no rate limit). Refreshed every hour.
   exchange_rate_url: ""

@@ -4,6 +4,8 @@ import { Activity, RefreshCw, Info } from "lucide-react";
 import { useTranslation, Trans } from "react-i18next";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
+import { SpotlightCard } from "@/components/landing/interactions";
+import { Reveal, RevealStagger, RevealItem } from "@/components/landing/reveal";
 import { api, ApiError } from "@/legacy/lib/api";
 import type { Summary } from "@/legacy/lib/types";
 import { OverviewPanel } from "@/legacy/components/overview-panel";
@@ -35,12 +37,7 @@ function MetricCell({
   accent?: boolean;
 }) {
   return (
-    <div
-      className={cn(
-        "rounded-lg border p-4",
-        accent ? "border-primary/30 bg-primary/[0.05]" : "border-border bg-card",
-      )}
-    >
+    <SpotlightCard tiltDeg={0} className={cn("w-full rounded-xl p-4", accent && "ring-1 ring-primary/30")}>
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="mt-2 flex items-baseline gap-1.5">
         <span
@@ -60,7 +57,7 @@ function MetricCell({
       {hint && (
         <div className="mt-2 text-[11px] font-mono text-muted-foreground tabular-nums">{hint}</div>
       )}
-    </div>
+    </SpotlightCard>
   );
 }
 
@@ -190,22 +187,26 @@ export default function ConsolePage() {
           laid out as a real horizontal grid (2 cols on mobile, 3 on small
           screens, 5 across on lg+). Each cell is a self-contained card
           using the same border/bg vocabulary as the SaaS dashboard. */}
-      <section className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
-        <MetricCell
-          label={t("console.metrics.credentials")}
-          value={`${healthyCreds}`}
-          unit={`/ ${totalCreds}`}
-          hint={t("console.metrics.health")}
-          accent
-        />
-        <MetricCell label={t("console.metrics.oauth")} value={fmtInt(oauths.length)} />
-        <MetricCell label={t("console.metrics.apiKeys")} value={fmtInt(apikeys.length)} />
-        <MetricCell label={t("console.metrics.sumIn24h")} value={fmtInt(totals.in24)} unit={t("console.metrics.tok")} />
-        <MetricCell label={t("console.metrics.sumOut")} value={fmtInt(totals.out)} unit={t("console.metrics.tok")} />
-      </section>
+      <RevealStagger className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+        <RevealItem className="flex">
+          <MetricCell
+            label={t("console.metrics.credentials")}
+            value={`${healthyCreds}`}
+            unit={`/ ${totalCreds}`}
+            hint={t("console.metrics.health")}
+            accent
+          />
+        </RevealItem>
+        <RevealItem className="flex"><MetricCell label={t("console.metrics.oauth")} value={fmtInt(oauths.length)} /></RevealItem>
+        <RevealItem className="flex"><MetricCell label={t("console.metrics.apiKeys")} value={fmtInt(apikeys.length)} /></RevealItem>
+        <RevealItem className="flex"><MetricCell label={t("console.metrics.sumIn24h")} value={fmtInt(totals.in24)} unit={t("console.metrics.tok")} /></RevealItem>
+        <RevealItem className="flex"><MetricCell label={t("console.metrics.sumOut")} value={fmtInt(totals.out)} unit={t("console.metrics.tok")} /></RevealItem>
+      </RevealStagger>
 
       {/* The original Overview panel — charts + fleet health visualisation. */}
-      <OverviewPanel summary={data} pricing={data?.pricing} refreshTick={refreshTick} />
+      <Reveal>
+        <OverviewPanel summary={data} pricing={data?.pricing} refreshTick={refreshTick} />
+      </Reveal>
     </div>
   );
 }

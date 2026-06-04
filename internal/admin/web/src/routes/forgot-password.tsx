@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiPost } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
-import { AuthLayout } from "./login";
+import { cn } from "@/lib/utils";
+import { AuthLayout, AuthForm, AuthRow, authBtn } from "./login";
 
 // Two-step reset flow that mirrors the backend's /auth/send-code (purpose=reset)
 // + /auth/reset-password endpoints. We don't reveal whether the email is
@@ -54,9 +55,9 @@ export default function ForgotPasswordPage() {
 
   if (step === "reset") {
     return (
-      <AuthLayout title={t("auth.forgot.step2Title")} sub={t("auth.forgot.step2Sub", { email })}>
-        <form onSubmit={resetPassword} className="space-y-4">
-          <div className="space-y-2">
+      <AuthLayout side="right" title={t("auth.forgot.step2Title")} sub={t("auth.forgot.step2Sub", { email })}>
+        <AuthForm key="reset" onSubmit={resetPassword} className="space-y-4">
+          <AuthRow className="space-y-2">
             <Label htmlFor="code">{t("auth.register.codeLabel")}</Label>
             <Input
               id="code"
@@ -69,8 +70,8 @@ export default function ForgotPasswordPage() {
               className="font-mono text-lg tracking-widest text-center"
               placeholder="000000"
             />
-          </div>
-          <div className="space-y-2">
+          </AuthRow>
+          <AuthRow className="space-y-2">
             <Label htmlFor="new-password">{t("auth.forgot.newPasswordLabel")}</Label>
             <Input
               id="new-password"
@@ -82,28 +83,26 @@ export default function ForgotPasswordPage() {
               onChange={(e) => setNewPassword(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">{t("auth.forgot.newPasswordHint")}</p>
-          </div>
-          <Button type="submit" className="w-full" disabled={busy}>
-            {busy ? t("auth.forgot.resetting") : t("auth.forgot.submit")}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            className="w-full"
-            disabled={busy}
-            onClick={() => setStep("start")}
-          >
-            {t("common.back")}
-          </Button>
-        </form>
+          </AuthRow>
+          <AuthRow>
+            <Button type="submit" className={cn("w-full", authBtn)} disabled={busy}>
+              {busy ? t("auth.forgot.resetting") : t("auth.forgot.submit")}
+            </Button>
+          </AuthRow>
+          <AuthRow>
+            <Button type="button" variant="ghost" className={cn("w-full", authBtn)} disabled={busy} onClick={() => setStep("start")}>
+              {t("common.back")}
+            </Button>
+          </AuthRow>
+        </AuthForm>
       </AuthLayout>
     );
   }
 
   return (
-    <AuthLayout title={t("auth.forgot.title")} sub={t("auth.forgot.sub")}>
-      <form onSubmit={sendCode} className="space-y-4">
-        <div className="space-y-2">
+    <AuthLayout side="right" title={t("auth.forgot.title")} sub={t("auth.forgot.sub")}>
+      <AuthForm key="start" onSubmit={sendCode} className="space-y-4">
+        <AuthRow className="space-y-2">
           <Label htmlFor="email">{t("common.email")}</Label>
           <Input
             id="email"
@@ -114,16 +113,18 @@ export default function ForgotPasswordPage() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
           />
-        </div>
-        <Button type="submit" className="w-full" disabled={busy}>
-          {busy ? t("auth.forgot.sending") : t("auth.forgot.sendCode")}
-        </Button>
-        <div className="text-center text-sm text-muted-foreground">
+        </AuthRow>
+        <AuthRow>
+          <Button type="submit" className={cn("w-full", authBtn)} disabled={busy}>
+            {busy ? t("auth.forgot.sending") : t("auth.forgot.sendCode")}
+          </Button>
+        </AuthRow>
+        <AuthRow className="text-center text-sm text-muted-foreground">
           <Link to="/login" className="text-primary underline-offset-4 hover:underline">
             {t("auth.forgot.backToLogin")}
           </Link>
-        </div>
-      </form>
+        </AuthRow>
+      </AuthForm>
     </AuthLayout>
   );
 }

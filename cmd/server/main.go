@@ -197,6 +197,16 @@ func main() {
 		}
 		log.Infof("payment gateway: %s", gwName)
 		billingH := billing.NewHandler(saasDB, rate, gateway, cfg.SaaS.SiteName)
+		billingH.SiteURL = cfg.SaaS.SiteURL
+		// Stripe runs alongside the QR gateway (not instead of it) so the
+		// embedded Payment Element — card / Alipay / WeChat / crypto, charged
+		// 1:1 in USD — and the legacy QR rail coexist.
+		if stripeGW, err := buildStripeGateway(cfg.SaaS); err != nil {
+			log.Fatalf("stripe gateway: %v", err)
+		} else if stripeGW != nil {
+			billingH.Stripe = stripeGW
+			log.Infof("stripe gateway: enabled (currency=%s, webhook=%v)", stripeGW.Currency(), stripeGW.HasWebhookSecret())
+		}
 		// Background sweeper: marks pending alipay orders older than the
 		// TTL as expired so late notifications can't credit them.
 		go billingH.RunExpirySweeper(refresherCtx)
@@ -425,6 +435,37 @@ func selectPaymentGateway(s saas.Config) (billing.Gateway, string, error) {
 		return &billing.MockGateway{}, "mock (auto-confirms after 2s — DO NOT use in production)", nil
 	}
 	return nil, "", fmt.Errorf("unknown payment_provider %q (want zpay|alipay|mock)", provider)
+}
+
+// buildStripeGateway constructs the optional Stripe gateway. Returns
+// (nil, nil) when Stripe isn't configured (no enabled flag and no secret key),
+// so the caller can treat "absent" and "error" distinctly. Resolves the @path
+// indirection on the secret key + webhook secret.
+func buildStripeGateway(s saas.Config) (*billing.StripeGateway, error) {
+	sc := s.Stripe
+	if !sc.Enabled && strings.TrimSpace(sc.SecretKey) == "" {
+		return nil, nil // not configured
+	}
+	secret, err := loadKeyFile(sc.SecretKey)
+	if err != nil {
+		return nil, fmt.Errorf("secret_key: %w", err)
+	}
+	whsec, err := loadKeyFile(sc.WebhookSecret)
+	if err != nil {
+		return nil, fmt.Errorf("webhook_secret: %w", err)
+	}
+	returnURL := strings.TrimSpace(sc.ReturnURL)
+	if returnURL == "" && strings.TrimSpace(s.SiteURL) != "" {
+		returnURL = strings.TrimRight(s.SiteURL, "/") + "/app/billing"
+	}
+	return billing.NewStripeGateway(billing.StripeParams{
+		SecretKey:                  secret,
+		PublishableKey:             sc.PublishableKey,
+		WebhookSecret:              whsec,
+		Currency:                   sc.Currency,
+		PaymentMethodConfiguration: sc.PaymentMethodConfiguration,
+		ReturnURL:                  returnURL,
+	})
 }
 
 // loadKeyFile resolves either an inline secret or an "@/path" reference.

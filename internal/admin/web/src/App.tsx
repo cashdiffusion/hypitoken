@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/hooks/use-auth";
+import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { RequireAdmin, RequireAuth } from "@/components/require-auth";
 import { AppShell } from "@/components/layout/shell";
 import { TitleWatcher } from "@/components/title-watcher";
@@ -21,6 +22,7 @@ import DocsLayout, { DocsIndex } from "@/routes/docs";
 export default function App() {
   return (
     <AuthProvider>
+      <ConfirmProvider>
       <BrowserRouter>
         <TitleWatcher />
         <Routes>
@@ -61,6 +63,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      </ConfirmProvider>
       <Toaster position="top-right" richColors closeButton />
     </AuthProvider>
   );

@@ -2,26 +2,32 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, AlertTriangle, XCircle, Clock, Activity } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { PublicHeader } from "@/components/layout/shell";
+import { Reveal } from "@/components/landing/reveal";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-interface HistoryPoint {
-  status: string;
-  latency_ms: number;
-  checked_at: number;
+// One aggregated availability line per provider. A slot/day is "up" if ANY
+// credential of that provider was healthy in it — we only care about whether
+// the service was usable, not which credential served it.
+interface Slot {
+  from: number; // unix seconds
+  ok: number;
+  total: number;
 }
-
-interface HealthCheck {
-  id: number;
-  display_name: string;
-  provider: string;
-  model?: string;
-  status: string;      // "ok" | "fail"
-  latency_ms: number;
-  error: string;
-  checked_at: number;  // unix seconds
-  history: HistoryPoint[];
-  oauth_count?: number;
+interface DayStat {
+  date: number; // unix seconds (midnight)
+  ok: number;
+  total: number;
+}
+interface ProviderMon {
+  key: string;
+  name: string;
+  operational: "operational" | "degraded" | "down";
+  healthy_creds: number;
+  total_creds: number;
+  checked_at: number;
+  recent: Slot[];
+  daily: DayStat[];
 }
 
 interface Props {
@@ -30,20 +36,17 @@ interface Props {
 
 export default function StatusPage({ embedded }: Props) {
   const { t } = useTranslation();
-  const [checks, setChecks] = useState<HealthCheck[]>([]);
+  const [providers, setProviders] = useState<ProviderMon[]>([]);
   const [asOf, setAsOf] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   const reload = async () => {
     try {
-      // Public endpoint — no auth required so visitors landing on /status
-      // can see upstream health without signing in. Mirror of /admin/health
-      // minus the operator-only error strings + refresh trigger.
-      const r = await api<{ checks: HealthCheck[]; as_of: number }>("/health");
-      setChecks(r.checks || []);
+      const r = await api<{ providers: ProviderMon[]; as_of: number }>("/health/monitor");
+      setProviders(r.providers || []);
       setAsOf(r.as_of || 0);
     } catch {
-      setChecks([]);
+      setProviders([]);
     } finally {
       setLoading(false);
     }
@@ -55,46 +58,29 @@ export default function StatusPage({ embedded }: Props) {
     return () => clearInterval(id);
   }, []);
 
-  const claudeChecks = checks.filter((c) => c.provider === "anthropic");
-  const codexChecks = checks.filter((c) => c.provider === "openai");
-
-  const overall = computeOverall(checks);
+  const overall = computeOverall(providers);
 
   const content = (
     <div className="space-y-8">
       <OverallBanner overall={overall} asOf={asOf} />
 
-      {loading && checks.length === 0 ? (
+      {loading && providers.length === 0 ? (
         <div className="flex items-center justify-center py-16 text-muted-foreground">
           <Activity className="mr-2 h-5 w-5 animate-pulse" />
           {t("common.loading")}
         </div>
-      ) : checks.length === 0 ? (
+      ) : providers.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="space-y-8">
-          <p className="text-right text-xs text-muted-foreground">
-            {t("status.uptimeBlurb", { n: SLOT_COUNT })}
-          </p>
-          {claudeChecks.length > 0 && (
-            <ProviderSection
-              name={t("status.claudeName")}
-              description={t("status.claudeSub")}
-              checks={claudeChecks}
-            />
-          )}
-          {codexChecks.length > 0 && (
-            <ProviderSection
-              name={t("status.codexName")}
-              description={t("status.codexSub")}
-              checks={codexChecks}
-            />
-          )}
+        <div className="space-y-6">
+          {providers.map((p) => (
+            <ProviderCard key={p.key} p={p} />
+          ))}
         </div>
       )}
 
       <p className="text-center text-xs text-muted-foreground">
-        {t("status.refreshHint", { n: Math.max(0, Math.round(120 - (Date.now() / 1000 - asOf) % 120)) })}
+        {t("status.refreshHint", { n: Math.max(0, Math.round(120 - ((Date.now() / 1000 - asOf) % 120))) })}
       </p>
     </div>
   );
@@ -111,8 +97,11 @@ export default function StatusPage({ embedded }: Props) {
     <div className="min-h-dvh bg-background text-foreground">
       <PublicHeader />
       <div className="mx-auto max-w-3xl px-4 py-12 md:px-6 md:py-16">
-        <h1 className="font-display text-4xl font-semibold tracking-tight md:text-5xl">{t("status.title")}</h1>
-        <p className="mt-2 text-muted-foreground">{t("status.sub")}</p>
+        <Reveal>
+          <span className="eyebrow text-primary">{t("nav.status")}</span>
+          <h1 className="mt-3 font-display text-4xl font-semibold tracking-tight md:text-5xl">{t("status.title")}</h1>
+          <p className="mt-2 text-muted-foreground">{t("status.sub")}</p>
+        </Reveal>
         <div className="mt-10">{content}</div>
       </div>
     </div>
@@ -123,11 +112,11 @@ export default function StatusPage({ embedded }: Props) {
 
 type Overall = "operational" | "degraded" | "outage" | "unknown";
 
-function computeOverall(checks: HealthCheck[]): Overall {
-  if (checks.length === 0) return "unknown";
-  const ok = checks.filter((c) => c.status === "ok").length;
-  if (ok === checks.length) return "operational";
-  if (ok === 0) return "outage";
+function computeOverall(providers: ProviderMon[]): Overall {
+  if (providers.length === 0) return "unknown";
+  const op = providers.filter((p) => p.operational === "operational").length;
+  if (op === providers.length) return "operational";
+  if (op === 0 && providers.every((p) => p.operational === "down")) return "outage";
   return "degraded";
 }
 
@@ -135,9 +124,9 @@ function OverallBanner({ overall, asOf }: { overall: Overall; asOf: number }) {
   const { t } = useTranslation();
   const cfg = {
     operational: { icon: CheckCircle2, key: "status.operational", bg: "bg-[#76ad2a]" },
-    degraded:    { icon: AlertTriangle, key: "status.degraded",    bg: "bg-[#eaa82a]" },
-    outage:      { icon: XCircle,       key: "status.outage",      bg: "bg-[#e04343]" },
-    unknown:     { icon: Clock,         key: "status.awaiting",    bg: "bg-zinc-500" },
+    degraded: { icon: AlertTriangle, key: "status.degraded", bg: "bg-[#eaa82a]" },
+    outage: { icon: XCircle, key: "status.outage", bg: "bg-[#e04343]" },
+    unknown: { icon: Clock, key: "status.awaiting", bg: "bg-zinc-500" },
   } as const;
   const { icon: Icon, key, bg } = cfg[overall];
   const since = asOf ? new Date(asOf * 1000).toLocaleString() : "—";
@@ -153,151 +142,135 @@ function OverallBanner({ overall, asOf }: { overall: Overall; asOf: number }) {
   );
 }
 
-// ─── Provider section ─────────────────────────────────────────────────────────
+// ─── Provider card: two aggregated uptime strips (recent 10-min + daily) ──────
 
-function ProviderSection({ name, description, checks }: { name: string; description: string; checks: HealthCheck[] }) {
-  const allOk = checks.every((c) => c.status === "ok");
-  const anyOk = checks.some((c) => c.status === "ok");
+const FILL_OK = "#76ad2a"; // operational green
+const FILL_FAIL = "#e04343"; // outage red
+const FILL_PARTIAL = "#eaa82a"; // degraded amber
+const FILL_NONE = "#B0AEA5"; // no-data gray
+
+function ProviderCard({ p }: { p: ProviderMon }) {
+  const { t } = useTranslation();
+  const age = p.checked_at ? Math.round(Date.now() / 1000 - p.checked_at) / 60 : null;
+
+  return (
+    <Reveal>
+      <div className="glass overflow-hidden rounded-2xl p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <h2 className="font-display text-xl font-semibold">{p.name}</h2>
+            <span className="font-mono text-xs text-muted-foreground">
+              {t("status.credsHealthy", { ok: p.healthy_creds, total: p.total_creds })}
+            </span>
+          </div>
+          <ProviderPill operational={p.operational} />
+        </div>
+
+        <div className="mt-5 space-y-5">
+          <UptimeStrip
+            label={t("status.recentWindow")}
+            slots={p.recent.map((s) => ({ ok: s.ok, total: s.total, ts: s.from, kind: "slot" as const }))}
+            slotCount={144}
+          />
+          <UptimeStrip
+            label={t("status.dailyWindow")}
+            slots={p.daily.map((d) => ({ ok: d.ok, total: d.total, ts: d.date, kind: "day" as const }))}
+            slotCount={p.daily.length || 30}
+            wide
+          />
+        </div>
+
+        {age !== null && (
+          <p className="mt-4 text-right text-[11px] text-muted-foreground" title={new Date(p.checked_at * 1000).toLocaleString()}>
+            {age < 1 ? t("status.justNow") : t("status.minAgo", { n: Math.round(age) })}
+          </p>
+        )}
+      </div>
+    </Reveal>
+  );
+}
+
+function ProviderPill({ operational }: { operational: ProviderMon["operational"] }) {
+  const { t } = useTranslation();
+  if (operational === "operational")
+    return <span className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-mono uppercase tracking-wider text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400">{t("status.pillOperational")}</span>;
+  if (operational === "degraded")
+    return <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-mono uppercase tracking-wider text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-400">{t("status.pillDegraded")}</span>;
+  return <span className="rounded-full border border-red-300 bg-red-50 px-3 py-1 text-xs font-mono uppercase tracking-wider text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-400">{t("status.pillDown")}</span>;
+}
+
+interface StripSlot {
+  ok: number;
+  total: number;
+  ts: number;
+  kind: "slot" | "day";
+}
+
+function slotFill(s: StripSlot): string {
+  if (s.total === 0) return FILL_NONE;
+  if (s.kind === "day") {
+    const r = s.ok / s.total;
+    if (r >= 0.99) return FILL_OK;
+    if (r >= 0.95) return FILL_PARTIAL;
+    return FILL_FAIL;
+  }
+  // 10-min slot: up if any credential was healthy in the window.
+  return s.ok > 0 ? FILL_OK : FILL_FAIL;
+}
+
+function UptimeStrip({ label, slots, slotCount, wide }: { label: string; slots: StripSlot[]; slotCount: number; wide?: boolean }) {
+  const { t } = useTranslation();
+  const BAR_W = wide ? 14 : 3;
+  const BAR_GAP = wide ? 4 : 2;
+  const BAR_H = 34;
+  const count = slotCount;
+  // Left-pad so newest is on the right.
+  const padded: (StripSlot | null)[] = [
+    ...Array(Math.max(0, count - slots.length)).fill(null),
+    ...slots.slice(-count),
+  ];
+  const vbW = count * (BAR_W + BAR_GAP) - BAR_GAP;
+
+  const withData = slots.filter((s) => s.total > 0);
+  let uptimePct: number | null = null;
+  if (withData.length > 0) {
+    if (slots[0]?.kind === "day") {
+      const ok = withData.reduce((a, s) => a + s.ok, 0);
+      const tot = withData.reduce((a, s) => a + s.total, 0);
+      uptimePct = tot > 0 ? (ok / tot) * 100 : null;
+    } else {
+      const up = withData.filter((s) => s.ok > 0).length;
+      uptimePct = (up / withData.length) * 100;
+    }
+  }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h2 className="font-display text-xl font-semibold">{name}</h2>
-          <p className="text-xs text-muted-foreground">{description}</p>
-        </div>
-        <StatusPill allOk={allOk} anyOk={anyOk} />
+      <div className="mb-1.5 flex items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground">
+        <span>{label}</span>
+        <span className="font-mono tabular-nums normal-case">
+          {uptimePct === null ? t("status.awaitingData") : `${uptimePct.toFixed(2)} %`}
+        </span>
       </div>
-
-      <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
-        {checks.map((c) => (
-          <CredRow key={c.id} check={c} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function StatusPill({ allOk, anyOk }: { allOk: boolean; anyOk: boolean }) {
-  const { t } = useTranslation();
-  if (allOk)
-    return <span className="rounded-full border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 dark:border-emerald-800 px-3 py-1 text-xs font-mono uppercase tracking-wider text-emerald-700 dark:text-emerald-400">{t("status.pillOperational")}</span>;
-  if (anyOk)
-    return <span className="rounded-full border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 px-3 py-1 text-xs font-mono uppercase tracking-wider text-amber-700 dark:text-amber-400">{t("status.pillDegraded")}</span>;
-  return <span className="rounded-full border border-red-300 bg-red-50 dark:bg-red-950/40 dark:border-red-800 px-3 py-1 text-xs font-mono uppercase tracking-wider text-red-700 dark:text-red-400">{t("status.pillDown")}</span>;
-}
-
-// ─── Credential row with status.claude.com-style uptime bars ─────────────────
-
-// Match status.claude.com: 90 slots, bar width 3, gap 2 → viewBox width 448 (90*5 - 2).
-const SLOT_COUNT = 90;
-const BAR_W = 3;
-const BAR_GAP = 2;
-const BAR_H = 34;
-const VB_W = SLOT_COUNT * (BAR_W + BAR_GAP) - BAR_GAP; // 448
-
-// Color palette lifted directly from status.claude.com SVG.
-const FILL_OK = "#76ad2a";    // operational green
-const FILL_FAIL = "#e04343";  // outage red
-const FILL_NONE = "#B0AEA5";  // no data gray
-
-function CredRow({ check }: { check: HealthCheck }) {
-  const { t } = useTranslation();
-  const ok = check.status === "ok";
-  const age = check.checked_at ? Math.round((Date.now() / 1000 - check.checked_at) / 60) : null;
-
-  return (
-    <div className="bg-card px-5 py-4">
-      {/* Top row: name + current status */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="font-mono text-sm font-medium text-foreground">{check.display_name}</span>
-          {check.oauth_count && check.oauth_count > 0 && (
-            <span className="text-xs text-muted-foreground font-mono">
-              {check.oauth_count} OAuth
-            </span>
-          )}
-          {!ok && check.error && (
-            <span className="hidden max-w-xs truncate text-xs text-muted-foreground sm:block" title={check.error}>
-              {check.error.slice(0, 80)}{check.error.length > 80 ? "…" : ""}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-4 text-xs">
-          {ok && check.latency_ms > 0 && (
-            <span className={cn(
-              "font-mono tabular-nums text-muted-foreground",
-              check.latency_ms > 5000 ? "text-amber-500" : ""
-            )}>
-              {check.latency_ms}ms
-            </span>
-          )}
-          {age !== null && (
-            <span className="text-muted-foreground" title={new Date(check.checked_at * 1000).toLocaleString()}>
-              {age === 0 ? t("status.justNow") : t("status.minAgo", { n: age })}
-            </span>
-          )}
-          <span className={cn(
-            "font-medium",
-            ok ? "text-emerald-700 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
-          )}>
-            {ok ? t("status.rowOperational") : t("status.rowDown")}
-          </span>
-        </div>
-      </div>
-
-      {/* Uptime bar */}
-      <UptimeBar history={check.history} />
-    </div>
-  );
-}
-
-function UptimeBar({ history }: { history: HistoryPoint[] }) {
-  const { t } = useTranslation();
-  // Pad on the left: oldest data on the left, newest on the right.
-  const padded: (HistoryPoint | null)[] = [
-    ...Array(Math.max(0, SLOT_COUNT - history.length)).fill(null),
-    ...history.slice(-SLOT_COUNT),
-  ];
-
-  const uptimePct = history.length === 0
-    ? null
-    : ((history.filter(h => h.status === "ok").length / history.length) * 100);
-
-  return (
-    <div className="mt-3">
-      {/* SVG bar — preserveAspectRatio=none lets the 448-wide viewBox stretch
-          to the container's full width while keeping bars as crisp rects. */}
-      <svg
-        className="block h-[34px] w-full"
-        preserveAspectRatio="none"
-        viewBox={`0 0 ${VB_W} ${BAR_H}`}
-        height={BAR_H}
-      >
-        {padded.map((pt, i) => {
+      <svg className="block w-full" style={{ height: BAR_H }} preserveAspectRatio="none" viewBox={`0 0 ${vbW} ${BAR_H}`} height={BAR_H}>
+        {padded.map((s, i) => {
           const x = i * (BAR_W + BAR_GAP);
-          const fill = pt == null ? FILL_NONE : pt.status === "ok" ? FILL_OK : FILL_FAIL;
-          let title = "No data";
-          if (pt) {
-            const ts = new Date(pt.checked_at * 1000).toLocaleString();
-            title = pt.status === "ok"
-              ? `${ts} — operational (${pt.latency_ms}ms)`
-              : `${ts} — failed`;
+          const fill = s == null ? FILL_NONE : slotFill(s);
+          let title = t("status.noData");
+          if (s) {
+            const when = new Date(s.ts * 1000).toLocaleString();
+            const pct = s.total > 0 ? Math.round((s.ok / s.total) * 100) : null;
+            title = s.total === 0 ? `${when} — ${t("status.noData")}` : `${when} — ${pct}% (${s.ok}/${s.total})`;
           }
           return (
-            <rect key={i} x={x} y={0} width={BAR_W} height={BAR_H} fill={fill}>
+            <rect key={i} x={x} y={0} width={BAR_W} height={BAR_H} rx={wide ? 2 : 0} fill={fill}>
               <title>{title}</title>
             </rect>
           );
         })}
       </svg>
-
       <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground">
         <span className="shrink-0">{t("status.older")}</span>
-        <span className="h-px flex-1 bg-border" />
-        <span className="shrink-0 font-mono tabular-nums">
-          {uptimePct === null ? t("status.awaitingData") : `${uptimePct.toFixed(2)} %`}
-        </span>
         <span className="h-px flex-1 bg-border" />
         <span className="shrink-0">{t("status.now")}</span>
       </div>
@@ -308,7 +281,7 @@ function UptimeBar({ history }: { history: HistoryPoint[] }) {
 function EmptyState() {
   const { t } = useTranslation();
   return (
-    <div className="rounded-xl border border-border bg-card p-12 text-center">
+    <div className="glass rounded-2xl p-12 text-center">
       <Clock className="mx-auto h-10 w-10 text-muted-foreground" />
       <h3 className="mt-4 font-display text-lg font-medium">{t("status.none.title")}</h3>
       <p className="mt-2 text-sm text-muted-foreground">{t("status.none.sub")}</p>

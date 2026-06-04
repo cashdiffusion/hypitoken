@@ -6,6 +6,7 @@
 /saas.db
 /saas.db-wal
 /saas.db-shm
+/saas.db.jwt_secret
 /shop.db
 /shop.db-wal
 /shop.db-shm
@@ -21,3 +22,4 @@
 !/internal/admin/web/dist/.gitkeep
 .claude/
 backups/
+/secrets/

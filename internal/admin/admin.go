@@ -1627,6 +1627,10 @@ func (h *Handler) RegisterSaaSBridge(g *gin.RouterGroup) {
 	// create / oauth-start / oauth-finish / delete — those are not just
 	// pass-throughs (they write JSON files into AuthDir).
 	g.GET("/credentials", h.handleBridgeListCreds)
+	// Upload a raw credential JSON (export from another instance, etc.). The
+	// legacy handler writes the file into AuthDir and adds it to the shared
+	// pool — the same pool the SaaS panel reads — so it bridges cleanly.
+	g.POST("/credentials/upload", h.handleUpload)
 	g.PATCH("/credentials/:id", h.handlePatchAuth)
 	g.POST("/credentials/:id/refresh", h.handleRefresh)
 	g.POST("/credentials/:id/clear-quota", h.handleClearQuota)

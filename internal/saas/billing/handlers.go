@@ -67,6 +67,15 @@ type PayResult struct {
 	QRCode string `json:"qr_code,omitempty"`
 	PayURL string `json:"pay_url,omitempty"`
 	Img    string `json:"img,omitempty"`
+
+	// Stripe Payment Element fields. Provider + PaymentIntentID are persisted
+	// in the order's qr_code JSON column so the poll / reconcile path can map
+	// an order back to its PaymentIntent. ClientSecret + PublishableKey are
+	// returned to the browser in the topup response only and are NEVER stored.
+	Provider        string `json:"provider,omitempty"`
+	PaymentIntentID string `json:"payment_intent_id,omitempty"`
+	ClientSecret    string `json:"client_secret,omitempty"`
+	PublishableKey  string `json:"publishable_key,omitempty"`
 }
 
 // Notification is the verified subset of Alipay's async notify / sync query
@@ -85,6 +94,13 @@ type Handler struct {
 	Rate    *Rate
 	Gateway Gateway
 	Site    string
+
+	// Stripe is the optional embedded Payment Element gateway, running
+	// alongside Gateway (the QR rail). nil when Stripe isn't configured.
+	Stripe *StripeGateway
+	// SiteURL is the public app origin, used to default the Stripe
+	// redirect-return URL when the Stripe config doesn't set one.
+	SiteURL string
 
 	// OrderTTL controls how long a "pending" order is honoured before the
 	// background sweeper marks it expired. After expiry, late Alipay
@@ -127,6 +143,7 @@ func (h *Handler) UserRoutes(g *gin.RouterGroup) {
 	g.GET("/rate", h.exchangeRate)
 	g.POST("/topup", h.topup)
 	g.GET("/orders/:id", h.orderStatus)
+	g.GET("/providers", h.providers)
 }
 
 // PublicRoutes mounts gateway notification callbacks (no auth — verified
@@ -136,6 +153,9 @@ func (h *Handler) UserRoutes(g *gin.RouterGroup) {
 func (h *Handler) PublicRoutes(g *gin.RouterGroup) {
 	g.POST("/billing/notify", h.notify)
 	g.GET("/billing/notify", h.notify)
+	// Stripe webhook — separate route because Stripe verifies a signature over
+	// the raw request body (not form params like the Alipay/Z-Pay notify).
+	g.POST("/billing/stripe/webhook", h.stripeWebhook)
 }
 
 func (h *Handler) balance(c *gin.Context) {
@@ -193,6 +213,10 @@ func (h *Handler) orders(c *gin.Context) {
 type topupReq struct {
 	USD    float64 `json:"usd"`              // wallet credit requested (real USD)
 	Method string  `json:"method,omitempty"` // "alipay" (default) | "wxpay" — gateways may ignore
+	// Provider picks the rail: "stripe" routes through the embedded Payment
+	// Element (card / Alipay / WeChat / crypto, charged 1:1 in USD); anything
+	// else (default) uses the configured QR Gateway (zpay / alipay / mock).
+	Provider string `json:"provider,omitempty"`
 }
 
 func (h *Handler) topup(c *gin.Context) {
@@ -232,13 +256,23 @@ func (h *Handler) topup(c *gin.Context) {
 		})
 		return
 	}
-	rate := h.Rate.CNYPerUSD()
-	cny := round2(req.USD * rate)
 	out, err := genOutTradeNo(u.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Stripe rail: create a PaymentIntent and hand its client_secret to the
+	// browser. Charged 1:1 in the configured currency (USD). The order's
+	// cny_amount column is repurposed to hold the charged amount with rate=1
+	// so the existing admin dashboard sums stay coherent.
+	if strings.EqualFold(strings.TrimSpace(req.Provider), "stripe") {
+		h.topupStripe(c, u.ID, req.USD, out)
+		return
+	}
+
+	rate := h.Rate.CNYPerUSD()
+	cny := round2(req.USD * rate)
 	method := strings.ToLower(strings.TrimSpace(req.Method))
 	if method == "" {
 		method = "alipay"
@@ -288,6 +322,16 @@ func (h *Handler) orderStatus(c *gin.Context) {
 	if err != nil || o.UserID != u.ID {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
+	}
+	// Stripe poll-to-settle: the browser polls this endpoint after confirming
+	// the Payment Element, so for a pending Stripe order we retrieve the live
+	// PaymentIntent and credit on the spot. This makes the happy path work
+	// even when no webhook is delivered (e.g. local dev without a tunnel).
+	if o.Status == db.OrderPending {
+		h.maybeSettleStripeOrder(c.Request.Context(), o)
+		if fresh, ferr := h.DB.GetOrder(c.Request.Context(), out); ferr == nil {
+			o = fresh
+		}
 	}
 	c.JSON(http.StatusOK, orderView(o))
 }
@@ -416,15 +460,8 @@ func orderView(o *db.AlipayOrder) gin.H {
 		paid = o.PaidAt.Unix()
 	}
 	// QRCode is stored as a JSON-encoded PayResult so we don't need a
-	// schema migration to add pay_url/img alongside it. Best-effort unpack
-	// — legacy rows are bare URLs and decode harmlessly to the empty
-	// struct, leaving qr_code as the legacy raw value.
-	var pr PayResult
-	if s := strings.TrimSpace(o.QRCode); strings.HasPrefix(s, "{") {
-		_ = json.Unmarshal([]byte(s), &pr)
-	} else {
-		pr.QRCode = s
-	}
+	// schema migration to add pay_url/img alongside it.
+	pr := parsePayResult(o.QRCode)
 	return gin.H{
 		"out_trade_no": o.OutTradeNo,
 		"cny_amount":   o.CNYAmount,
@@ -435,9 +472,23 @@ func orderView(o *db.AlipayOrder) gin.H {
 		"qr_code":      pr.QRCode,
 		"pay_url":      pr.PayURL,
 		"img":          pr.Img,
+		"provider":     pr.Provider,
 		"created_at":   o.CreatedAt.Unix(),
 		"paid_at":      paid,
 	}
+}
+
+// parsePayResult unpacks the qr_code TEXT column. New rows store a
+// JSON-encoded PayResult; legacy rows are a bare QR/URL string and decode to
+// a PayResult with just QRCode set.
+func parsePayResult(s string) PayResult {
+	var pr PayResult
+	if t := strings.TrimSpace(s); strings.HasPrefix(t, "{") {
+		_ = json.Unmarshal([]byte(t), &pr)
+	} else {
+		pr.QRCode = t
+	}
+	return pr
 }
 
 // allowCreate gates per-user order creation: max 10 / hour. Returns
