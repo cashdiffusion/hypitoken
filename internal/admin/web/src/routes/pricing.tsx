@@ -27,9 +27,18 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 // Official Anthropic & OpenAI model pricing (USD per 1M tokens, as of May 2025)
 const CLAUDE_MODELS = [
   {
+    name: "claude-opus-4-8",
+    display: "Claude Opus 4.8",
+    tier: "flagship",
+    input: 5.0,
+    output: 25.0,
+    cacheWrite: 6.25,
+    cacheRead: 0.5,
+  },
+  {
     name: "claude-opus-4-7",
     display: "Claude Opus 4.7",
-    tier: "flagship",
+    tier: "advanced",
     input: 5.0,
     output: 25.0,
     cacheWrite: 6.25,
