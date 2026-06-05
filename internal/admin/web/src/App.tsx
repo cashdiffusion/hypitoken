@@ -1,6 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
-import { AppShell } from "@/components/layout/shell";
+import { AppShell, PublicLayout } from "@/components/layout/shell";
 import { RequireAdmin, RequireAuth } from "@/components/require-auth";
 import { TitleWatcher } from "@/components/title-watcher";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
@@ -26,15 +26,21 @@ export default function App() {
         <BrowserRouter>
           <TitleWatcher />
           <Routes>
-            {/* public */}
+            {/* standalone public pages — each owns its own full-screen layout
+                (home = cinematic video hero; auth = split-screen) */}
             <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/pricing" element={<PricingPage />} />
-            <Route path="/status" element={<StatusPage />} />
-            <Route path="/docs" element={<DocsIndex />} />
-            <Route path="/docs/:slug" element={<DocsLayout />} />
+
+            {/* marketing pages — share one persistent PublicLayout header so the
+                nav never remounts (no flicker) and stays consistent */}
+            <Route element={<PublicLayout />}>
+              <Route path="/pricing" element={<PricingPage />} />
+              <Route path="/status" element={<StatusPage />} />
+              <Route path="/docs" element={<DocsIndex />} />
+              <Route path="/docs/:slug" element={<DocsLayout />} />
+            </Route>
 
             {/* authed */}
             <Route

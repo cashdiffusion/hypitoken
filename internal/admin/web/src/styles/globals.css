@@ -132,6 +132,17 @@
     color-scheme: dark;
   }
 
+  /* Radix Dialog/Select/Popover lock scroll via react-remove-scroll, which
+     adds `margin-right: <scrollbar>px !important` to <body> on open to offset
+     the scrollbar it removes. But we reserve the gutter permanently above
+     (`scrollbar-gutter: stable`), so the gutter never collapses — that offset
+     is double-counted and visibly shoves the whole page left every time a
+     modal opens. Zero it out. The `html` prefix lifts specificity above
+     react-remove-scroll's own !important rule regardless of insertion order. */
+  html body[data-scroll-locked] {
+    margin-right: 0 !important;
+  }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
@@ -384,4 +395,35 @@ html:not(.dark) .page-canvas {
     radial-gradient(ellipse 45% 40% at 95% 10%, color-mix(in oklch, var(--success) 8%, transparent) 0%, transparent 70%),
     radial-gradient(ellipse 60% 45% at 15% 100%, color-mix(in oklch, var(--success) 10%, transparent) 0%, transparent 70%),
     radial-gradient(ellipse 50% 40% at 95% 95%, color-mix(in oklch, var(--success) 7%, transparent) 0%, transparent 70%);
+}
+
+/* ── View Transitions ──────────────────────────────────────────────────────
+   Route changes opt in via react-router's `viewTransition` prop, which wraps
+   the DOM swap in document.startViewTransition(). The outgoing page is held
+   opaque underneath while the incoming page dissolves in on top — an opaque
+   cross-fade with no mid-transition background bleed, replacing the hard-cut
+   "flicker" between routes. The PublicLayout header is the same DOM node across
+   navigations (it lives outside the swapped <Outlet/>), so on pricing↔docs↔
+   status it doesn't move at all; only the content dissolves. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root) {
+    animation: none; /* held opaque beneath the incoming snapshot */
+  }
+  ::view-transition-new(root) {
+    animation: vt-page-in 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@keyframes vt-page-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Honour reduced-motion: swap instantly, no dissolve. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
 }

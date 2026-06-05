@@ -15,7 +15,6 @@ import { Trans, useTranslation } from "react-i18next";
 import { SpotlightCard } from "@/components/landing/interactions";
 import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { useIsMobile, usePrefersReducedMotion } from "@/components/landing/use-media";
-import { PublicHeader } from "@/components/layout/shell";
 import { api } from "@/lib/api";
 import type { PricingGroup } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -758,10 +757,5 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
   );
 
   if (embedded) return content;
-  return (
-    <div className="min-h-dvh bg-background text-foreground">
-      <PublicHeader />
-      <div className="mx-auto max-w-6xl px-4 py-12 md:px-6 md:py-20">{content}</div>
-    </div>
-  );
+  return <div className="mx-auto max-w-6xl px-4 py-12 md:px-6 md:py-20">{content}</div>;
 }

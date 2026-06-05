@@ -2,7 +2,6 @@ import { Activity, AlertTriangle, CheckCircle2, Clock, XCircle } from "lucide-re
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Reveal } from "@/components/landing/reveal";
-import { PublicHeader } from "@/components/layout/shell";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -97,18 +96,15 @@ export default function StatusPage({ embedded }: Props) {
     );
   }
   return (
-    <div className="min-h-dvh bg-background text-foreground">
-      <PublicHeader />
-      <div className="mx-auto max-w-3xl px-4 py-12 md:px-6 md:py-16">
-        <Reveal>
-          <span className="eyebrow text-primary">{t("nav.status")}</span>
-          <h1 className="mt-3 font-display text-4xl font-semibold tracking-tight md:text-5xl">
-            {t("status.title")}
-          </h1>
-          <p className="mt-2 text-muted-foreground">{t("status.sub")}</p>
-        </Reveal>
-        <div className="mt-10">{content}</div>
-      </div>
+    <div className="mx-auto max-w-3xl px-4 py-12 md:px-6 md:py-16">
+      <Reveal>
+        <span className="eyebrow text-primary">{t("nav.status")}</span>
+        <h1 className="mt-3 font-display text-4xl font-semibold tracking-tight md:text-5xl">
+          {t("status.title")}
+        </h1>
+        <p className="mt-2 text-muted-foreground">{t("status.sub")}</p>
+      </Reveal>
+      <div className="mt-10">{content}</div>
     </div>
   );
 }

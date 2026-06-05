@@ -24,6 +24,7 @@ import { StatusBoard } from "@/components/landing/status-board";
 import { useIsMobile, usePrefersReducedMotion } from "@/components/landing/use-media";
 import { LanguageToggle } from "@/components/language-toggle";
 import { MobileMenu } from "@/components/layout/mobile-menu";
+import { SiteNav } from "@/components/layout/shell";
 import { ThemeToggle } from "@/components/theme-toggle";
 import RadialOrbitalTimeline, { type TimelineItem } from "@/components/ui/radial-orbital-timeline";
 import { type Testimonial, TestimonialsColumn } from "@/components/ui/testimonials-columns";
@@ -51,7 +52,7 @@ export default function HomePage() {
 
   return (
     <div className="relative text-foreground">
-      <FloatingNav t={t} />
+      <FloatingNav />
       {/* page-canvas slides up over the pinned footer for the curtain reveal */}
       <div className="page-canvas relative z-10 mb-[460px] sm:mb-[600px]">
         <Hero t={t} />
@@ -238,19 +239,12 @@ export default function HomePage() {
 
 /* ── Floating glass nav ────────────────────────────────────────────────── */
 
-const NAV_LINKS = [
-  { to: "/", key: "nav.home" },
-  { to: "/pricing", key: "nav.pricing" },
-  { to: "/docs", key: "nav.docs" },
-  { to: "/status", key: "nav.status" },
-];
-
 // Scroll-aware condensed header. Stays hidden over the hero, then slides down
-// as a themed glass pill whenever the user scrolls up anywhere below the fold,
-// and tucks away again on scroll-down. Mirrors the hero nav, themed (adapts to
-// light/dark) rather than the over-video green variant.
-function FloatingNav({ t }: { t: (k: string) => string }) {
-  const { user } = useAuth();
+// whenever the user scrolls up anywhere below the fold, and tucks away again on
+// scroll-down. The pill itself is the shared <SiteNav/> — identical to every
+// other page's header — so the homepage and the rest of the site read as one
+// consistent navbar.
+function FloatingNav() {
   const reduce = useReducedMotion();
   const { scrollY } = useScroll();
   const [shown, setShown] = useState(false);
@@ -274,43 +268,7 @@ function FloatingNav({ t }: { t: (k: string) => string }) {
       animate={shown ? { y: 0, opacity: 1 } : { y: -120, opacity: 0 }}
       transition={reduce ? { duration: 0 } : { duration: 0.38, ease: EASE }}
     >
-      <nav className="glass mx-auto flex max-w-6xl items-center justify-between gap-4 rounded-full px-3 py-2 md:px-4">
-        <Link
-          to="/"
-          className="flex items-center gap-2 pl-1 font-display text-lg font-semibold tracking-tight"
-        >
-          <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
-            <KeyRound className="h-3.5 w-3.5" />
-          </span>
-          HypiToken
-        </Link>
-        <div className="hidden items-center gap-1 lg:flex">
-          {NAV_LINKS.map((l) => (
-            <Link
-              key={l.to}
-              to={l.to}
-              className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              {t(l.key)}
-            </Link>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="hidden items-center gap-1.5 lg:flex">
-            <LanguageToggle />
-            <ThemeToggle />
-            {user ? (
-              <PrimaryLink to="/app">{t("nav.dashboard")} →</PrimaryLink>
-            ) : (
-              <>
-                <GhostLink to="/login">{t("nav.signIn")}</GhostLink>
-                <PrimaryLink to="/register">{t("nav.signUp")}</PrimaryLink>
-              </>
-            )}
-          </div>
-          <MobileMenu variant="public" />
-        </div>
-      </nav>
+      <SiteNav />
     </motion.div>
   );
 }
@@ -466,6 +424,7 @@ function HeroNav({ t }: { t: (k: string) => string }) {
       <nav className="glass-dark mx-auto flex max-w-6xl items-center justify-between gap-4 rounded-full px-3 py-2 md:px-4">
         <Link
           to="/"
+          viewTransition
           className="flex items-center gap-2 pl-1 font-display text-lg font-semibold tracking-tight text-white"
         >
           <span className="grid h-7 w-7 place-items-center rounded-md bg-emerald-400 text-emerald-950">
@@ -478,6 +437,7 @@ function HeroNav({ t }: { t: (k: string) => string }) {
             <Link
               key={l.to}
               to={l.to}
+              viewTransition
               className="rounded-full px-3 py-1.5 text-sm text-white/80 transition-colors hover:bg-white/10 hover:text-white"
             >
               {t(l.key)}
@@ -522,6 +482,7 @@ function HeroPrimary({
   return (
     <Link
       to={to}
+      viewTransition
       className={`group inline-flex items-center justify-center gap-2 rounded-full bg-emerald-400 font-medium text-emerald-950 shadow-[0_8px_30px_-8px_rgba(52,211,153,0.6)] transition-all hover:bg-emerald-300 hover:shadow-[0_10px_40px_-8px_rgba(52,211,153,0.8)] ${
         compact ? "px-4 py-1.5 text-sm" : "px-5 py-2.5 text-base"
       }`}
@@ -543,6 +504,7 @@ function HeroGhost({
   return (
     <Link
       to={to}
+      viewTransition
       className={`glass-dark inline-flex items-center justify-center gap-2 rounded-full font-medium text-white transition-colors hover:bg-white/15 ${
         compact ? "px-4 py-1.5 text-sm" : "px-5 py-2.5 text-base"
       }`}
@@ -570,6 +532,7 @@ function PrimaryLink({ to, children }: { to: string; children: ReactNode }) {
   return (
     <Link
       to={to}
+      viewTransition
       className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:opacity-90 hover:shadow-md"
     >
       {children}
@@ -589,6 +552,7 @@ function GhostLink({
   return (
     <Link
       to={to}
+      viewTransition
       className={`inline-flex items-center justify-center gap-2 rounded-full border border-border-strong bg-card px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent ${className}`}
     >
       {children}

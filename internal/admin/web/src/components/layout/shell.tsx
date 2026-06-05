@@ -48,6 +48,7 @@ function SideNavLink({
     <NavLink
       to={to}
       end={end}
+      viewTransition
       className={cn(
         "relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
         active ? "font-medium text-primary" : "text-muted-foreground hover:text-foreground",
@@ -197,10 +198,14 @@ function Header() {
   );
 }
 
-// PublicHeader — floating glass pill shared by all public pages (pricing,
-// docs, status, auth). Sticky (so it occupies flow and never overlaps page
-// content) and themed via `.glass`, matching the homepage nav language.
-export function PublicHeader() {
+// SiteNav — the canonical public navigation pill (logo + section links +
+// language/theme toggles + auth CTAs). Shared *verbatim* between the public
+// pages (via PublicLayout/PublicHeader) and the homepage's scroll-aware
+// FloatingNav so the bar is pixel-identical everywhere — this is the single
+// source of truth for "the homepage nav style". Every link opts into the View
+// Transitions API (viewTransition) so route changes cross-fade rather than
+// hard-cutting.
+export function SiteNav() {
   const { user } = useAuth();
   const { t } = useTranslation();
   const linkCls = ({ isActive }: { isActive: boolean }) =>
@@ -211,53 +216,83 @@ export function PublicHeader() {
         : "text-muted-foreground hover:bg-accent hover:text-foreground",
     );
   return (
-    <div className="sticky top-0 z-40 px-4 pt-3 md:px-6">
-      <header className="glass mx-auto flex max-w-7xl items-center justify-between gap-4 rounded-full px-3 py-2 md:px-4">
-        <Link
-          to="/"
-          className="flex items-center gap-2 pl-1 font-display text-lg font-semibold tracking-tight"
-        >
-          <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
-            <KeyRound className="h-3.5 w-3.5" />
-          </span>
-          HypiToken
-        </Link>
-        <nav className="hidden items-center gap-1 lg:flex">
-          <NavLink to="/" end className={linkCls}>
-            {t("nav.home")}
-          </NavLink>
-          <NavLink to="/pricing" className={linkCls}>
-            {t("nav.pricing")}
-          </NavLink>
-          <NavLink to="/docs" className={linkCls}>
-            {t("nav.docs")}
-          </NavLink>
-          <NavLink to="/status" className={linkCls}>
-            {t("nav.status")}
-          </NavLink>
-        </nav>
-        <div className="flex items-center gap-2">
-          <div className="hidden items-center gap-1.5 lg:flex">
-            <LanguageToggle />
-            <ThemeToggle />
-            {user ? (
-              <Button asChild size="sm" className="rounded-full">
-                <Link to="/app">{t("nav.dashboard")} →</Link>
+    <header className="glass mx-auto flex max-w-6xl items-center justify-between gap-4 rounded-full px-3 py-2 md:px-4">
+      <Link
+        to="/"
+        viewTransition
+        className="flex items-center gap-2 pl-1 font-display text-lg font-semibold tracking-tight"
+      >
+        <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
+          <KeyRound className="h-3.5 w-3.5" />
+        </span>
+        HypiToken
+      </Link>
+      <nav className="hidden items-center gap-1 lg:flex">
+        <NavLink to="/" end viewTransition className={linkCls}>
+          {t("nav.home")}
+        </NavLink>
+        <NavLink to="/pricing" viewTransition className={linkCls}>
+          {t("nav.pricing")}
+        </NavLink>
+        <NavLink to="/docs" viewTransition className={linkCls}>
+          {t("nav.docs")}
+        </NavLink>
+        <NavLink to="/status" viewTransition className={linkCls}>
+          {t("nav.status")}
+        </NavLink>
+      </nav>
+      <div className="flex items-center gap-2">
+        <div className="hidden items-center gap-1.5 lg:flex">
+          <LanguageToggle />
+          <ThemeToggle />
+          {user ? (
+            <Button asChild size="sm" className="rounded-full">
+              <Link to="/app" viewTransition>
+                {t("nav.dashboard")} →
+              </Link>
+            </Button>
+          ) : (
+            <>
+              <Button asChild variant="ghost" size="sm" className="rounded-full">
+                <Link to="/login" viewTransition>
+                  {t("nav.signIn")}
+                </Link>
               </Button>
-            ) : (
-              <>
-                <Button asChild variant="ghost" size="sm" className="rounded-full">
-                  <Link to="/login">{t("nav.signIn")}</Link>
-                </Button>
-                <Button asChild size="sm" className="rounded-full">
-                  <Link to="/register">{t("nav.signUp")}</Link>
-                </Button>
-              </>
-            )}
-          </div>
-          <MobileMenu variant="public" />
+              <Button asChild size="sm" className="rounded-full">
+                <Link to="/register" viewTransition>
+                  {t("nav.signUp")}
+                </Link>
+              </Button>
+            </>
+          )}
         </div>
-      </header>
+        <MobileMenu variant="public" />
+      </div>
+    </header>
+  );
+}
+
+// PublicHeader — the sticky glass-pill bar wrapping SiteNav. Rendered once by
+// PublicLayout so it *persists* across public route changes (the header DOM
+// node is never unmounted/remounted), which is what removes the navbar flicker
+// when navigating pricing ↔ docs ↔ status.
+export function PublicHeader() {
+  return (
+    <div className="sticky top-0 z-40 px-4 pt-3 md:px-6">
+      <SiteNav />
+    </div>
+  );
+}
+
+// PublicLayout — shared chrome for every public marketing page. Owns the
+// background + persistent header; child routes render only their content into
+// the <Outlet/>. Because the header lives here (not inside each page), it stays
+// mounted across navigations — no remount, no flicker, one consistent nav.
+export function PublicLayout() {
+  return (
+    <div className="min-h-dvh bg-background text-foreground">
+      <PublicHeader />
+      <Outlet />
     </div>
   );
 }

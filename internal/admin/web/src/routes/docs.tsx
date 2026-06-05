@@ -6,7 +6,6 @@ import { Link, NavLink, useLocation, useNavigate, useParams } from "react-router
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
-import { PublicHeader } from "@/components/layout/shell";
 import { type DocSection, docsFor, slugify } from "@/lib/docs";
 import { isOSGroup, type OS, OS_VALUES, OSProvider, useOS } from "@/lib/use-os";
 import { cn, copyToClipboard } from "@/lib/utils";
@@ -66,154 +65,152 @@ export default function DocsLayout() {
 
   return (
     <OSProvider>
-      <div className="min-h-dvh bg-background text-foreground">
-        <PublicHeader />
-        <div className="mx-auto max-w-7xl px-4 md:px-6">
-          <div className="grid gap-10 py-10 md:grid-cols-[14rem_minmax(0,1fr)_12rem] md:gap-12 lg:gap-16">
-            {/* Sidebar */}
-            <aside className="hidden md:block">
-              <nav className="sticky top-24 space-y-6">
-                {groups.map((g) => (
-                  <div key={g}>
-                    <div className="mb-2 px-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                      {g}
-                    </div>
-                    <ul className="space-y-0.5">
-                      {docs
-                        .filter((d) => d.group === g)
-                        .map((d) => (
-                          <li key={d.slug}>
-                            <NavLink
-                              to={`/docs/${d.slug}`}
-                              className={({ isActive }) =>
-                                cn(
-                                  "block rounded-md px-2 py-1.5 text-sm transition-colors",
-                                  isActive
-                                    ? "bg-primary/10 font-medium text-primary"
-                                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                                )
-                              }
-                            >
-                              {d.title}
-                            </NavLink>
-                          </li>
-                        ))}
-                    </ul>
+      <div className="mx-auto max-w-7xl px-4 md:px-6">
+        <div className="grid gap-10 py-10 md:grid-cols-[14rem_minmax(0,1fr)_12rem] md:gap-12 lg:gap-16">
+          {/* Sidebar */}
+          <aside className="hidden md:block">
+            <nav className="sticky top-24 space-y-6">
+              {groups.map((g) => (
+                <div key={g}>
+                  <div className="mb-2 px-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    {g}
                   </div>
-                ))}
-              </nav>
-            </aside>
-
-            {/* Main */}
-            <main className="min-w-0">
-              {/* Mobile nav — sidebar + TOC collapse into a sticky drawer since
-                  both asides are hidden below md. */}
-              <MobileDocNav
-                docs={docs}
-                groups={groups}
-                section={section}
-                headings={headings}
-                activeID={activeID}
-                open={mobileNavOpen}
-                setOpen={setMobileNavOpen}
-              />
-              {/* Desktop breadcrumb + OS switcher. Hidden on mobile — the
-                  sticky MobileDocNav above already shows the breadcrumb. */}
-              <div className="mb-8 hidden items-center justify-between gap-3 md:flex">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <BookOpen className="h-3.5 w-3.5" />
-                  <span>{section.group}</span>
-                  <ChevronRight className="h-3.5 w-3.5" />
-                  <span className="text-foreground">{section.title}</span>
-                </div>
-                {hasOSContent && <OSSwitcher className="shrink-0" />}
-              </div>
-              {/* OS switcher on mobile, shown only on pages with OS tab blocks. */}
-              {hasOSContent && (
-                <div className="mb-6 flex md:hidden">
-                  <OSSwitcher />
-                </div>
-              )}
-              <h1 className="font-display text-4xl font-semibold tracking-tight md:text-5xl">
-                {section.title}
-              </h1>
-              {section.intro && (
-                <p className="mt-4 text-lg text-muted-foreground">{section.intro}</p>
-              )}
-
-              <article className="hypi-prose mt-8">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[
-                    rehypeRaw,
-                    [rehypeHighlight, { detect: true, ignoreMissing: true }],
-                  ]}
-                  components={mdComponents}
-                >
-                  {section.body}
-                </ReactMarkdown>
-              </article>
-
-              <div className="mt-16 grid gap-3 sm:grid-cols-2">
-                {prev ? (
-                  <Link
-                    to={`/docs/${prev.slug}`}
-                    className="glass rounded-xl p-4 transition-transform hover:-translate-y-0.5"
-                  >
-                    <div className="text-xs uppercase tracking-wider text-muted-foreground">
-                      ← Previous
-                    </div>
-                    <div className="mt-1 font-display text-lg font-medium">{prev.title}</div>
-                  </Link>
-                ) : (
-                  <div />
-                )}
-                {next ? (
-                  <Link
-                    to={`/docs/${next.slug}`}
-                    className="glass rounded-xl p-4 text-right transition-transform hover:-translate-y-0.5"
-                  >
-                    <div className="text-xs uppercase tracking-wider text-muted-foreground">
-                      Next →
-                    </div>
-                    <div className="mt-1 font-display text-lg font-medium">{next.title}</div>
-                  </Link>
-                ) : (
-                  <div />
-                )}
-              </div>
-            </main>
-
-            {/* TOC */}
-            <aside className="hidden lg:block">
-              <div className="sticky top-24">
-                {headings.length > 0 && (
-                  <>
-                    <div className="mb-3 px-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                      On this page
-                    </div>
-                    <ul className="space-y-0.5 border-l border-border">
-                      {headings.map((h) => (
-                        <li key={h.id} className={h.level === 3 ? "pl-3" : ""}>
-                          <a
-                            href={`#${h.id}`}
-                            className={cn(
-                              "-ml-px block border-l-2 px-3 py-1 text-sm transition-colors",
-                              activeID === h.id
-                                ? "border-primary text-primary"
-                                : "border-transparent text-muted-foreground hover:text-foreground",
-                            )}
+                  <ul className="space-y-0.5">
+                    {docs
+                      .filter((d) => d.group === g)
+                      .map((d) => (
+                        <li key={d.slug}>
+                          <NavLink
+                            to={`/docs/${d.slug}`}
+                            viewTransition
+                            className={({ isActive }) =>
+                              cn(
+                                "block rounded-md px-2 py-1.5 text-sm transition-colors",
+                                isActive
+                                  ? "bg-primary/10 font-medium text-primary"
+                                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                              )
+                            }
                           >
-                            {h.text}
-                          </a>
+                            {d.title}
+                          </NavLink>
                         </li>
                       ))}
-                    </ul>
-                  </>
-                )}
+                  </ul>
+                </div>
+              ))}
+            </nav>
+          </aside>
+
+          {/* Main */}
+          <main className="min-w-0">
+            {/* Mobile nav — sidebar + TOC collapse into a sticky drawer since
+                  both asides are hidden below md. */}
+            <MobileDocNav
+              docs={docs}
+              groups={groups}
+              section={section}
+              headings={headings}
+              activeID={activeID}
+              open={mobileNavOpen}
+              setOpen={setMobileNavOpen}
+            />
+            {/* Desktop breadcrumb + OS switcher. Hidden on mobile — the
+                  sticky MobileDocNav above already shows the breadcrumb. */}
+            <div className="mb-8 hidden items-center justify-between gap-3 md:flex">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <BookOpen className="h-3.5 w-3.5" />
+                <span>{section.group}</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+                <span className="text-foreground">{section.title}</span>
               </div>
-            </aside>
-          </div>
+              {hasOSContent && <OSSwitcher className="shrink-0" />}
+            </div>
+            {/* OS switcher on mobile, shown only on pages with OS tab blocks. */}
+            {hasOSContent && (
+              <div className="mb-6 flex md:hidden">
+                <OSSwitcher />
+              </div>
+            )}
+            <h1 className="font-display text-4xl font-semibold tracking-tight md:text-5xl">
+              {section.title}
+            </h1>
+            {section.intro && <p className="mt-4 text-lg text-muted-foreground">{section.intro}</p>}
+
+            <article className="hypi-prose mt-8">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[
+                  rehypeRaw,
+                  [rehypeHighlight, { detect: true, ignoreMissing: true }],
+                ]}
+                components={mdComponents}
+              >
+                {section.body}
+              </ReactMarkdown>
+            </article>
+
+            <div className="mt-16 grid gap-3 sm:grid-cols-2">
+              {prev ? (
+                <Link
+                  to={`/docs/${prev.slug}`}
+                  viewTransition
+                  className="glass rounded-xl p-4 transition-transform hover:-translate-y-0.5"
+                >
+                  <div className="text-xs uppercase tracking-wider text-muted-foreground">
+                    ← Previous
+                  </div>
+                  <div className="mt-1 font-display text-lg font-medium">{prev.title}</div>
+                </Link>
+              ) : (
+                <div />
+              )}
+              {next ? (
+                <Link
+                  to={`/docs/${next.slug}`}
+                  viewTransition
+                  className="glass rounded-xl p-4 text-right transition-transform hover:-translate-y-0.5"
+                >
+                  <div className="text-xs uppercase tracking-wider text-muted-foreground">
+                    Next →
+                  </div>
+                  <div className="mt-1 font-display text-lg font-medium">{next.title}</div>
+                </Link>
+              ) : (
+                <div />
+              )}
+            </div>
+          </main>
+
+          {/* TOC */}
+          <aside className="hidden lg:block">
+            <div className="sticky top-24">
+              {headings.length > 0 && (
+                <>
+                  <div className="mb-3 px-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    On this page
+                  </div>
+                  <ul className="space-y-0.5 border-l border-border">
+                    {headings.map((h) => (
+                      <li key={h.id} className={h.level === 3 ? "pl-3" : ""}>
+                        <a
+                          href={`#${h.id}`}
+                          className={cn(
+                            "-ml-px block border-l-2 px-3 py-1 text-sm transition-colors",
+                            activeID === h.id
+                              ? "border-primary text-primary"
+                              : "border-transparent text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {h.text}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          </aside>
         </div>
       </div>
     </OSProvider>
