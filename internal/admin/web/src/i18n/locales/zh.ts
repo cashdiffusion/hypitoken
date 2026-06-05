@@ -404,15 +404,7 @@ export default {
       modelMapLabel: "模型映射（可选，JSON）",
       modelMapHint: "把请求的模型改写为上游模型，例如把 opus 路由到更便宜的档位。",
       modelMapParseError: "model_map JSON 解析失败：{{msg}}",
-      addSessionCookie: "+ Session cookie",
       uploadJson: "上传 JSON",
-      sessionCookieTitle: "通过 claude.com session cookie 添加",
-      sessionCookieDesc:
-        "粘贴 claude.com 的 sessionKey（sk-ant-sid…）。必须配置代理 —— claude.com 会拦截没有浏览器级 TLS 的服务器 IP。",
-      sessionCookieInvalid: "session cookie 必须以 sk-ant-sid 开头",
-      sessionCookieProxyRequired: "session-cookie 登录必须提供代理地址",
-      sessionCookieAdded: "已添加凭证 {{email}}",
-      sessionCookieBusy: "授权中…",
       uploadTitle: "上传 {{provider}} 凭证 JSON",
       uploadDesc:
         "粘贴从其他实例导出的凭证 JSON。类型（OAuth / API key）会根据其 `type` 字段推断；下方字段在导入时覆盖。",

@@ -465,7 +465,6 @@ function CredentialsTab() {
   const [creds, setCreds] = useState<Credential[]>([]);
   const [openKey, setOpenKey] = useState(false);
   const [openOAuth, setOpenOAuth] = useState<null | "anthropic" | "openai">(null);
-  const [openSession, setOpenSession] = useState(false);
   const [openUpload, setOpenUpload] = useState(false);
   const [usageFor, setUsageFor] = useState<{ id: string; label: string; provider: string } | null>(
     null,
@@ -585,15 +584,13 @@ function CredentialsTab() {
             action={
               <div className="flex flex-wrap justify-end gap-2">
                 <Button onClick={() => setOpenKey(true)}>{t("admin.creds.addApiKey")}</Button>
-                <Button variant="outline" onClick={() => setOpenOAuth("anthropic")}>
-                  {t("admin.creds.addOauthClaude")}
-                </Button>
-                <Button variant="outline" onClick={() => setOpenOAuth("openai")}>
-                  {t("admin.creds.addOauthCodex")}
-                </Button>
-                {providerTab === "anthropic" && (
-                  <Button variant="outline" onClick={() => setOpenSession(true)}>
-                    {t("admin.creds.addSessionCookie")}
+                {providerTab === "anthropic" ? (
+                  <Button variant="outline" onClick={() => setOpenOAuth("anthropic")}>
+                    {t("admin.creds.addOauthClaude")}
+                  </Button>
+                ) : (
+                  <Button variant="outline" onClick={() => setOpenOAuth("openai")}>
+                    {t("admin.creds.addOauthCodex")}
                   </Button>
                 )}
                 <Button variant="outline" onClick={() => setOpenUpload(true)}>
@@ -877,9 +874,13 @@ function CredentialsTab() {
         </Reveal>
       )}
 
-      <AddAPIKeyDialog open={openKey} onOpenChange={setOpenKey} onCreated={reload} />
+      <AddAPIKeyDialog
+        open={openKey}
+        onOpenChange={setOpenKey}
+        provider={providerTab === "openai" ? "openai" : "anthropic"}
+        onCreated={reload}
+      />
       <AddOAuthDialog provider={openOAuth} onClose={() => setOpenOAuth(null)} onCreated={reload} />
-      <SessionCookieDialog open={openSession} onOpenChange={setOpenSession} onCreated={reload} />
       <UploadJSONDialog
         open={openUpload}
         onOpenChange={setOpenUpload}
@@ -1598,9 +1599,13 @@ interface CredentialDialogProps {
   onCreated: () => void;
 }
 
-function AddAPIKeyDialog({ open, onOpenChange, onCreated }: CredentialDialogProps) {
+function AddAPIKeyDialog({
+  open,
+  onOpenChange,
+  provider,
+  onCreated,
+}: CredentialDialogProps & { provider: string }) {
   const { t } = useTranslation();
-  const [provider, setProvider] = useState("anthropic");
   const [key, setKey] = useState("");
   const [label, setLabel] = useState("");
   const [base, setBase] = useState("");
@@ -1611,20 +1616,12 @@ function AddAPIKeyDialog({ open, onOpenChange, onCreated }: CredentialDialogProp
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>{t("admin.creds.newApiTitle")}</DialogTitle>
+          <DialogTitle>
+            {t("admin.creds.newApiTitle")} ·{" "}
+            {provider === "openai" ? "Codex (OpenAI)" : "Claude (Anthropic)"}
+          </DialogTitle>
         </DialogHeader>
         <div className="grid gap-3 py-2">
-          <div className="space-y-2">
-            <Label>{t("admin.creds.cols.kind")}</Label>
-            <select
-              className="h-10 w-full rounded-md border border-border bg-card px-3 text-sm"
-              value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-            >
-              <option value="anthropic">Anthropic</option>
-              <option value="openai">OpenAI</option>
-            </select>
-          </div>
           <div className="space-y-2">
             <Label>API key</Label>
             <Input
@@ -1716,118 +1713,6 @@ function AddAPIKeyDialog({ open, onOpenChange, onCreated }: CredentialDialogProp
             }}
           >
             {t("common.add")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// SessionCookieDialog drives the claude.com sessionKey login: paste an
-// sk-ant-sid… cookie + a proxy and the backend exchanges it for an OAuth
-// credential. Anthropic-only.
-function SessionCookieDialog({ open, onOpenChange, onCreated }: CredentialDialogProps) {
-  const { t } = useTranslation();
-  const [cookie, setCookie] = useState("");
-  const [proxy, setProxy] = useState("");
-  const [label, setLabel] = useState("");
-  const [group, setGroup] = useState("");
-  const [maxc, setMaxc] = useState("");
-  const [busy, setBusy] = useState(false);
-  const reset = () => {
-    setCookie("");
-    setProxy("");
-    setLabel("");
-    setGroup("");
-    setMaxc("");
-  };
-  const submit = async () => {
-    if (!cookie.trim().startsWith("sk-ant-sid")) {
-      toast.error(t("admin.creds.sessionCookieInvalid"));
-      return;
-    }
-    if (!proxy.trim()) {
-      toast.error(t("admin.creds.sessionCookieProxyRequired"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const r = await apiPost<{ email?: string; id: string }>(
-        "/admin/credentials/oauth/session-cookie",
-        {
-          session_cookie: cookie.trim(),
-          proxy_url: proxy.trim(),
-          label: label.trim(),
-          group: group.trim(),
-          max_concurrent: parseInt(maxc, 10) || 0,
-        },
-      );
-      toast.success(t("admin.creds.sessionCookieAdded", { email: r.email || r.id }));
-      onCreated();
-      onOpenChange(false);
-      reset();
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px]">
-        <DialogHeader>
-          <DialogTitle>{t("admin.creds.sessionCookieTitle")}</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3 py-2">
-          <p className="text-xs text-muted-foreground">{t("admin.creds.sessionCookieDesc")}</p>
-          <div className="space-y-2">
-            <Label>Session cookie (sk-ant-sid…)</Label>
-            <Input
-              type="password"
-              value={cookie}
-              onChange={(e) => setCookie(e.target.value)}
-              placeholder="sk-ant-sid01-…"
-              className="font-mono"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>
-              Proxy URL <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              value={proxy}
-              onChange={(e) => setProxy(e.target.value)}
-              placeholder="socks5://… or http://…"
-              className="font-mono"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>{t("admin.creds.cols.label")}</Label>
-              <Input value={label} onChange={(e) => setLabel(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>{t("admin.creds.cols.group")}</Label>
-              <Input value={group} onChange={(e) => setGroup(e.target.value)} />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>{t("admin.creds.maxConcurrent")}</Label>
-            <Input
-              type="number"
-              min="0"
-              value={maxc}
-              onChange={(e) => setMaxc(e.target.value)}
-              placeholder="0 = default"
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {t("common.cancel")}
-          </Button>
-          <Button disabled={busy} onClick={submit}>
-            {busy ? t("admin.creds.sessionCookieBusy") : t("common.add")}
           </Button>
         </DialogFooter>
       </DialogContent>

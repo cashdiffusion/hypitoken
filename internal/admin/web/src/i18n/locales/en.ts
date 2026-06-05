@@ -408,15 +408,7 @@ export default {
       modelMapLabel: "Model map (optional, JSON)",
       modelMapHint: "Rewrite requested model → upstream model, e.g. route opus to a cheaper tier.",
       modelMapParseError: "model_map JSON parse failed: {{msg}}",
-      addSessionCookie: "+ Session cookie",
       uploadJson: "Upload JSON",
-      sessionCookieTitle: "Add via claude.com session cookie",
-      sessionCookieDesc:
-        "Paste a claude.com sessionKey (sk-ant-sid…). A proxy is required — claude.com blocks server IPs without browser-grade TLS.",
-      sessionCookieInvalid: "Session cookie must start with sk-ant-sid",
-      sessionCookieProxyRequired: "A proxy URL is required for session-cookie login",
-      sessionCookieAdded: "Added credential {{email}}",
-      sessionCookieBusy: "Authorizing…",
       uploadTitle: "Upload {{provider}} credential JSON",
       uploadDesc:
         "Paste a credential JSON exported from another instance. The kind (OAuth / API key) is inferred from its `type` field; the fields below override on import.",
