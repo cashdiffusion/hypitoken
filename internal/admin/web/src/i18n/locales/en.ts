@@ -250,6 +250,7 @@ export default {
       pay: "Pay {{amount}}",
       processing: "Processing…",
       confirming: "Confirming payment…",
+      loadingElement: "Loading secure checkout…",
       secured: "Secured by Stripe · PCI-DSS",
       success: "Payment successful",
       failed: "Payment could not be completed.",

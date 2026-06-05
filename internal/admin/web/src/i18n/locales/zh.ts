@@ -247,6 +247,7 @@ export default {
       pay: "支付 {{amount}}",
       processing: "处理中…",
       confirming: "正在确认支付…",
+      loadingElement: "正在加载安全支付…",
       secured: "由 Stripe 保障 · 符合 PCI-DSS",
       success: "支付成功",
       failed: "支付未能完成。",

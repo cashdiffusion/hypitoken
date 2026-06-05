@@ -9,6 +9,7 @@ import { CreditCard, Loader2, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 // loadStripe is expensive (injects the Stripe.js script) and must be called
 // once per publishable key — cache the promise across mounts/keys.
@@ -16,6 +17,16 @@ const stripeCache: Record<string, Promise<Stripe | null>> = {};
 function getStripe(pk: string): Promise<Stripe | null> {
   if (!stripeCache[pk]) stripeCache[pk] = loadStripe(pk);
   return stripeCache[pk];
+}
+
+// preloadStripe warms Stripe.js (script download + Stripe's own preconnects to
+// js.stripe.com / api.stripe.com) as soon as the top-up dialog opens — i.e.
+// while the user is still picking an amount — instead of waiting until the
+// order is created and the Checkout Element mounts. From high-latency networks
+// (e.g. China → overseas Stripe) this cold-start cost is the bulk of the
+// "spinner then blank gap" delay. Idempotent and cached.
+export function preloadStripe(pk: string | undefined | null): void {
+  if (pk) getStripe(pk);
 }
 
 // cssVarToHex resolves a CSS custom property to a Stripe-safe rgb() color. Our
@@ -131,7 +142,18 @@ function CheckoutForm({ onConfirmed }: { onConfirmed: () => void }) {
   const result = useCheckoutElements();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // ready flips when the PaymentElement iframe has actually painted. We keep an
+  // opaque loading overlay over the form until then so the spinner never
+  // disappears into a blank gap while Stripe's iframe is still booting.
+  const [ready, setReady] = useState(false);
   const confirmedRef = useRef(false);
+
+  // Safety net: if Stripe's onReady never fires (network hiccup), reveal the
+  // form anyway after a few seconds so the user is never stuck behind a spinner.
+  useEffect(() => {
+    const id = setTimeout(() => setReady(true), 9000);
+    return () => clearTimeout(id);
+  }, []);
 
   if (result.type === "loading") {
     return (
@@ -171,19 +193,32 @@ function CheckoutForm({ onConfirmed }: { onConfirmed: () => void }) {
   };
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form onSubmit={submit} className={cn("relative space-y-4", !ready && "min-h-[280px]")}>
+      {/* Opaque overlay covering the still-booting PaymentElement. Sits above
+          the form (which is mounted underneath so the iframe actually loads)
+          until onReady fires, then disappears — no blank gap. */}
+      {!ready && (
+        <div className="absolute inset-0 z-10 grid place-items-center rounded-lg bg-card">
+          <div className="flex flex-col items-center gap-2.5">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <span className="text-xs text-muted-foreground">
+              {t("billing.stripe.loadingElement")}
+            </span>
+          </div>
+        </div>
+      )}
       {hasCurrencyOptions && (
         <div className="rounded-md border border-border-strong bg-muted/30 p-2">
           <CurrencySelectorElement />
         </div>
       )}
-      <PaymentElement options={{ layout: "tabs" }} />
+      <PaymentElement options={{ layout: "tabs" }} onReady={() => setReady(true)} />
       {err && <p className="text-sm text-destructive">{err}</p>}
       <Button
         type="submit"
         size="lg"
         className="w-full gap-2"
-        disabled={busy || !checkout.canConfirm}
+        disabled={busy || !checkout.canConfirm || !ready}
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
         {busy ? t("billing.stripe.processing") : t("billing.stripe.pay", { amount: payAmount })}

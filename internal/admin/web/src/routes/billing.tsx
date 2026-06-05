@@ -4,7 +4,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { CountUp, GlassPanel, PageHeader } from "@/components/app/page-primitives";
-import { StripeTopUp } from "@/components/app/stripe-topup";
+import { preloadStripe, StripeTopUp } from "@/components/app/stripe-topup";
 import { SpotlightCard } from "@/components/landing/interactions";
 import { Reveal } from "@/components/landing/reveal";
 import { Button } from "@/components/ui/button";
@@ -369,7 +369,12 @@ function TopUpDialog({
   useEffect(() => {
     if (!open) return;
     apiGet<ProvidersInfo>("/billing/providers")
-      .then(setProviders)
+      .then((p) => {
+        setProviders(p);
+        // Warm Stripe.js now (dialog just opened, user is still choosing an
+        // amount) so the Checkout Element appears fast once they hit "下单".
+        preloadStripe(p.stripe?.publishable_key);
+      })
       .catch(() => setProviders({ stripe: { enabled: false }, qr: { enabled: false } }));
   }, [open]);
 
