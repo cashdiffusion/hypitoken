@@ -115,12 +115,13 @@ function Header() {
   const nav = useNavigate();
   const { t } = useTranslation();
   return (
-    <header className="sticky top-0 z-40 border-b border-border/60 bg-background/70 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
-        <div className="flex items-center gap-6">
+    <div className="sticky top-0 z-40 px-4 pt-3 md:px-6">
+      <header className="glass mx-auto flex max-w-7xl items-center justify-between gap-4 rounded-full px-3 py-2 md:px-4">
+        <div className="flex items-center gap-5">
           <Link
             to="/app"
-            className="flex items-center gap-2 font-display text-xl font-semibold tracking-tight"
+            viewTransition
+            className="flex items-center gap-2 pl-1 font-display text-lg font-semibold tracking-tight"
           >
             <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
               <KeyRound className="h-3.5 w-3.5" />
@@ -130,25 +131,29 @@ function Header() {
           <nav className="hidden items-center gap-1 md:flex">
             <Link
               to="/"
-              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              viewTransition
+              className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               {t("nav.home")}
             </Link>
             <Link
               to="/pricing"
-              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              viewTransition
+              className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               {t("nav.pricing")}
             </Link>
             <Link
               to="/docs"
-              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              viewTransition
+              className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               {t("nav.docs")}
             </Link>
             <Link
               to="/status"
-              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              viewTransition
+              className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               {t("nav.status")}
             </Link>
@@ -193,8 +198,8 @@ function Header() {
           </div>
           <MobileMenu variant="app" />
         </div>
-      </div>
-    </header>
+      </header>
+    </div>
   );
 }
 
