@@ -1062,7 +1062,7 @@ var processStart = time.Now()
 // the real proxy uptime so it grows monotonically like a long-running CLI.
 func buildProcessMetrics(accountKey string) map[string]any {
 	sum := sha256.Sum256([]byte("cpa-claude-procbaseline/" + accountKey))
-	b := func(i int) int { return int(sum[i]) } // 0..255 per byte
+	b := func(i int) int { return int(sum[i]) }   // 0..255 per byte
 	ramGB := []int{8, 16, 16, 32, 32, 64}[b(0)%6] // weighted toward 16/32
 	constrained := int64(float64(ramGB) * float64(1<<30) * 0.46)
 	rssBase := 250_000_000 + b(1)*1_100_000           // ~250–530 MB
