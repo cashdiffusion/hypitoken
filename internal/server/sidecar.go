@@ -20,7 +20,7 @@ import (
 	"github.com/wjsoj/cc-core/auth"
 )
 
-// Sidecar emulates the auxiliary traffic real Claude Code 2.1.158 fires
+// Sidecar emulates the auxiliary traffic real Claude Code 2.1.167 fires
 // alongside /v1/messages. Three phases:
 //
 //   - Phase A (always): quota probe (Haiku "quota") at session start.
@@ -38,7 +38,7 @@ import (
 //   - Phase C (heartbeat): a goroutine that POSTs
 //     /api/event_logging/v2/batch every ~18s ±40% with a realistic
 //     ClaudeCodeInternalEvent payload (env block matches our pinned
-//     2.1.158 / Linux / x64 / Node v24.3.0 fingerprint). Stops 5 min
+//     2.1.167 / Linux / x64 / Node v24.3.0 fingerprint). Stops 5 min
 //     after the session goes idle — mirrors a real CLI process exit.
 //
 // A virtual session is identified by accountKey alone. Multiple downstream
@@ -126,11 +126,11 @@ const (
 
 // quotaProbeBeta and quotaProbeModel come from crack/oauth/rows/06.
 const (
-	quotaProbeBeta  = "oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05"
+	quotaProbeBeta  = "oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05"
 	quotaProbeModel = "claude-haiku-4-5-20251001"
 )
 
-// User-Agent strings used across sidecar endpoints. Real CC 2.1.158 uses
+// User-Agent strings used across sidecar endpoints. Real CC 2.1.167 uses
 // FOUR distinct HTTP clients: Bun fetch (GrowthBook only), axios 1.15.2
 // (penguin / mcp-registry / mcp_servers / downloads), claude-code/<ver>
 // (oauth/account/settings, bootstrap, event_logging), and the main
@@ -142,15 +142,15 @@ const (
 	uaClaudeCLI  = claudeCLIUserAgent // shared with the chat path
 )
 
-// Telemetry env profile — the pinned 2.1.158 client-machine fingerprint shared
+// Telemetry env profile — the pinned 2.1.167 client-machine fingerprint shared
 // by the event_logging and datadog heartbeat bodies. Values captured from real
-// CC 2.1.158 (crack/claude SPEC.md §6). The block is a single plausible-host
+// CC 2.1.167 (crack/claude SPEC.md §6). The block is a single plausible-host
 // profile (it already pins konsole / zsh / x64), so distro + kernel are pinned
 // to match rather than probed from the proxy's own host.
 const (
-	ccBuildTime      = "2026-05-29T23:26:17Z"
+	ccBuildTime      = "2026-06-05T23:07:45Z"
 	ccLinuxDistroID  = "arch"
-	ccLinuxKernel    = "7.0.10-arch1-1"
+	ccLinuxKernel    = "7.0.11-arch1-1"
 	ccTelemetryModel = "claude-opus-4-8[1m]" // event_logging event_data.model
 	ccDatadogModel   = "claude-opus-4-8"     // datadog model field + ddtags (no [1m])
 )
@@ -871,7 +871,7 @@ func (m *sidecarMgr) sendHeartbeat(parent context.Context, a *auth.Auth, session
 
 // buildHeartbeatBody constructs a single-event batch shaped like row 14.
 // Volatile fields (timestamps, event_id, process metric) are refreshed
-// each tick; the env block stays fixed at our pinned 2.1.158 / Linux /
+// each tick; the env block stays fixed at our pinned 2.1.167 / Linux /
 // x64 / Node v24.3.0 fingerprint so it matches the X-Stainless headers.
 //
 // Event name `tengu_dir_search` is what real CC emits most frequently

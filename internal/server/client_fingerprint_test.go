@@ -40,9 +40,9 @@ func headersWithUA(ua string) http.Header {
 func TestClientGate_AcceptsInteractiveClients(t *testing.T) {
 	accept := []string{
 		"claude-cli/2.1.146 (external, cli)",
-		"claude-cli/2.1.158 (external, cli)",
+		"claude-cli/2.1.167 (external, cli)",
 		"claude-code/2.1.146",
-		"claude-code/2.1.158 (vscode)",
+		"claude-code/2.1.167 (vscode)",
 		"Cursor/0.42.0",
 		"Claude/1.2.3 Chrome/120 Electron/28 Safari/537.36", // Claude Desktop-ish
 		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
