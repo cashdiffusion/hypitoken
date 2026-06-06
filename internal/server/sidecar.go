@@ -142,15 +142,15 @@ const (
 	uaClaudeCLI  = claudeCLIUserAgent // shared with the chat path
 )
 
-// Telemetry env profile — the pinned 2.1.167 client-machine fingerprint shared
-// by the event_logging and datadog heartbeat bodies. Values captured from real
-// CC 2.1.167 (crack/claude SPEC.md §6). The block is a single plausible-host
-// profile (it already pins konsole / zsh / x64), so distro + kernel are pinned
-// to match rather than probed from the proxy's own host.
+// Telemetry env profile — the version-tied client fingerprint shared by the
+// event_logging and datadog heartbeat bodies. build_time tracks the CC release;
+// model is fixed. The MACHINE-specific axes (linux_distro_id, linux_kernel,
+// terminal, shell) are NOT here — they vary per OAuth account via
+// auth.HostProfile (cc-core auth/hostprofile.go), so distinct accounts don't all
+// advertise one identical host. platform/arch/node_version/is_running_with_bun
+// stay fixed (one ground-truth capture; runtime bundle moves with the release).
 const (
 	ccBuildTime      = "2026-06-05T23:07:45Z"
-	ccLinuxDistroID  = "arch"
-	ccLinuxKernel    = "7.0.11-arch1-1"
 	ccTelemetryModel = "claude-opus-4-8[1m]" // event_logging event_data.model
 	ccDatadogModel   = "claude-opus-4-8"     // datadog model field + ddtags (no [1m])
 )
@@ -268,6 +268,16 @@ func (m *sidecarMgr) Notify(a *auth.Auth, clientToken string) <-chan struct{} {
 	if !sess.bootstrapFired.CompareAndSwap(false, true) {
 		return sess.bootstrapReady
 	}
+
+	// Pin this account's synthetic host profile to the credential file on first
+	// touch (idempotent; a no-op once set) so its sidecar telemetry reports a
+	// stable per-account machine rather than the shared default. Body builders
+	// fall back to the derived profile if this hasn't completed yet.
+	go func() {
+		if err := a.EnsureHostProfile(); err != nil {
+			log.Debugf("sidecar: persist host profile for %s failed: %v", a.ID, err)
+		}
+	}()
 
 	sess.bootstrapSessionID = anchor.sessionID(accountKey)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -961,20 +971,9 @@ func buildStartupHeartbeatBody(a *auth.Auth, sessionID string) ([]byte, error) {
 // truth for every field that's stable across event_names.
 func buildHeartbeatEvent(a *auth.Auth, sessionID, eventName string, ts time.Time) (map[string]any, error) {
 	deviceID := DeviceIDFor(accountAnchorFor(a))
+	hp := a.HostProfileOrDefault()
 
-	processMetrics := map[string]any{
-		"uptime":            time.Since(processStart).Seconds(),
-		"rss":               320_000_000,
-		"heapTotal":         40_000_000,
-		"heapUsed":          34_000_000,
-		"external":          13_000_000,
-		"arrayBuffers":      521,
-		"constrainedMemory": 1_590_133_555_2,
-		"cpuUsage": map[string]any{
-			"user":   500_000,
-			"system": 160_000,
-		},
-	}
+	processMetrics := buildProcessMetrics(accountAnchorFor(a))
 	processB64, err := json.Marshal(processMetrics)
 	if err != nil {
 		return nil, err
@@ -997,7 +996,7 @@ func buildHeartbeatEvent(a *auth.Auth, sessionID, eventName string, ts time.Time
 	envBlock := map[string]any{
 		"platform":               "linux",
 		"node_version":           claudeStainlessRuntimeV,
-		"terminal":               "konsole",
+		"terminal":               hp.Terminal,
 		"package_managers":       "npm,yarn,pnpm",
 		"runtimes":               "bun,deno,node",
 		"is_running_with_bun":    true,
@@ -1014,11 +1013,11 @@ func buildHeartbeatEvent(a *auth.Auth, sessionID, eventName string, ts time.Time
 		"version_base":           CLICurrentVersion,
 		"build_time":             ccBuildTime,
 		"is_local_agent_mode":    false,
-		"linux_distro_id":        ccLinuxDistroID,
-		"linux_kernel":           ccLinuxKernel,
+		"linux_distro_id":        hp.DistroID,
+		"linux_kernel":           hp.Kernel,
 		"vcs":                    "git",
 		"platform_raw":           "linux",
-		"shell":                  "zsh",
+		"shell":                  hp.Shell,
 	}
 
 	return map[string]any{
@@ -1055,6 +1054,47 @@ var processStart = time.Now()
 // randomHex16 returns a 16-char lowercase hex string (used for the rh
 // field in the additional_metadata blob — real CC uses a request hash
 // that we have no equivalent for, so a random one suffices).
+// buildProcessMetrics returns the V8/process memory + CPU snapshot reported in
+// every heartbeat. The footprint is anchored per account (a given machine has a
+// stable-ish RAM size and base memory use) and jittered per tick (a live
+// process's memory fluctuates). Without this, every account reported byte-
+// identical process metrics — another "all one machine" signal. uptime stays
+// the real proxy uptime so it grows monotonically like a long-running CLI.
+func buildProcessMetrics(accountKey string) map[string]any {
+	sum := sha256.Sum256([]byte("cpa-claude-procbaseline/" + accountKey))
+	b := func(i int) int { return int(sum[i]) } // 0..255 per byte
+	ramGB := []int{8, 16, 16, 32, 32, 64}[b(0)%6] // weighted toward 16/32
+	constrained := int64(float64(ramGB) * float64(1<<30) * 0.46)
+	rssBase := 250_000_000 + b(1)*1_100_000           // ~250–530 MB
+	heapTotalBase := 32_000_000 + (b(2)%30)*1_000_000 // ~32–61 MB
+	externalBase := 9_000_000 + (b(4)%9)*1_000_000
+	jit := func(base, pct int) int {
+		d := base * pct / 100
+		if d <= 0 {
+			return base
+		}
+		return base - d + rand.Intn(2*d+1)
+	}
+	heapTotal := jit(heapTotalBase, 5)
+	// heapUsed MUST be ≤ heapTotal (V8 guarantees it) — derive it as a fraction
+	// of the already-jittered heapTotal, never jitter it independently, or the
+	// pair can land impossible (heapUsed > heapTotal), an obvious synthetic tell.
+	heapUsed := heapTotal * (74 + rand.Intn(20)) / 100 // 74–93% of heapTotal
+	return map[string]any{
+		"uptime":            time.Since(processStart).Seconds(),
+		"rss":               jit(rssBase, 8),
+		"heapTotal":         heapTotal,
+		"heapUsed":          heapUsed,
+		"external":          jit(externalBase, 10),
+		"arrayBuffers":      200 + rand.Intn(1600),
+		"constrainedMemory": constrained,
+		"cpuUsage": map[string]any{
+			"user":   300_000 + rand.Intn(600_000),
+			"system": 90_000 + rand.Intn(200_000),
+		},
+	}
+}
+
 func randomHex16() string {
 	const hex = "0123456789abcdef"
 	b := make([]byte, 16)
@@ -1178,6 +1218,7 @@ func userBucketFor(accountKey string) int {
 func buildDatadogHeartbeatBody(a *auth.Auth, sessionID string) ([]byte, error) {
 	bucket := userBucketFor(a.AccountKey())
 	subType, _ := subscriptionAttrsFor(a)
+	hp := a.HostProfileOrDefault()
 	tags := []string{
 		"event:tengu_feature_ok",
 		"arch:" + claudeStainlessArch,
@@ -1191,19 +1232,7 @@ func buildDatadogHeartbeatBody(a *auth.Auth, sessionID string) ([]byte, error) {
 		"version:" + CLICurrentVersion,
 		"version_base:" + CLICurrentVersion,
 	}
-	processMetrics := map[string]any{
-		"uptime":            time.Since(processStart).Seconds(),
-		"rss":               320_000_000,
-		"heapTotal":         40_000_000,
-		"heapUsed":          34_000_000,
-		"external":          13_000_000,
-		"arrayBuffers":      938,
-		"constrainedMemory": 1_590_133_555_2,
-		"cpuUsage": map[string]any{
-			"user":   500_000,
-			"system": 160_000,
-		},
-	}
+	processMetrics := buildProcessMetrics(accountAnchorFor(a))
 	event := map[string]any{
 		"ddsource":               "nodejs",
 		"ddtags":                 strings.Join(tags, ","),
@@ -1229,8 +1258,8 @@ func buildDatadogHeartbeatBody(a *auth.Auth, sessionID string) ([]byte, error) {
 		"platform_raw":           "linux",
 		"arch":                   claudeStainlessArch,
 		"node_version":           claudeStainlessRuntimeV,
-		"terminal":               "konsole",
-		"shell":                  "zsh",
+		"terminal":               hp.Terminal,
+		"shell":                  hp.Shell,
 		"package_managers":       "npm,yarn,pnpm",
 		"runtimes":               "bun,deno,node",
 		"is_running_with_bun":    true,
@@ -1246,8 +1275,8 @@ func buildDatadogHeartbeatBody(a *auth.Auth, sessionID string) ([]byte, error) {
 		"version_base":           CLICurrentVersion,
 		"build_time":             ccBuildTime,
 		"deployment_environment": "unknown-linux",
-		"linux_kernel":           ccLinuxKernel,
-		"linux_distro_id":        ccLinuxDistroID,
+		"linux_kernel":           hp.Kernel,
+		"linux_distro_id":        hp.DistroID,
 		"vcs":                    "git",
 		"feature_name":           "api_request",
 		"user_bucket":            bucket,

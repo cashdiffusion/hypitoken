@@ -414,6 +414,7 @@ func TestStartupBatchSuppressedUnderCooldown(t *testing.T) {
 // user_bucket present at the top level (as int).
 func TestDatadogHeartbeatBodyShape(t *testing.T) {
 	a := newTestAuth("auth-1", "alice@example.com")
+	hp := auth.ProfileFor(a.AccountKey())
 	body, err := buildDatadogHeartbeatBody(a, "00000000-0000-0000-0000-000000000000")
 	if err != nil {
 		t.Fatalf("build failed: %v", err)
@@ -424,7 +425,10 @@ func TestDatadogHeartbeatBodyShape(t *testing.T) {
 		`"message":"tengu_feature_ok"`,
 		`"service":"claude-code"`,
 		`"renderer_mode":"default"`,
-		`"linux_distro_id":"` + ccLinuxDistroID + `"`,
+		`"linux_distro_id":"` + hp.DistroID + `"`,
+		`"linux_kernel":"` + hp.Kernel + `"`,
+		`"terminal":"` + hp.Terminal + `"`,
+		`"shell":"` + hp.Shell + `"`,
 		`"feature_name":"api_request"`,
 		`"betas":"` + claudeReportedBetas + `"`,
 		`"version":"` + CLICurrentVersion + `"`,
