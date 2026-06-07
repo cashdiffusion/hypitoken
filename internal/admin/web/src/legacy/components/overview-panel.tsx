@@ -56,22 +56,30 @@ export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
     load();
   }, [load, refreshTick]);
 
-  const pool: DashboardPool | null = summary
-    ? (() => {
-        let healthy = 0,
-          quota = 0,
-          unhealthy = 0,
-          disabled = 0;
-        for (const a of summary.auths) {
-          if (a.disabled) disabled++;
-          else if (a.quota_exceeded) quota++;
-          else if (a.hard_failure) unhealthy++;
-          else if (a.healthy) healthy++;
-          else unhealthy++;
-        }
-        return { total: summary.auths.length, healthy, quota, unhealthy, disabled };
-      })()
-    : null;
+  // Non-operator callers receive a redacted summary with no `auths` rows
+  // (see handleSummary). Treat that as the public view: hide the credential
+  // pool breakdown and label the top-clients list as pseudonymous (the
+  // backend already anonymized those keys). Operators viewing this page get
+  // the full rows and the real pool pie.
+  const publicView = (summary?.auths?.length ?? 0) === 0;
+
+  const pool: DashboardPool | null =
+    summary && !publicView
+      ? (() => {
+          let healthy = 0,
+            quota = 0,
+            unhealthy = 0,
+            disabled = 0;
+          for (const a of summary.auths) {
+            if (a.disabled) disabled++;
+            else if (a.quota_exceeded) quota++;
+            else if (a.hard_failure) unhealthy++;
+            else if (a.healthy) healthy++;
+            else unhealthy++;
+          }
+          return { total: summary.auths.length, healthy, quota, unhealthy, disabled };
+        })()
+      : null;
 
   const slim = (r: RequestsResp | null): DashboardRequestsSlim | null =>
     r
@@ -87,6 +95,7 @@ export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
       hourly={hourly}
       busy={busy}
       userPaidUSD={userPaid}
+      publicView={publicView}
     />
   );
 }

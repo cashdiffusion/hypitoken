@@ -65,6 +65,43 @@ function MetricCell({
   );
 }
 
+// HealthCell renders the coarse service-health badge that replaces the old
+// credential-count tile. It exposes only "can the service serve right now",
+// never the underlying pool size or composition.
+function HealthCell({ health }: { health?: "operational" | "down" }) {
+  const { t } = useTranslation();
+  const ok = health === "operational";
+  const pending = health == null; // summary not loaded yet — stay neutral
+  return (
+    <SpotlightCard tiltDeg={0} className="w-full rounded-xl p-4 ring-1 ring-primary/30">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+        {t("console.metrics.serviceHealth")}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <span className="relative inline-flex h-2.5 w-2.5">
+          {ok && (
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+          )}
+          <span
+            className={cn(
+              "relative inline-flex h-2.5 w-2.5 rounded-full",
+              pending ? "bg-muted-foreground/40" : ok ? "bg-emerald-500" : "bg-destructive",
+            )}
+          />
+        </span>
+        <span
+          className={cn(
+            "font-mono text-xl md:text-2xl leading-none font-semibold",
+            pending ? "text-muted-foreground" : ok ? "text-emerald-500" : "text-destructive",
+          )}
+        >
+          {pending ? "···" : ok ? t("console.metrics.operational") : t("console.metrics.down")}
+        </span>
+      </div>
+    </SpotlightCard>
+  );
+}
+
 export default function ConsolePage() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -118,19 +155,22 @@ export default function ConsolePage() {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Aggregate KPIs the original masthead displays.
-  const auths = data?.auths || [];
-  const oauths = auths.filter((a) => a.kind === "oauth");
-  const apikeys = auths.filter((a) => a.kind === "apikey");
-  const totalCreds = auths.length;
-  const healthyCreds = auths.filter((a) => a.healthy).length;
-  const totals = { in24: 0, out: 0 };
-  for (const a of auths) {
-    const t = a.usage?.total;
-    if (t) totals.out += t.output_tokens || 0;
-    const h24 = a.usage?.sum_24h;
-    if (h24) totals.in24 += h24.input_tokens || 0;
-  }
+  // Usage KPIs + a single service-health verb — sourced from the redacted
+  // aggregate the backend computes, never from per-credential rows. We
+  // intentionally surface usage (the bridge users care about) and a coarse
+  // health badge, but no credential / OAuth / API-key counts.
+  const health = data?.service_health;
+  const tot = data?.usage_totals?.total;
+  const h24 = data?.usage_totals?.sum_24h;
+  const req24 = h24?.requests || 0;
+  const in24 = h24?.input_tokens || 0;
+  const out24 = h24?.output_tokens || 0;
+  const totalTokens = tot
+    ? (tot.input_tokens || 0) +
+      (tot.output_tokens || 0) +
+      (tot.cache_read_tokens || 0) +
+      (tot.cache_create_tokens || 0)
+    : 0;
 
   return (
     <div className="space-y-8">
@@ -203,37 +243,34 @@ export default function ConsolePage() {
         )}
       </header>
 
-      {/* KPI strip — same five metrics the original Overview leads with,
-          laid out as a real horizontal grid (2 cols on mobile, 3 on small
-          screens, 5 across on lg+). Each cell is a self-contained card
-          using the same border/bg vocabulary as the SaaS dashboard. */}
+      {/* KPI strip — a single coarse service-health badge plus usage
+          metrics. Deliberately no credential / OAuth / API-key counts:
+          fleet pool size is operator-internal and not exposed here. */}
       <RevealStagger className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         <RevealItem className="flex">
-          <MetricCell
-            label={t("console.metrics.credentials")}
-            value={`${healthyCreds}`}
-            unit={`/ ${totalCreds}`}
-            hint={t("console.metrics.health")}
-            accent
-          />
+          <HealthCell health={health} />
         </RevealItem>
         <RevealItem className="flex">
-          <MetricCell label={t("console.metrics.oauth")} value={fmtInt(oauths.length)} />
-        </RevealItem>
-        <RevealItem className="flex">
-          <MetricCell label={t("console.metrics.apiKeys")} value={fmtInt(apikeys.length)} />
+          <MetricCell label={t("console.metrics.requests24h")} value={fmtInt(req24)} />
         </RevealItem>
         <RevealItem className="flex">
           <MetricCell
-            label={t("console.metrics.sumIn24h")}
-            value={fmtInt(totals.in24)}
+            label={t("console.metrics.tokensIn24h")}
+            value={fmtInt(in24)}
             unit={t("console.metrics.tok")}
           />
         </RevealItem>
         <RevealItem className="flex">
           <MetricCell
-            label={t("console.metrics.sumOut")}
-            value={fmtInt(totals.out)}
+            label={t("console.metrics.tokensOut24h")}
+            value={fmtInt(out24)}
+            unit={t("console.metrics.tok")}
+          />
+        </RevealItem>
+        <RevealItem className="flex">
+          <MetricCell
+            label={t("console.metrics.tokensTotal")}
+            value={fmtInt(totalTokens)}
             unit={t("console.metrics.tok")}
           />
         </RevealItem>

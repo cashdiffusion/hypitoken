@@ -9,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/usage"
 )
@@ -105,14 +104,21 @@ func anonymizeByClient(in map[string]requestlog.Aggregate) map[string]requestlog
 
 // ---- /status/api/dashboard ----
 
-type statusDashboardPool struct {
-	Total     int `json:"total"`
-	Healthy   int `json:"healthy"`
-	Quota     int `json:"quota"`
-	Unhealthy int `json:"unhealthy"`
-	Disabled  int `json:"disabled"`
-	OAuth     int `json:"oauth"`
-	APIKey    int `json:"apikey"`
+// serviceHealth returns "operational" when at least one credential can serve
+// a request right now, else "down". Deliberately count-free: the public
+// status API reports service usability, never the pool's size or composition.
+func (h *Handler) serviceHealth() string {
+	for _, st := range h.pool.Status() {
+		live := h.pool.FindByID(st.Auth.ID)
+		var healthy, hardFail bool
+		if live != nil {
+			healthy, hardFail, _, _ = live.HealthSnapshot()
+		}
+		if healthy && !hardFail && st.Auth.QuotaExceededAt.IsZero() && !st.Auth.Disabled {
+			return "operational"
+		}
+	}
+	return "down"
 }
 
 type statusDashboardRequests struct {
@@ -123,42 +129,16 @@ type statusDashboardRequests struct {
 }
 
 type statusDashboard struct {
-	Pool        statusDashboardPool     `json:"pool"`
-	Pricing     any                     `json:"pricing,omitempty"`
-	Requests14d statusDashboardRequests `json:"requests_14d"`
-	RequestsAll statusDashboardRequests `json:"requests_all"`
-	Hourly24h   []requestlog.HourBucket `json:"hourly_24h"`
+	ServiceHealth string                  `json:"service_health"`
+	Pricing       any                     `json:"pricing,omitempty"`
+	Requests14d   statusDashboardRequests `json:"requests_14d"`
+	RequestsAll   statusDashboardRequests `json:"requests_all"`
+	Hourly24h     []requestlog.HourBucket `json:"hourly_24h"`
 }
 
 func (h *Handler) handleStatusDashboard(c *gin.Context) {
 	var out statusDashboard
-
-	// Pool health — same counts the /overview endpoint produces, inlined
-	// here so the SPA only needs one round trip for the dashboard tab.
-	for _, st := range h.pool.Status() {
-		out.Pool.Total++
-		if st.Auth.Kind == auth.KindAPIKey {
-			out.Pool.APIKey++
-		} else {
-			out.Pool.OAuth++
-		}
-		live := h.pool.FindByID(st.Auth.ID)
-		var healthy, hardFail bool
-		if live != nil {
-			healthy, hardFail, _, _ = live.HealthSnapshot()
-		}
-		quota := !st.Auth.QuotaExceededAt.IsZero()
-		switch {
-		case st.Auth.Disabled:
-			out.Pool.Disabled++
-		case quota:
-			out.Pool.Quota++
-		case hardFail || !healthy:
-			out.Pool.Unhealthy++
-		default:
-			out.Pool.Healthy++
-		}
-	}
+	out.ServiceHealth = h.serviceHealth()
 
 	// Pricing (public — same shape admin /summary exposes).
 	if h.pricing != nil {
@@ -210,81 +190,22 @@ func (h *Handler) handleStatusDashboard(c *gin.Context) {
 
 // ---- /status/api/overview ----
 
-type statusOverviewAuth struct {
-	Kind          string `json:"kind"`
-	Label         string `json:"label,omitempty"`
-	Group         string `json:"group,omitempty"`
-	Healthy       bool   `json:"healthy"`
-	Disabled      bool   `json:"disabled,omitempty"`
-	QuotaExceeded bool   `json:"quota_exceeded,omitempty"`
-	HardFailure   bool   `json:"hard_failure,omitempty"`
-}
-
 type statusOverview struct {
-	Counts struct {
-		Total     int `json:"total"`
-		Healthy   int `json:"healthy"`
-		Quota     int `json:"quota"`
-		Unhealthy int `json:"unhealthy"`
-		Disabled  int `json:"disabled"`
-		OAuth     int `json:"oauth"`
-		APIKey    int `json:"apikey"`
-		Models    int `json:"models"`
-	} `json:"counts"`
-	Window struct {
+	// ServiceHealth is "operational" / "down" — no credential counts or
+	// per-credential roster are exposed on this anonymous endpoint.
+	ServiceHealth string `json:"service_health"`
+	Models        int    `json:"models"`
+	Window        struct {
 		Requests int64   `json:"requests"`
 		CostUSD  float64 `json:"cost_usd"`
 		Errors   int64   `json:"errors"`
 	} `json:"window_24h"`
-	Auths []statusOverviewAuth `json:"auths"`
 }
 
 func (h *Handler) handleStatusOverview(c *gin.Context) {
 	var out statusOverview
-	out.Auths = []statusOverviewAuth{}
-	for _, st := range h.pool.Status() {
-		kind := "oauth"
-		if st.Auth.Kind == auth.KindAPIKey {
-			kind = "apikey"
-			out.Counts.APIKey++
-		} else {
-			out.Counts.OAuth++
-		}
-		out.Counts.Total++
-
-		live := h.pool.FindByID(st.Auth.ID)
-		var healthy, hardFail bool
-		if live != nil {
-			healthy, hardFail, _, _ = live.HealthSnapshot()
-		}
-		quota := !st.Auth.QuotaExceededAt.IsZero()
-		switch {
-		case st.Auth.Disabled:
-			out.Counts.Disabled++
-		case quota:
-			out.Counts.Quota++
-		case hardFail || !healthy:
-			out.Counts.Unhealthy++
-		default:
-			out.Counts.Healthy++
-		}
-		// Truncate label to 48 chars to keep the page defensive against
-		// operators who stuff private info (e.g. email) into the label.
-		label := st.Auth.Label
-		if len(label) > 48 {
-			label = label[:48] + "…"
-		}
-		out.Auths = append(out.Auths, statusOverviewAuth{
-			Kind:          kind,
-			Label:         label,
-			Group:         st.Auth.Group,
-			Healthy:       healthy && !quota && !hardFail && !st.Auth.Disabled,
-			Disabled:      st.Auth.Disabled,
-			QuotaExceeded: quota,
-			HardFailure:   hardFail,
-		})
-	}
-	out.Counts.Models = len(h.pricing.Models())
+	out.ServiceHealth = h.serviceHealth()
+	out.Models = len(h.pricing.Models())
 
 	// 24h aggregate across the whole pool.
 	if h.cfg.LogDir != "" {

@@ -22,8 +22,7 @@ interface ProviderMon {
   key: string;
   name: string;
   operational: "operational" | "degraded" | "down";
-  healthy_creds: number;
-  total_creds: number;
+  // No credential counts: the public page reports service usability only.
   checked_at: number;
   recent: Slot[];
   daily: DayStat[];
@@ -160,12 +159,7 @@ function ProviderCard({ p }: { p: ProviderMon }) {
     <Reveal>
       <div className="glass overflow-hidden rounded-2xl p-5">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h2 className="font-display text-xl font-semibold">{p.name}</h2>
-            <span className="font-mono text-xs text-muted-foreground">
-              {t("status.credsHealthy", { ok: p.healthy_creds, total: p.total_creds })}
-            </span>
-          </div>
+          <h2 className="font-display text-xl font-semibold">{p.name}</h2>
           <ProviderPill operational={p.operational} />
         </div>
 
@@ -305,11 +299,10 @@ function UptimeStrip({
           let title = t("status.noData");
           if (s) {
             const when = new Date(s.ts * 1000).toLocaleString();
+            // Show availability % only — raw ok/total would leak the
+            // credential-pool size on the public page.
             const pct = s.total > 0 ? Math.round((s.ok / s.total) * 100) : null;
-            title =
-              s.total === 0
-                ? `${when} — ${t("status.noData")}`
-                : `${when} — ${pct}% (${s.ok}/${s.total})`;
+            title = s.total === 0 ? `${when} — ${t("status.noData")}` : `${when} — ${pct}%`;
           }
           return (
             // biome-ignore lint/suspicious/noArrayIndexKey: positional bar chart — index IS the stable position (left=oldest, right=newest)

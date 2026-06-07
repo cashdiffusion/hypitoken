@@ -183,8 +183,13 @@ export interface DashboardBoardProps {
   lifetimeData: DashboardRequestsSlim | null;
   hourly: HourBucket[] | null;
   busy?: boolean;
-  /** When true, label Top clients with a "pseudonyms" hint/tooltip. */
-  clientsAnonymized?: boolean;
+  /**
+   * Public/non-operator view. Hides the credential-pool breakdown entirely
+   * and labels Top clients as deterministic pseudonyms (the backend has
+   * already anonymized those keys). Defaults to false so the operator panel
+   * renders the full pool pie and real client labels.
+   */
+  publicView?: boolean;
   /**
    * Fleet-wide sum of what users actually paid us in USD (post per-group
    * multiplier). When provided, the "Saved" tile compares no-cache @
@@ -203,7 +208,7 @@ export function DashboardBoard({
   lifetimeData,
   hourly,
   busy = false,
-  clientsAnonymized = false,
+  publicView = false,
   userPaidUSD = null,
 }: DashboardBoardProps) {
   const { t } = useTranslation();
@@ -817,42 +822,51 @@ export function DashboardBoard({
         </div>
       </section>
 
-      {/* Three-up: health mix + top models + top clients */}
-      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
-        <div className="bg-card border border-border-strong rounded-md p-4 md:p-5 md:col-span-2 lg:col-span-1">
-          <div className="mb-4">
-            <div className="eyebrow mb-1">{t("legacy.poolHealth")}</div>
-            <h3 className="font-display text-xl tracking-tight">
-              <span className="text-muted-foreground">
-                {t("legacy.poolCount", { n: pool?.total ?? 0 })}
-              </span>
-            </h3>
+      {/* Health mix (operator only) + top models + top clients. The pool
+          breakdown is omitted in the public view so credential-pool size /
+          composition never leaks; the grid drops to two columns there. */}
+      <section
+        className={cn(
+          "grid grid-cols-1 gap-4 md:gap-5",
+          publicView ? "md:grid-cols-2" : "md:grid-cols-2 lg:grid-cols-3",
+        )}
+      >
+        {!publicView && (
+          <div className="bg-card border border-border-strong rounded-md p-4 md:p-5 md:col-span-2 lg:col-span-1">
+            <div className="mb-4">
+              <div className="eyebrow mb-1">{t("legacy.poolHealth")}</div>
+              <h3 className="font-display text-xl tracking-tight">
+                <span className="text-muted-foreground">
+                  {t("legacy.poolCount", { n: pool?.total ?? 0 })}
+                </span>
+              </h3>
+            </div>
+            {health.length === 0 ? (
+              <ChartEmpty className="h-[220px] w-full" label="no credentials configured" />
+            ) : (
+              <ChartContainer config={healthConfig} className="h-[220px] aspect-auto w-full">
+                <PieChart>
+                  <ChartTooltip content={<ChartTooltipContent hideLabel indicator="dot" />} />
+                  <Pie
+                    data={health}
+                    dataKey="value"
+                    nameKey="key"
+                    innerRadius={55}
+                    outerRadius={85}
+                    strokeWidth={2}
+                    stroke="var(--card)"
+                    paddingAngle={3}
+                  >
+                    {health.map((h) => (
+                      <Cell key={h.key} fill={`var(--color-${h.key})`} />
+                    ))}
+                  </Pie>
+                  <ChartLegend content={<ChartLegendContent />} />
+                </PieChart>
+              </ChartContainer>
+            )}
           </div>
-          {health.length === 0 ? (
-            <ChartEmpty className="h-[220px] w-full" label="no credentials configured" />
-          ) : (
-            <ChartContainer config={healthConfig} className="h-[220px] aspect-auto w-full">
-              <PieChart>
-                <ChartTooltip content={<ChartTooltipContent hideLabel indicator="dot" />} />
-                <Pie
-                  data={health}
-                  dataKey="value"
-                  nameKey="key"
-                  innerRadius={55}
-                  outerRadius={85}
-                  strokeWidth={2}
-                  stroke="var(--card)"
-                  paddingAngle={3}
-                >
-                  {health.map((h) => (
-                    <Cell key={h.key} fill={`var(--color-${h.key})`} />
-                  ))}
-                </Pie>
-                <ChartLegend content={<ChartLegendContent />} />
-              </PieChart>
-            </ChartContainer>
-          )}
-        </div>
+        )}
 
         <TopList
           title={t("legacy.topModels")}
@@ -875,7 +889,7 @@ export function DashboardBoard({
         <TopList
           title={t("legacy.topClients")}
           sub={t("legacy.topModelsBy")}
-          titleAdornment={clientsAnonymized ? <PseudonymHint /> : undefined}
+          titleAdornment={publicView ? <PseudonymHint /> : undefined}
           rows={
             reqData
               ? Object.entries(reqData.by_client)

@@ -225,6 +225,11 @@ func guessMime(name string) string {
 var SSOAuth func(c *gin.Context) (allowed bool, isAdmin bool)
 
 // adminAuth verifies the X-Admin-Token header (or Bearer token) against
+// ctxKeyPrivileged marks a request as coming from an operator (legacy admin
+// token or SaaS admin role) rather than an ordinary signed-in user. Read-only
+// handlers use it to decide whether to redact fleet-internal detail.
+const ctxKeyPrivileged = "admin_privileged"
+
 // config.AdminToken using constant-time compare. If neither matches and
 // SSOAuth is registered, it falls back to SaaS JWT verification — that
 // path lets a logged-in SaaS user reach the legacy console without ever
@@ -242,16 +247,21 @@ func (h *Handler) adminAuth() gin.HandlerFunc {
 		// Path 1: legacy operator token. Constant-time compare so a token
 		// that happens to look like a SaaS JWT can't time-leak the secret.
 		if got != "" && subtle.ConstantTimeCompare([]byte(got), want) == 1 {
+			c.Set(ctxKeyPrivileged, true)
 			c.Next()
 			return
 		}
 		// Path 2: SSO via SaaS JWT. Read-only endpoints are open to any
 		// authenticated user (including non-admin SaaS users) — that's
 		// the whole point: Overview/charts visible to anyone signed in.
-		// Mutations require role=admin.
+		// Mutations require role=admin. Non-admin SSO callers are flagged
+		// non-privileged so read-only handlers can redact fleet-internal
+		// detail (credential counts, real token labels) — see handleSummary
+		// and handleRequestsQuery.
 		if SSOAuth != nil {
 			if allowed, isAdmin := SSOAuth(c); allowed {
 				if isAdmin || c.Request.Method == http.MethodGet {
+					c.Set(ctxKeyPrivileged, isAdmin)
 					c.Next()
 					return
 				}
@@ -551,19 +561,46 @@ func (h *Handler) handleSummary(c *gin.Context) {
 	for k, v := range h.pricing.Models() {
 		priceView[k] = v
 	}
-	c.JSON(http.StatusOK, gin.H{
+
+	// Fleet-wide usage aggregate + a single service-health verb. Computed
+	// for every caller so the user-facing console can show usage KPIs and a
+	// health badge without ever touching the per-credential rows.
+	var totals usageSummary
+	health := "down"
+	for _, r := range rows {
+		if r.Healthy {
+			health = "operational"
+		}
+		if r.Usage != nil {
+			totals.Total.Add(r.Usage.Total)
+			totals.Sum24h.Add(r.Usage.Sum24h)
+		}
+	}
+
+	out := gin.H{
 		"active_window_minutes": h.cfg.ActiveWindowMinutes,
-		"auth_dir":              h.cfg.AuthDir,
-		"default_proxy_url":     h.cfg.DefaultProxyURL,
-		"auths":                 rows,
-		"clients":               clientRows,
 		"current_week":          currentWeek,
+		"service_health":        health,
+		"usage_totals":          gin.H{"total": totals.Total, "sum_24h": totals.Sum24h},
 		"pricing": gin.H{
 			"default":           h.pricing.Default(),
 			"provider_defaults": h.pricing.ProviderDefaults(),
 			"models":            priceView,
 		},
-	})
+	}
+	// Operators get the full fleet detail; ordinary signed-in users do not —
+	// the per-credential rows (their count, oauth/api split) and real client
+	// token labels are fleet-internal and must not leak to the public console.
+	if c.GetBool(ctxKeyPrivileged) {
+		out["auth_dir"] = h.cfg.AuthDir
+		out["default_proxy_url"] = h.cfg.DefaultProxyURL
+		out["auths"] = rows
+		out["clients"] = clientRows
+	} else {
+		out["auths"] = []authRow{}
+		out["clients"] = []clientRow{}
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 type clientRow struct {
@@ -1229,8 +1266,17 @@ func (h *Handler) handleRequestsQuery(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	h.remapDisplayNames(res.Entries)
-	res.ByClient = h.remapByClient(res.ByClient)
+	if c.GetBool(ctxKeyPrivileged) {
+		h.remapDisplayNames(res.Entries)
+		res.ByClient = h.remapByClient(res.ByClient)
+	} else {
+		// Ordinary signed-in users see only anonymized aggregates: the raw
+		// per-request ledger and real client labels stay operator-only.
+		// ByClient keys are still masked tokens here (pre-remap), so the
+		// pseudonym map keys off a stable identifier.
+		res.Entries = nil
+		res.ByClient = anonymizeByClient(res.ByClient)
+	}
 	c.JSON(http.StatusOK, res)
 }
 

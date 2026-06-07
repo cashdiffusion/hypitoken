@@ -546,15 +546,15 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 				daily[i] = gin.H{"date": d, "ok": upSlots, "total": totSlots}
 			}
 
+			// healthy_creds/total_creds are deliberately omitted: the public
+			// status page reports service usability, not credential-pool size.
 			out = append(out, gin.H{
-				"key":           pv.key,
-				"name":          pv.name,
-				"operational":   operational,
-				"healthy_creds": cc.ok,
-				"total_creds":   cc.total,
-				"checked_at":    cc.checkedAt,
-				"recent":        recent,
-				"daily":         daily,
+				"key":         pv.key,
+				"name":        pv.name,
+				"operational": operational,
+				"checked_at":  cc.checkedAt,
+				"recent":      recent,
+				"daily":       daily,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"providers": out, "as_of": nowU})

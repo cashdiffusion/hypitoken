@@ -92,6 +92,11 @@ export interface Summary {
   default_proxy_url?: string;
   current_week?: string;
   pricing?: Pricing;
+  // Service-health verb + fleet-wide usage aggregate. Always present; the
+  // public console reads these instead of the per-credential `auths` rows
+  // (which are empty for non-operator callers — see handleSummary).
+  service_health?: "operational" | "down";
+  usage_totals?: { total: Counts; sum_24h: Counts };
 }
 
 export interface RequestEntry {
