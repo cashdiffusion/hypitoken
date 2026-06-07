@@ -477,12 +477,14 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			if cc == nil || cc.total == 0 {
 				continue // no credentials for this provider — omit the card
 			}
+			// The pill answers one question: can a new user use the service right
+			// now? Yes as long as AT LEAST ONE credential is healthy — the pool
+			// routes around the dead ones. It is NOT a credential-health ratio:
+			// many creds may sit dead/quota-exceeded while the service stays fully
+			// usable, so we report operational whenever any credential can serve.
 			operational := "down"
-			switch {
-			case cc.ok == cc.total:
+			if cc.ok > 0 {
 				operational = "operational"
-			case cc.ok > 0:
-				operational = "degraded"
 			}
 
 			samples, _ := store.ProviderHealthSamples(c.Request.Context(), pv.key, time.Unix(recentStart, 0).Add(-time.Duration(dailyDays)*24*time.Hour))
@@ -491,9 +493,14 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			recent := make([]gin.H, recentSlots)
 			rOK := make([]int, recentSlots)
 			rTot := make([]int, recentSlots)
-			// Daily rollup.
-			dayOK := map[int64]int{}
-			dayTot := map[int64]int{}
+			// Daily rollup measures service uptime, NOT credential health: a day's
+			// {ok,total} count 10-min slots where AT LEAST ONE credential was ok vs.
+			// slots with any sample. Counting raw per-credential samples instead
+			// would peg every day red whenever most creds sit dead/quota-exceeded
+			// (e.g. 5 healthy of 17 → ratio≈0.29) even while the service stayed
+			// fully usable — matching the "any cred ok" semantics of recent slots.
+			type slotAgg struct{ okCount, total int }
+			daySlots := map[int64]map[int64]*slotAgg{} // dayMidnight -> slotStart -> agg
 			for _, s := range samples {
 				ts := s.CheckedAt.Unix()
 				if ts >= recentStart && ts <= nowU {
@@ -506,9 +513,20 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 					}
 				}
 				d := (ts / daySec) * daySec
-				dayTot[d]++
+				slot := (ts / recentSlotS) * recentSlotS
+				m := daySlots[d]
+				if m == nil {
+					m = map[int64]*slotAgg{}
+					daySlots[d] = m
+				}
+				ag := m[slot]
+				if ag == nil {
+					ag = &slotAgg{}
+					m[slot] = ag
+				}
+				ag.total++
 				if s.Status == "ok" {
-					dayOK[d]++
+					ag.okCount++
 				}
 			}
 			for i := 0; i < recentSlots; i++ {
@@ -518,7 +536,14 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			daily := make([]gin.H, dailyDays)
 			for i := 0; i < dailyDays; i++ {
 				d := todayMidnight - int64(dailyDays-1-i)*daySec
-				daily[i] = gin.H{"date": d, "ok": dayOK[d], "total": dayTot[d]}
+				upSlots, totSlots := 0, 0
+				for _, ag := range daySlots[d] {
+					totSlots++
+					if ag.okCount > 0 {
+						upSlots++
+					}
+				}
+				daily[i] = gin.H{"date": d, "ok": upSlots, "total": totSlots}
 			}
 
 			out = append(out, gin.H{
