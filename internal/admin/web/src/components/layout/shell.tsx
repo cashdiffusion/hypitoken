@@ -8,15 +8,19 @@ import {
   User as UserIcon,
   Wallet,
 } from "lucide-react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { DiscordIcon } from "@/components/icons/discord";
 import { LanguageToggle } from "@/components/language-toggle";
 import { MobileMenu } from "@/components/layout/mobile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
+import { DISCORD_INVITE } from "@/lib/social";
 import { cn, fmtUSD } from "@/lib/utils";
+
+const DISCORD_BLURPLE = "#5865f2";
 
 // NAV_ITEMS is keyed by i18n string id rather than the literal label —
 // resolved at render time so language switching reflows the sidebar.
@@ -106,7 +110,40 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+      <FloatingDiscord />
     </div>
+  );
+}
+
+// FloatingDiscord — a bottom-right FAB linking to the community server. Lives in
+// AppShell so it persists across every signed-in route. z-30 keeps it under the
+// header pill (z-40) and dialog overlays (z-50); toasts render top-right so
+// there's no collision. The label pill expands on hover/focus.
+function FloatingDiscord() {
+  const { t } = useTranslation();
+  const reduce = useReducedMotion();
+  return (
+    <motion.a
+      href={DISCORD_INVITE}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={t("common.joinDiscord")}
+      title={t("common.joinDiscord")}
+      className="group fixed bottom-5 right-5 z-30 flex items-center gap-0 rounded-full text-white shadow-lg ring-1 ring-white/10 md:bottom-6 md:right-6"
+      style={{ backgroundColor: DISCORD_BLURPLE, boxShadow: `0 10px 30px -8px ${DISCORD_BLURPLE}` }}
+      initial={reduce ? false : { opacity: 0, y: 16, scale: 0.9 }}
+      animate={reduce ? undefined : { opacity: 1, y: 0, scale: 1 }}
+      transition={reduce ? undefined : { delay: 0.4, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+      whileHover={reduce ? undefined : { scale: 1.05 }}
+      whileTap={reduce ? undefined : { scale: 0.95 }}
+    >
+      <span className="grid size-12 place-items-center">
+        <DiscordIcon className="size-6" />
+      </span>
+      <span className="max-w-0 overflow-hidden whitespace-nowrap text-sm font-medium opacity-0 transition-all duration-300 group-hover:max-w-[10rem] group-hover:pr-5 group-hover:opacity-100 group-focus-visible:max-w-[10rem] group-focus-visible:pr-5 group-focus-visible:opacity-100">
+        {t("common.joinDiscord")}
+      </span>
+    </motion.a>
   );
 }
 

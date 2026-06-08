@@ -15,6 +15,8 @@ import { motion, useMotionValueEvent, useReducedMotion, useScroll } from "motion
 import { lazy, type ReactNode, Suspense, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { DiscordIcon } from "@/components/icons/discord";
+import { Community } from "@/components/landing/community";
 import { FeatureShowcase } from "@/components/landing/feature-showcase";
 import { HlsVideo } from "@/components/landing/hls-video";
 import { Magnetic, Marquee, SpotlightCard } from "@/components/landing/interactions";
@@ -29,6 +31,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import RadialOrbitalTimeline, { type TimelineItem } from "@/components/ui/radial-orbital-timeline";
 import { type Testimonial, TestimonialsColumn } from "@/components/ui/testimonials-columns";
 import { useAuth } from "@/hooks/use-auth";
+import { DISCORD_INVITE } from "@/lib/social";
 
 const ParticleField = lazy(() => import("@/components/landing/particle-field"));
 const FloatingGeometry = lazy(() => import("@/components/landing/floating-geometry"));
@@ -190,6 +193,9 @@ export default function HomePage() {
 
         {/* Testimonials — vertical glass marquee */}
         <Testimonials />
+
+        {/* Community — social platforms (Discord) */}
+        <Community />
 
         {/* CTA */}
         <section className="mx-auto max-w-7xl px-4 pb-24 md:px-6">
@@ -784,6 +790,15 @@ function SiteFooter({ t }: { t: (k: string) => string }) {
                 HypiToken
               </Link>
               <p className="mt-3 max-w-xs text-sm text-white/70">{t("home.footerBlurb")}</p>
+              <a
+                href={DISCORD_INVITE}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={t("common.joinDiscord")}
+                className="mt-5 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/8 text-white/80 ring-1 ring-white/10 transition-colors hover:bg-[#5865f2] hover:text-white hover:ring-[#5865f2]"
+              >
+                <DiscordIcon className="h-4 w-4" />
+              </a>
             </div>
             <FooterCol
               title={t("home.footerProduct")}

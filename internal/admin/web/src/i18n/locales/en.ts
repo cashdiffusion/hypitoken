@@ -26,6 +26,7 @@ export default {
     unlimited: "unlimited",
     copy: "Copy",
     copied: "Copied",
+    joinDiscord: "Join Discord",
     open: "Open",
     add: "Add",
     remove: "Remove",
@@ -599,6 +600,24 @@ export default {
         role: "Product Engineer",
       },
     ],
+
+    community: {
+      eyebrow: "Community",
+      title: "Join the developer community.",
+      sub: "Get support, hear about updates first, and trade integration notes with other operators on Discord.",
+      live: "Community online",
+      cardTitle: "Find us on Discord",
+      cardSub:
+        "Live answers, release news, and real-world talk about routing and credential pools — all in one place.",
+      cta: "Join Discord",
+      supportT: "Real-time support",
+      supportB: "Hit a snag during setup or debugging? Ask in the channel and get answers faster.",
+      updatesT: "Updates & announcements",
+      updatesB:
+        "New releases, compatibility changes, and maintenance notices, the moment they land.",
+      talkT: "Talk to operators",
+      talkB: "Swap hard-won notes on pool scheduling, session stickiness, and self-hosting.",
+    },
 
     archEyebrow: "Architecture",
     archTitle: "Forwarding that mirrors real Claude Code behavior.",
