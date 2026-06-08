@@ -230,11 +230,41 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		return
 	}
 
-	// Try upstream with retries across auths. On saturation / quota / auth
-	// errors, we pick a different auth and retry (bounded).
-	const maxAttempts = 4
+	// Hand off to the credential-failover retry loop.
+	s.forwardWithFailover(c, provider, path, model, clientToken, clientGroup, clientName, slotID, body, peek.Stream, start)
+}
+
+// forwardWithFailover runs the per-request retry loop: it acquires a
+// credential, forwards via the provider-appropriate doForward, and on a
+// credential-level error (429 quota/rate-limit, 401/403, account ban — which
+// doForward withholds rather than writing through) transparently switches to
+// another healthy credential. The user only ever sees an error when the pool
+// has no slot left: excludeIDs narrows the candidate set each round so the
+// loop terminates naturally once Acquire returns nil (every healthy credential
+// tried). maxAttempts is only a backstop against a pathologically large
+// all-failing fleet. When every credential is exhausted, the most recent
+// withheld upstream error is replayed verbatim (e.g. a 429 + Retry-After)
+// instead of a synthetic 503, so clients back off correctly.
+func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clientToken, clientGroup, clientName, slotID string, body []byte, stream bool, start time.Time) {
+	const maxAttempts = 12
 	tried := make(map[string]bool)
 	attempts := 0
+	var lastDeferred *deferredResponse
+
+	// surfaceDeferred replays a withheld upstream error to the client once no
+	// healthy credential remains — preferable to a synthetic 503 because the
+	// client (e.g. Claude Code) backs off correctly on the genuine 429 +
+	// Retry-After it would otherwise have received directly.
+	surfaceDeferred := func(d *deferredResponse) {
+		replayDeferred(c, d)
+		s.emitLog(requestlog.Record{
+			Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider,
+			AuthID: d.authID, Model: model, Status: d.status, Attempts: attempts,
+			Stream: stream, Path: path, DurationMs: time.Since(start).Milliseconds(),
+			Error: fmt.Sprintf("upstream %d (all credentials exhausted)", d.status),
+		})
+	}
+
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		excludeIDs := make([]string, 0, len(tried))
 		for id := range tried {
@@ -242,6 +272,13 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		}
 		a := s.pool.Acquire(c.Request.Context(), provider, clientToken, clientGroup, model, slotID, excludeIDs...)
 		if a == nil {
+			// No healthy/untried credential left. If we withheld an upstream
+			// error on the way here, surface that genuine status; otherwise
+			// there was nothing in the pool to serve the request at all.
+			if lastDeferred != nil {
+				surfaceDeferred(lastDeferred)
+				return
+			}
 			msg := "no upstream credentials available"
 			if len(tried) > 0 {
 				msg = "all upstream credentials exhausted"
@@ -249,7 +286,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 			c.AbortWithStatusJSON(503, gin.H{"error": msg})
 			s.emitLog(requestlog.Record{
 				Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider, Model: model,
-				Stream: peek.Stream, Path: path, Status: 503, Attempts: attempts,
+				Stream: stream, Path: path, Status: 503, Attempts: attempts,
 				DurationMs: time.Since(start).Milliseconds(), Error: msg,
 			})
 			return
@@ -258,11 +295,14 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		attempts++
 
 		var retry, done bool
+		var deferred *deferredResponse
 		switch auth.NormalizeProvider(a.Provider) {
 		case auth.ProviderOpenAI:
-			retry, done = s.doForwardCodex(c, a, path, body, peek.Stream, model, clientToken, clientName, start, attempts)
+			retry, done = s.doForwardCodex(c, a, path, body, stream, model, clientToken, clientName, start, attempts)
 		default:
-			retry, done = s.doForward(c, a, path, body, peek.Stream, model, clientToken, slotID, clientName, start, attempts)
+			// attempt > 0 ⇒ this is a transparent retry; doForward skips the
+			// blocking bootstrap-wait so the credential switch stays fast.
+			retry, done, deferred = s.doForward(c, a, path, body, stream, model, clientToken, slotID, clientName, start, attempts, attempt > 0)
 		}
 		if done {
 			s.pool.Release(provider, clientToken, slotID)
@@ -272,12 +312,23 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 			s.pool.Release(provider, clientToken, slotID)
 			return
 		}
+		// Credential-level error withheld from the client — remember the most
+		// recent one so it can be surfaced if every credential is exhausted,
+		// then loop on to the next credential.
+		if deferred != nil {
+			lastDeferred = deferred
+		}
 		log.Warnf("proxy: retrying with a different credential (last auth=%s)", a.ID)
+	}
+	// Backstop reached (maxAttempts) — surface the last withheld error if any.
+	if lastDeferred != nil {
+		surfaceDeferred(lastDeferred)
+		return
 	}
 	c.AbortWithStatusJSON(503, gin.H{"error": "upstream retries exhausted"})
 	s.emitLog(requestlog.Record{
 		Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider, Model: model,
-		Stream: peek.Stream, Path: path, Status: 503, Attempts: attempts,
+		Stream: stream, Path: path, Status: 503, Attempts: attempts,
 		DurationMs: time.Since(start).Milliseconds(), Error: "upstream retries exhausted",
 	})
 }
@@ -330,12 +381,49 @@ func flagStripThinking(a *auth.Auth) {
 	log.Infof("proxy: %s flagged strip-thinking (persisted) — prior thinking signatures will be sanitized proactively on future requests", a.ID)
 }
 
-// doForward sends the request with one credential. Returns (retry, done):
+// deferredResponse is an upstream error response withheld from the client so
+// the request can be transparently retried on another credential. The forward
+// loop keeps the most recent one; if every healthy credential is exhausted it
+// replays this verbatim instead of synthesizing a 503, so the client still
+// receives the genuine upstream status (e.g. a 429 with its Retry-After) and
+// backs off correctly. nil when nothing was withheld.
+type deferredResponse struct {
+	status int
+	header http.Header
+	body   []byte
+	authID string
+}
+
+// replayDeferred writes a withheld upstream error response to the client,
+// honouring the same hop-by-hop header filter as writeResponseHeaders.
+func replayDeferred(c *gin.Context, d *deferredResponse) {
+	for k, vs := range d.header {
+		if hopHeaders[http.CanonicalHeaderKey(k)] {
+			continue
+		}
+		for _, v := range vs {
+			c.Writer.Header().Add(k, v)
+		}
+	}
+	c.Writer.WriteHeader(d.status)
+	_, _ = c.Writer.Write(d.body)
+}
+
+// doForward sends the request with one credential. Returns (retry, done, deferred):
 //
-//	retry=true  → caller should try another credential
-//	done=true   → response was delivered successfully (status < 400 or
-//	              non-retryable error already written to client)
-func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, slotID, clientName string, start time.Time, attempts int) (retry bool, done bool) {
+//	retry=true   → caller should try another credential. When the retry was
+//	               prompted by a credential-level upstream error (429 quota /
+//	               rate-limit, 401/403, account ban) the response is withheld
+//	               from the client and returned in deferred so the loop can
+//	               surface it if no healthy credential remains. A nil deferred
+//	               on retry=true means a transport error (nothing received).
+//	done=true    → response was delivered to the client (status < 400 or a
+//	               non-retryable error already written through).
+//
+// isRetry is true on the 2nd+ attempt of a request; it suppresses the
+// blocking bootstrap-wait gate so a transparent credential switch doesn't
+// re-stack the ≤5s sidecar wait on every alternate credential.
+func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, slotID, clientName string, start time.Time, attempts int, isRetry bool) (retry bool, done bool, deferred *deferredResponse) {
 	// Mid-conversation account switch: drop prior `thinking` block
 	// signatures before forwarding. Both OAuth and API-key paths bind
 	// thinking signatures to the issuing account, so this runs ahead
@@ -412,7 +500,12 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	}
 
 	ctx := c.Request.Context()
-	if bootstrapReady != nil {
+	// Skip the blocking bootstrap-wait on retries: a transparent credential
+	// switch (after a 429/auth error on the previous credential) must not
+	// re-stack the ≤5s sidecar wait for every alternate credential. The
+	// sidecar bootstrap still fires in the background via Notify above; we
+	// just don't gate user traffic on it the second time around.
+	if bootstrapReady != nil && !isRetry {
 		select {
 		case <-bootstrapReady:
 		case <-ctx.Done():
@@ -424,7 +517,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(upstreamBody))
 	if err != nil {
 		c.AbortWithStatusJSON(500, gin.H{"error": err.Error()})
-		return false, true
+		return false, true, nil
 	}
 
 	// Forward selected client headers.
@@ -465,11 +558,11 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 				Attempts:    attempts,
 				Error:       "client canceled",
 			})
-			return false, true
+			return false, true, nil
 		}
 		a.MarkFailure(err.Error())
 		log.Warnf("proxy: upstream error via %s: %v", a.ID, err)
-		return true, false
+		return true, false, nil
 	}
 
 	// Decompress upstream gzip/br before reading anything — we asked for
@@ -541,14 +634,25 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		// smarter scheduling decisions, but never hide the error from
 		// the client. Generic 4xx (400/404/413/422/...) are client-request
 		// faults — credential is fine, so no MarkFailure.
+		// retryable marks credential-level failures (this credential is bad
+		// right now, but another might serve the request): 429 quota/rate-
+		// limit, 401/403 auth rejection, account ban. For these we withhold
+		// the response and let forward() transparently switch credentials so
+		// the user never sees the error while the pool still has a slot.
+		// Request-level faults (generic 4xx, "Extra usage is required") and
+		// upstream-wide weather (5xx/529) stay non-retryable — every
+		// credential would return the same thing, so forward it through.
+		retryable := false
 		switch {
 		case banned:
 			a.MarkHardFailure(fmt.Sprintf("account banned (upstream %d)", resp.StatusCode))
 			log.Warnf("auth: %s hard-disabled — account ban detected (status %d)", a.ID, resp.StatusCode)
+			retryable = true
 		case resp.StatusCode == 429 && bytes.Contains(errBody, []byte("Extra usage is required")):
 			// Request-level rejection (long context), not a credential
-			// problem — no cooldown.
+			// problem — no cooldown, no retry (every credential rejects it).
 		case resp.StatusCode == 429:
+			retryable = true
 			// Four flavors of 429 from Anthropic, treated differently. Check
 			// in this order — earlier checks are more specific signals:
 			//
@@ -594,6 +698,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 				s.pool.ReportUpstreamError(a, resp.StatusCode, resetAt)
 			}
 		case resp.StatusCode == 401 || resp.StatusCode == 403:
+			retryable = true
 			// On 401, a body of {"type":"authentication_error", ...} or
 			// "Invalid authentication credentials" means Anthropic has
 			// definitively rejected this credential. For OAuth we just
@@ -614,11 +719,33 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 			a.MarkFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
 		}
 
-		log.Warnf("proxy: %s returned %d — forwarding to client. body=%s", a.ID, resp.StatusCode, truncate(errBody, 500))
 		authKind := "oauth"
 		if a.Kind == auth.KindAPIKey {
 			authKind = "apikey"
 		}
+		// Break sticky session so the retry (and any future request from this
+		// client) can be assigned to a different, hopefully healthy credential.
+		s.pool.Unstick(auth.NormalizeProvider(a.Provider), clientToken, slotID)
+
+		if retryable {
+			// Withhold the response and signal the caller to switch
+			// credentials. We deliberately do NOT emitLog here: the request
+			// hasn't reached the client yet, and logging a 429 row for an
+			// attempt the user never saw would inflate the error dashboard and
+			// mislead billing. The final outcome (a success on another
+			// credential, or the surfaced error once the pool is exhausted)
+			// logs the authoritative row. The journald warn line below keeps
+			// per-credential visibility for ops.
+			log.Warnf("proxy: %s returned %d — retrying on another credential. body=%s", a.ID, resp.StatusCode, truncate(errBody, 500))
+			return true, false, &deferredResponse{
+				status: resp.StatusCode,
+				header: resp.Header.Clone(),
+				body:   errBody,
+				authID: a.ID,
+			}
+		}
+
+		log.Warnf("proxy: %s returned %d — forwarding to client. body=%s", a.ID, resp.StatusCode, truncate(errBody, 500))
 		s.emitLog(requestlog.Record{
 			Client:      clientName,
 			ClientToken: maskClientToken(clientToken),
@@ -633,13 +760,10 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 			Attempts:    attempts,
 			Error:       fmt.Sprintf("upstream %d", resp.StatusCode),
 		})
-		// Break sticky session so the next request from this client can
-		// be assigned to a different (hopefully healthy) credential.
-		s.pool.Unstick(auth.NormalizeProvider(a.Provider), clientToken, slotID)
 
 		writeResponseHeaders(c, resp)
 		_, _ = c.Writer.Write(errBody)
-		return false, true
+		return false, true, nil
 	}
 
 recoveredFromSignature:
@@ -735,7 +859,7 @@ recoveredFromSignature:
 		UserID:      userID,
 		Multiplier:  multiplier,
 	})
-	return false, true
+	return false, true, nil
 }
 
 // doForwardAnthropicAPIKey is the API-key passthrough for Anthropic-shaped
@@ -756,7 +880,11 @@ recoveredFromSignature:
 // midnight job (Pool.RunDailyAnthropicAPIKeyReset) wipes the hard-failure
 // flag once a day so transient overnight outages don't pin a credential
 // offline forever.
-func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, clientName string, start time.Time, attempts int) (retry bool, done bool) {
+// The (retry, done, deferred) contract matches doForward: a credential-level
+// error (401/402/403 hard-fail, 429/503 transient) is withheld and returned in
+// deferred so forward() can switch credentials transparently. There is no
+// bootstrap-wait gate on this path, so it takes no isRetry flag.
+func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, clientName string, start time.Time, attempts int) (retry bool, done bool, deferred *deferredResponse) {
 	baseURL := s.cfg.AnthropicBaseURL
 	if ab := strings.TrimRight(a.Snapshot().BaseURL, "/"); ab != "" {
 		baseURL = ab
@@ -778,7 +906,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upURL, bytes.NewReader(upstreamBody))
 	if err != nil {
 		c.AbortWithStatusJSON(500, gin.H{"error": err.Error()})
-		return false, true
+		return false, true, nil
 	}
 	copyForwardableHeaders(c.Request.Header, upReq.Header)
 	stripIngressHeaders(upReq.Header)
@@ -796,7 +924,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 				Model: model, Stream: stream, Path: path, Status: 499,
 				DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: "client canceled",
 			})
-			return false, true
+			return false, true, nil
 		}
 		log.Warnf("proxy(apikey): upstream transport error via %s: %v", a.ID, err)
 		a.MarkFailure(fmt.Sprintf("transport: %v", err))
@@ -807,7 +935,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 			Model: model, Stream: stream, Path: path, Status: 502,
 			DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: err.Error(),
 		})
-		return false, true
+		return false, true, nil
 	}
 
 	// Decompress upstream gzip/br before reading. Some relays emit gzipped
@@ -862,6 +990,47 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		}
 	}
 
+	// Credential health bookkeeping + retryability, computed before writing
+	// anything so a credential-level error can be withheld and retried on
+	// another credential while the pool still has a slot.
+	retryable := false
+	switch {
+	case resp.StatusCode < 400:
+		a.MarkSuccess()
+	case resp.StatusCode == http.StatusUnauthorized ||
+		resp.StatusCode == http.StatusPaymentRequired ||
+		resp.StatusCode == http.StatusForbidden:
+		// Token revoked, balance depleted, or forbidden — terminal for this
+		// key. Hard-fail it and retry the request on another credential.
+		a.MarkHardFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
+		retryable = true
+	case resp.StatusCode == http.StatusTooManyRequests ||
+		resp.StatusCode == http.StatusServiceUnavailable:
+		// 429 per-key throttle / 503 vendor overload: transient and not a
+		// verdict on the key itself, so skip Mark* (don't pin a working key or
+		// trip the consecutive-429 stealth-ban accumulator) — but retry on
+		// another credential so the user doesn't eat the relay's weather.
+		retryable = true
+	case resp.StatusCode == http.StatusNotFound:
+		// Route not implemented on this relay (e.g. /v1/messages/count_tokens
+		// on relays that only proxy /v1/messages). Another credential on the
+		// same relay would 404 too — forward it through, don't burn retries.
+	default:
+		a.MarkFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
+	}
+
+	if resp.StatusCode >= 400 && retryable {
+		errBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		log.Warnf("proxy(apikey): %s returned %d — retrying on another credential. body=%s", a.ID, resp.StatusCode, truncate(errBody, 500))
+		return true, false, &deferredResponse{
+			status: resp.StatusCode,
+			header: resp.Header.Clone(),
+			body:   errBody,
+			authID: a.ID,
+		}
+	}
+
 	writeResponseHeaders(c, resp)
 	var counts usage.Counts
 	var sub subUsage
@@ -885,29 +1054,6 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		}
 	}
 	_ = resp.Body.Close()
-
-	switch {
-	case resp.StatusCode < 400:
-		a.MarkSuccess()
-	case resp.StatusCode == http.StatusUnauthorized ||
-		resp.StatusCode == http.StatusPaymentRequired ||
-		resp.StatusCode == http.StatusForbidden:
-		a.MarkHardFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
-	case resp.StatusCode == http.StatusTooManyRequests,
-		resp.StatusCode == http.StatusServiceUnavailable,
-		resp.StatusCode == http.StatusNotFound:
-		// API-key relays routinely emit:
-		//  - 429: per-key throttle
-		//  - 503: vendor-side overload / brief maintenance
-		//  - 404: route not implemented (e.g. /v1/messages/count_tokens
-		//    on relays that only proxy /v1/messages)
-		// None of these reflect on the credential itself. Skip Mark*
-		// so transient upstream weather and route-coverage gaps don't
-		// pin a working key into cooldown or trip the consecutive-429
-		// stealth-ban accumulator.
-	default:
-		a.MarkFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
-	}
 
 	var costUSD float64
 	var userID int64
@@ -964,7 +1110,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		Multiplier:  multiplier,
 		Error:       errField,
 	})
-	return false, true
+	return false, true, nil
 }
 
 // stripIngressHeaders removes headers that describe the *ingress path* into
