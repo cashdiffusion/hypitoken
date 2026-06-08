@@ -65,6 +65,17 @@ const TABS = [
 
 export default function AdminPage() {
   const { t } = useTranslation();
+  // Auto-refresh tick. The fleet/overview panels load once on mount, so a
+  // credential whose quota cooldown has expired (cleared server-side on the
+  // next Snapshot) would keep showing a stale "配额耗尽" badge until a manual
+  // reload. Bump a tick every 15s so those panels re-fetch and reflect live
+  // server state. The requests log is intentionally left manual — auto-
+  // refreshing it mid-investigation is disruptive.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 15000);
+    return () => clearInterval(id);
+  }, []);
   return (
     <div className="space-y-6">
       <PageHeader
@@ -79,9 +90,9 @@ export default function AdminPage() {
       <Routes>
         <Route index element={<AdminDashboard />} />
         <Route path="dashboard" element={<AdminDashboard />} />
-        <Route path="fleet" element={<OverviewPanel refreshTick={0} />} />
+        <Route path="fleet" element={<OverviewPanel refreshTick={tick} />} />
         {/* legacy alias — earlier deeplinks pointed at /overview */}
-        <Route path="overview" element={<OverviewPanel refreshTick={0} />} />
+        <Route path="overview" element={<OverviewPanel refreshTick={tick} />} />
         <Route path="users" element={<UsersTab />} />
         <Route path="groups" element={<GroupsTab />} />
         <Route path="credentials" element={<CredentialsTab />} />
@@ -477,9 +488,15 @@ function CredentialsTab() {
     const r = await apiGet<{ credentials: Credential[] }>("/admin/credentials");
     setCreds(r.credentials || []);
   };
-  // biome-ignore lint/correctness/useExhaustiveDependencies: load once on mount; reload runs imperatively after mutations.
+  // Load on mount + poll every 15s so an expired quota cooldown (cleared
+  // server-side) stops showing a stale "配额耗尽" badge without a manual reload.
+  // reload also runs imperatively after mutations. Polling only swaps `creds`,
+  // so expanded rows / open dialogs (separate state) are preserved.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount + interval poll; reload's closure only touches stable setters.
   useEffect(() => {
     reload();
+    const id = setInterval(reload, 15000);
+    return () => clearInterval(id);
   }, []);
 
   const toggleExpand = (id: string) => {
