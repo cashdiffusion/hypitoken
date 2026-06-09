@@ -2,8 +2,10 @@ package shop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,8 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
-
-	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
+	stripe "github.com/stripe/stripe-go/v82"
 )
 
 // pageIndex is the storefront homepage — lists active products.
@@ -56,8 +57,11 @@ func (s *Shop) pageBuy(c *gin.Context) {
 	})
 }
 
-// handleCreateOrder processes the buy form. Creates a pending order,
-// kicks off Z-Pay payment, then redirects to the per-order page.
+// handleCreateOrder processes the buy form. Creates a Stripe hosted Checkout
+// Session, persists a pending order carrying the session id, then redirects the
+// buyer's browser straight to the Stripe-hosted payment page (card + Alipay).
+// Stripe sends them back to /order/<out>?session_id=… on success, where the
+// poll path settles the order.
 func (s *Shop) handleCreateOrder(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -82,13 +86,9 @@ func (s *Shop) handleCreateOrder(c *gin.Context) {
 
 	email := strings.TrimSpace(c.PostForm("email"))
 	queryPass := strings.TrimSpace(c.PostForm("query_pass"))
-	payMethod := strings.TrimSpace(c.PostForm("pay_method"))
 	if !looksLikeEmail(email) {
 		c.Redirect(http.StatusFound, fmt.Sprintf("/buy/%d?err=%s", id, url.QueryEscape("请输入有效的邮箱地址")))
 		return
-	}
-	if payMethod != "alipay" {
-		payMethod = "alipay"
 	}
 	hash, err := hashQueryPass(queryPass)
 	if err != nil {
@@ -101,15 +101,13 @@ func (s *Shop) handleCreateOrder(c *gin.Context) {
 	if len(subject) > 60 {
 		subject = subject[:60]
 	}
-	pay, err := s.gw.CreatePayment(ctx, billing.PayParams{
-		OutTradeNo: out,
-		Subject:    subject,
-		TotalCNY:   p.PriceCNY,
-		Method:     payMethod,
-		ClientIP:   c.ClientIP(),
-	})
+	// Stripe replaces {CHECKOUT_SESSION_ID} in success_url so the return page
+	// can poll-settle. Cancel returns the buyer to the product page.
+	successURL := s.successURL(out)
+	cancelURL := fmt.Sprintf("%s/buy/%d", strings.TrimRight(s.cfg.SiteURL, "/"), p.ID)
+	sess, err := s.stripe.CreateHostedCheckout(ctx, out, p.PriceCNY, email, successURL, cancelURL, subject, nil)
 	if err != nil {
-		log.Errorf("shop: z-pay create failed: %v", err)
+		log.Errorf("shop: stripe checkout create failed: %v", err)
 		s.renderError(c, http.StatusBadGateway, "创建支付订单失败，请稍后重试", err)
 		return
 	}
@@ -121,13 +119,10 @@ func (s *Shop) handleCreateOrder(c *gin.Context) {
 		Email:         email,
 		QueryPassHash: hash,
 		AmountCNY:     p.PriceCNY,
-		PayMethod:     payMethod,
-		PayURL:        pay.PayURL,
-		QRCode:        pay.QRCode,
+		PayMethod:     "stripe",
+		PayURL:        sess.URL,
+		PaySessionID:  sess.SessionID,
 		RemoteIP:      c.ClientIP(),
-	}
-	if o.PayURL == "" && pay.Img != "" {
-		o.PayURL = pay.Img
 	}
 	if err := s.db.CreateOrder(ctx, o); err != nil {
 		log.Errorf("shop: create order: %v", err)
@@ -135,11 +130,34 @@ func (s *Shop) handleCreateOrder(c *gin.Context) {
 		return
 	}
 
-	// Stash the query password into a session-only cookie so the next page
-	// can auto-render the fulfilment without forcing the buyer to type it
-	// again immediately. Cookie scope is exactly this order id.
+	// Stash the query password into a session-only cookie so the order page
+	// (where Stripe redirects back) can auto-render the fulfilment without
+	// forcing the buyer to retype it. Cookie scope is exactly this order id.
 	c.SetCookie("hypishop_q_"+out, queryPass, 0, "/order/"+out, "", false, true)
-	c.Redirect(http.StatusFound, "/order/"+out)
+	// Off to Stripe's hosted Checkout page.
+	c.Redirect(http.StatusFound, sess.URL)
+}
+
+// settleable reports whether an order in this status can still be settled by a
+// late Stripe confirmation. pending is the normal case; expired is rescued
+// because async methods (Alipay) can confirm after the expiry sweeper has run
+// (abandoned redirect + webhook retry backoff past OrderTTL). Terminal states
+// (paid, await_manual) are left untouched.
+func settleable(status string) bool {
+	return status == OrderPending || status == OrderExpired
+}
+
+// successURL builds the Stripe success_url for an order, embedding Stripe's
+// {CHECKOUT_SESSION_ID} placeholder so the landing page can poll-settle.
+func (s *Shop) successURL(out string) string {
+	prefix := strings.TrimRight(s.cfg.Stripe.SuccessURLPrefix, "/")
+	if prefix == "" {
+		prefix = strings.TrimRight(s.cfg.ReturnURLPrefix, "/")
+	}
+	if prefix == "" {
+		prefix = strings.TrimRight(s.cfg.SiteURL, "/") + "/order"
+	}
+	return prefix + "/" + out + "?session_id={CHECKOUT_SESSION_ID}"
 }
 
 // pageQuery renders the "look up my order" form.
@@ -183,6 +201,15 @@ func (s *Shop) pageOrderDetail(c *gin.Context) {
 		s.renderError(c, http.StatusNotFound, "订单不存在", nil)
 		return
 	}
+	// Buyer may have just been redirected back from Stripe — settle on the
+	// spot (poll path) so the page reflects payment without waiting for the
+	// webhook. No-op once already paid; rescues late-settling expired orders.
+	if settleable(o.Status) {
+		s.maybeSettleStripeOrder(ctx, o)
+		if refreshed, rerr := s.db.GetOrder(ctx, trade); rerr == nil {
+			o = refreshed
+		}
+	}
 	pass, _ := c.Cookie("hypishop_q_" + trade)
 	if pass == "" || !checkQueryPass(o.QueryPassHash, pass) {
 		s.render(c, "order_locked.html", gin.H{
@@ -197,77 +224,130 @@ func (s *Shop) pageOrderDetail(c *gin.Context) {
 	})
 }
 
-// handleNotify is the Z-Pay async payment notification. Z-Pay sends the
-// trade params in the URL query (GET) or as form body (POST); both are
-// supported. On valid notify with TRADE_SUCCESS, we mark the order paid,
-// pop a card secret (if applicable), and email the buyer.
+// handleStripeWebhook receives Stripe events for the shop. The signature is
+// verified over the raw body. Card payments settle via
+// checkout.session.completed; Alipay (and other redirect methods) settle
+// asynchronously via checkout.session.async_payment_succeeded — the
+// `completed` event for those can arrive while payment_status is still unpaid,
+// so applyStripeSession gates fulfilment strictly on payment_status==paid and
+// no-ops otherwise (we wait for the async event / poll).
 //
-// Response body MUST be the literal "success" — anything else makes Z-Pay
-// retry the callback on a schedule (8 attempts over ~24h).
-func (s *Shop) handleNotify(c *gin.Context) {
-	// Collect params from both query and form (the gateway uses GET, but
-	// some redirects flip to POST — accept both).
-	form := make(map[string][]string)
-	for k, v := range c.Request.URL.Query() {
-		form[k] = v
+// The shop may share a Stripe account with the SaaS wallet, so this endpoint
+// receives that account's full event stream. Events for non-shop orders (no
+// matching out_trade_no in shop_orders) are acked 200 as a harmless no-op.
+func (s *Shop) handleStripeWebhook(c *gin.Context) {
+	if !s.stripe.HasWebhookSecret() {
+		c.String(http.StatusServiceUnavailable, "stripe webhook not configured")
+		return
 	}
-	_ = c.Request.ParseForm()
-	for k, v := range c.Request.PostForm {
-		form[k] = v
-	}
-
-	note, err := s.gw.VerifyNotify(form)
+	const maxBody = 1 << 20 // 1 MiB — Stripe payloads are small
+	payload, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBody))
 	if err != nil {
-		log.Warnf("shop: notify signature reject: %v", err)
-		c.String(http.StatusBadRequest, "fail")
+		c.String(http.StatusBadRequest, "read error")
 		return
 	}
-	if note.AppID != s.gw.AppID() {
-		log.Warnf("shop: notify pid mismatch want=%s got=%s", s.gw.AppID(), note.AppID)
-		c.String(http.StatusBadRequest, "fail")
-		return
-	}
-	if !strings.EqualFold(note.TradeStatus, "TRADE_SUCCESS") {
-		// Other statuses (WAIT_BUYER_PAY etc) aren't terminal — ack with
-		// success so Z-Pay stops retrying.
-		c.String(http.StatusOK, "success")
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-	defer cancel()
-
-	// Defensive amount check — the gateway is authoritative but if a
-	// fortuitous bug ever lets a $1 order trade for the QR of a $100 one,
-	// we'd rather refuse than overdeliver. Compare to 2 decimals.
-	o, err := s.db.GetOrder(ctx, note.OutTradeNo)
+	event, err := s.stripe.ConstructEvent(payload, c.GetHeader("Stripe-Signature"))
 	if err != nil {
-		log.Warnf("shop: notify for unknown order %s", note.OutTradeNo)
-		c.String(http.StatusBadRequest, "fail")
-		return
-	}
-	if want := fmt.Sprintf("%.2f", o.AmountCNY); want != strings.TrimSpace(note.TotalAmount) {
-		log.Warnf("shop: notify amount mismatch order=%s want=%s got=%s", o.OutTradeNo, want, note.TotalAmount)
-		c.String(http.StatusBadRequest, "fail")
+		log.Warnf("shop: stripe webhook signature verify failed: %v", err)
+		c.String(http.StatusBadRequest, "bad signature")
 		return
 	}
 
-	updated, err := s.db.MarkOrderPaidAndFulfil(ctx, note.OutTradeNo, note.TradeNo)
+	switch event.Type {
+	case stripe.EventTypeCheckoutSessionCompleted,
+		stripe.EventTypeCheckoutSessionAsyncPaymentSucceeded:
+		var sess stripe.CheckoutSession
+		if err := json.Unmarshal(event.Data.Raw, &sess); err != nil {
+			c.String(http.StatusBadRequest, "bad payload")
+			return
+		}
+		out := sess.Metadata["out_trade_no"]
+		if out == "" {
+			c.String(http.StatusOK, "ignored (no out_trade_no)")
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+		defer cancel()
+		o, err := s.db.GetOrder(ctx, out)
+		if errors.Is(err, ErrNotFound) {
+			// Not a shop order (e.g. a SaaS top-up on a shared account). Ack.
+			c.String(http.StatusOK, "order not found")
+			return
+		}
+		if err != nil {
+			log.Errorf("shop: stripe webhook get order %s: %v", out, err)
+			c.String(http.StatusInternalServerError, "lookup failed")
+			return
+		}
+		if err := s.applyStripeSession(ctx, o, &sess, "webhook"); err != nil {
+			// Transient (DB) failure — 500 so Stripe retries.
+			log.Warnf("shop: stripe webhook apply order=%s: %v", out, err)
+			c.String(http.StatusInternalServerError, "apply failed")
+			return
+		}
+	default:
+		// Other event types are acknowledged and ignored.
+	}
+	c.String(http.StatusOK, "ok")
+}
+
+// applyStripeSession settles a shop order from an authoritative Checkout
+// Session (a signed webhook payload or a live poll retrieval). It is a no-op
+// when the session hasn't been paid yet (async Alipay still processing), so the
+// poll path can call it repeatedly. Fulfilment (card pop + email) only fires on
+// the pending→paid transition; MarkOrderPaidAndFulfil's status guard keeps it
+// idempotent against webhook/poll races.
+func (s *Shop) applyStripeSession(ctx context.Context, o *Order, sess *stripe.CheckoutSession, source string) error {
+	if !settleable(o.Status) {
+		return nil
+	}
+	if sess == nil {
+		return errors.New("nil checkout session")
+	}
+	if sess.PaymentStatus != stripe.CheckoutSessionPaymentStatusPaid {
+		return nil // not settled yet — keep polling (async methods settle later)
+	}
+	if err := s.stripe.VerifyPaidSession(sess, o.AmountCNY); err != nil {
+		// Amount/currency tampering — refuse to fulfil. Terminal; logged.
+		log.Warnf("shop: stripe verify order=%s: %v", o.OutTradeNo, err)
+		return nil
+	}
+	tradeNo := sess.ID
+	if sess.PaymentIntent != nil && sess.PaymentIntent.ID != "" {
+		tradeNo = sess.PaymentIntent.ID
+	}
+	updated, err := s.db.MarkOrderPaidAndFulfil(ctx, o.OutTradeNo, tradeNo)
 	if errors.Is(err, ErrOrderNotPending) {
-		// Duplicate webhook — already credited. Ack so Z-Pay stops retrying.
-		c.String(http.StatusOK, "success")
-		return
+		return nil // already settled by a racing webhook/poll
 	}
 	if err != nil {
-		log.Errorf("shop: mark paid failed: %v", err)
-		c.String(http.StatusInternalServerError, "fail")
+		return err
+	}
+	log.Infof("shop: stripe [%s] settled order=%s amount=¥%.2f session=%s status=%s",
+		source, updated.OutTradeNo, updated.AmountCNY, sess.ID, updated.Status)
+	// Fire the delivery email; failures don't block — admin can resend. The
+	// goroutine deliberately uses its own background context (dispatchOrderEmail)
+	// since it must outlive this request/webhook.
+	go s.dispatchOrderEmail(updated) //nolint:gosec // G118: delivery email must outlive the request ctx, dispatchOrderEmail uses its own background ctx
+	return nil
+}
+
+// maybeSettleStripeOrder is the poll path: if an order is still pending and
+// carries a Stripe session id, retrieve the live session and settle it on the
+// spot. This makes settlement work even when no webhook is configured/delivered
+// (the buyer landing back on the order page, or the status poll, drives it).
+func (s *Shop) maybeSettleStripeOrder(ctx context.Context, o *Order) {
+	if o == nil || !settleable(o.Status) || o.PaySessionID == "" {
 		return
 	}
-
-	// Fire the email; failures don't block the ack — admin can resend.
-	go s.dispatchOrderEmail(updated)
-
-	c.String(http.StatusOK, "success")
+	sess, err := s.stripe.RetrieveSession(ctx, o.PaySessionID)
+	if err != nil {
+		log.Warnf("shop: stripe poll retrieve %s: %v", o.PaySessionID, err)
+		return
+	}
+	if err := s.applyStripeSession(ctx, o, sess, "poll"); err != nil {
+		log.Warnf("shop: stripe poll apply order=%s: %v", o.OutTradeNo, err)
+	}
 }
 
 // dispatchOrderEmail sends the delivery email and flips email_sent.
@@ -315,6 +395,13 @@ func (s *Shop) apiOrderStatus(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
+	}
+	// Poll-settle while the buyer's order page is auto-refreshing.
+	if settleable(o.Status) {
+		s.maybeSettleStripeOrder(ctx, o)
+		if refreshed, rerr := s.db.GetOrder(ctx, trade); rerr == nil {
+			o = refreshed
+		}
 	}
 	if email != "" && !strings.EqualFold(email, o.Email) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})

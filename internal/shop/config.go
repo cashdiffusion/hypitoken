@@ -40,8 +40,16 @@ type Config struct {
 	OrderTTL time.Duration `yaml:"order_ttl"`
 
 	// ZPay merchant credentials. Independent from saas.zpay so the shop
-	// can be billed under its own merchant account if desired.
+	// can be billed under its own merchant account if desired. Retained for
+	// config back-compat; the shop now collects via Stripe (see Stripe).
 	ZPay ZPayConfig `yaml:"zpay"`
+
+	// Stripe is the active payment gateway. The storefront redirects buyers to
+	// a Stripe-hosted Checkout page (card + Alipay); settlement lands via a
+	// signed webhook and a poll fallback. Independent from saas.stripe so the
+	// shop can run a different account/webhook if desired (it may reuse the
+	// same secret_key with its own webhook endpoint secret).
+	Stripe StripeConfig `yaml:"stripe"`
 
 	// SMTP for transactional email (order delivery). Independent from
 	// saas.smtp. Pointing the host at smtp.resend.com effectively makes
@@ -54,6 +62,23 @@ type ZPayConfig struct {
 	BaseURL string `yaml:"base_url"` // default https://zpayz.cn
 	PID     string `yaml:"pid"`
 	Key     string `yaml:"key"`
+}
+
+// StripeConfig configures the shop's Stripe hosted-Checkout gateway. Secret +
+// webhook values support the same `@/path/to/file` indirection as the rest of
+// the config (resolved by the caller in cmd/server). Currency defaults to CNY
+// since shop products are priced in CNY — charging CNY directly makes Alipay
+// natively eligible without Adaptive Pricing.
+type StripeConfig struct {
+	Enabled       bool   `yaml:"enabled"`
+	SecretKey     string `yaml:"secret_key"`
+	WebhookSecret string `yaml:"webhook_secret"`
+	Currency      string `yaml:"currency"`
+	// SuccessURLPrefix / CancelURL control where Stripe sends the buyer back.
+	// SuccessURLPrefix has /<out_trade_no>?session_id={CHECKOUT_SESSION_ID}
+	// appended per order; defaults to ReturnURLPrefix. CancelURL defaults to
+	// the per-product buy page (handled in the handler).
+	SuccessURLPrefix string `yaml:"success_url_prefix"`
 }
 
 // SMTPConfig is the same shape as saas.SMTPConfig — kept separate so the
@@ -82,6 +107,9 @@ func (c *Config) ApplyDefaults(_ string) {
 	}
 	if strings.TrimSpace(c.ZPay.BaseURL) == "" {
 		c.ZPay.BaseURL = "https://zpayz.cn"
+	}
+	if strings.TrimSpace(c.Stripe.Currency) == "" {
+		c.Stripe.Currency = "cny"
 	}
 	if c.SMTP.Port == 0 {
 		c.SMTP.Port = 587

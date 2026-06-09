@@ -85,6 +85,67 @@ func minorUnits(amount float64) int64 {
 type StripeSession struct {
 	SessionID    string
 	ClientSecret string
+	// URL is the Stripe-hosted Checkout page (only set for hosted-mode
+	// sessions created via CreateHostedCheckout; empty for custom-UI sessions).
+	URL string
+}
+
+// CreateHostedCheckout creates a hosted-UI-mode Checkout Session and returns the
+// session id + the Stripe-hosted page URL the buyer's browser should be
+// redirected to. This is the right shape for a server-rendered storefront (no
+// Stripe.js / Elements on our pages): Stripe owns the whole payment UI — card +
+// Alipay tabs and the localized amount — then redirects back to successURL.
+//
+// The single line item is priced in g.currency (CNY for the shop, whose
+// products are priced in CNY). Charging CNY directly makes Alipay natively
+// eligible (its home currency) and cards work in any currency, so no Adaptive
+// Pricing is needed here — unlike the USD top-up path. amount is the major-unit
+// charge (e.g. 9.90 CNY). successURL should contain Stripe's
+// {CHECKOUT_SESSION_ID} placeholder so the return page can poll-settle. extra
+// metadata is merged into the session (e.g. out_trade_no) for webhook/poll
+// mapping back to the order.
+func (g *StripeGateway) CreateHostedCheckout(ctx context.Context, outTradeNo string, amount float64, email, successURL, cancelURL, description string, extra map[string]string) (*StripeSession, error) {
+	meta := map[string]string{"out_trade_no": outTradeNo}
+	for k, v := range extra {
+		meta[k] = v
+	}
+	params := &stripe.CheckoutSessionCreateParams{
+		Mode:       stripe.String(string(stripe.CheckoutSessionModePayment)),
+		SuccessURL: stripe.String(successURL),
+		LineItems: []*stripe.CheckoutSessionCreateLineItemParams{{
+			Quantity: stripe.Int64(1),
+			PriceData: &stripe.CheckoutSessionCreateLineItemPriceDataParams{
+				Currency:   stripe.String(g.currency),
+				UnitAmount: stripe.Int64(minorUnits(amount)),
+				ProductData: &stripe.CheckoutSessionCreateLineItemPriceDataProductDataParams{
+					Name: stripe.String(description),
+				},
+			},
+		}},
+		Metadata: meta,
+	}
+	if cancelURL != "" {
+		params.CancelURL = stripe.String(cancelURL)
+	}
+	if email != "" {
+		params.CustomerEmail = stripe.String(email)
+	}
+	if g.pmcID != "" {
+		params.PaymentMethodConfiguration = stripe.String(g.pmcID)
+	}
+	sess, err := g.sc.V1CheckoutSessions.Create(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	return &StripeSession{SessionID: sess.ID, ClientSecret: sess.ClientSecret, URL: sess.URL}, nil
+}
+
+// VerifyPaidSession is the exported guard used by callers outside this package
+// (e.g. the shop): the session must be paid, in g.currency, and total at least
+// amount (major units). Returns nil when safe to fulfil. Wraps the same checks
+// the top-up path uses internally.
+func (g *StripeGateway) VerifyPaidSession(sess *stripe.CheckoutSession, amount float64) error {
+	return verifySessionForOrder(sess, amount, g.currency)
 }
 
 // CreateTopUpSession creates a custom-UI-mode Checkout Session for a wallet

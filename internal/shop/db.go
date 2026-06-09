@@ -97,6 +97,12 @@ CREATE TABLE shop_orders (
 CREATE INDEX idx_shop_orders_email ON shop_orders(email);
 CREATE INDEX idx_shop_orders_status ON shop_orders(status, created_at);
 `,
+	// v2 — Stripe hosted Checkout. pay_session_id holds the Stripe Checkout
+	// Session id (cs_…) so the poll path can retrieve+settle an order even when
+	// the webhook never arrives. pay_url now holds the hosted-page URL.
+	`
+ALTER TABLE shop_orders ADD COLUMN pay_session_id TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // Open opens the shop SQLite at path with WAL + synchronous=FULL and
@@ -407,6 +413,7 @@ type Order struct {
 	TradeNo       string    `json:"trade_no,omitempty"`
 	PayURL        string    `json:"pay_url,omitempty"`
 	QRCode        string    `json:"qr_code,omitempty"`
+	PaySessionID  string    `json:"-"` // Stripe Checkout Session id (cs_…); never exposed
 	Fulfillment   string    `json:"fulfillment,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	PaidAt        time.Time `json:"paid_at,omitempty"`
@@ -414,7 +421,7 @@ type Order struct {
 	RemoteIP      string    `json:"remote_ip,omitempty"`
 }
 
-const orderCols = `out_trade_no, product_id, product_name, email, query_pass_hash, amount_cny, status, pay_method, trade_no, pay_url, qr_code, fulfillment, created_at, paid_at, email_sent, remote_ip`
+const orderCols = `out_trade_no, product_id, product_name, email, query_pass_hash, amount_cny, status, pay_method, trade_no, pay_url, qr_code, fulfillment, created_at, paid_at, email_sent, remote_ip, pay_session_id`
 
 func scanOrder(row interface{ Scan(...any) error }) (*Order, error) {
 	var o Order
@@ -422,7 +429,7 @@ func scanOrder(row interface{ Scan(...any) error }) (*Order, error) {
 	var emailSent int
 	if err := row.Scan(&o.OutTradeNo, &o.ProductID, &o.ProductName, &o.Email, &o.QueryPassHash,
 		&o.AmountCNY, &o.Status, &o.PayMethod, &o.TradeNo, &o.PayURL, &o.QRCode, &o.Fulfillment,
-		&c, &p, &emailSent, &o.RemoteIP); err != nil {
+		&c, &p, &emailSent, &o.RemoteIP, &o.PaySessionID); err != nil {
 		return nil, err
 	}
 	o.EmailSent = emailSent == 1
@@ -437,10 +444,10 @@ func (db *DB) CreateOrder(ctx context.Context, o *Order) error {
 	now := time.Now().Unix()
 	_, err := db.ExecContext(ctx, `INSERT INTO shop_orders
 		(out_trade_no, product_id, product_name, email, query_pass_hash, amount_cny,
-		 status, pay_method, trade_no, pay_url, qr_code, fulfillment, created_at, paid_at, email_sent, remote_ip)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, '', ?, 0, 0, ?)`,
+		 status, pay_method, trade_no, pay_url, qr_code, fulfillment, created_at, paid_at, email_sent, remote_ip, pay_session_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, '', ?, 0, 0, ?, ?)`,
 		o.OutTradeNo, o.ProductID, o.ProductName, o.Email, o.QueryPassHash, o.AmountCNY,
-		OrderPending, o.PayMethod, o.PayURL, o.QRCode, now, o.RemoteIP)
+		OrderPending, o.PayMethod, o.PayURL, o.QRCode, now, o.RemoteIP, o.PaySessionID)
 	if err != nil {
 		return err
 	}
@@ -548,10 +555,17 @@ func (db *DB) MarkOrderPaidAndFulfil(ctx context.Context, outTradeNo, tradeNo st
 	return o, nil
 }
 
-// lockPendingOrder reads the row with an UPDATE-style guard: if status
-// isn't pending, return ErrOrderNotPending without holding any row lock.
-// SQLite serializes writers so this is safe enough — the trailing UPDATE
-// in the caller transaction is the real consistency anchor.
+// lockPendingOrder reads the row with an UPDATE-style guard: if status is
+// already settled (paid/await_manual), return ErrOrderNotPending without
+// holding any row lock. SQLite serializes writers so this is safe enough — the
+// trailing UPDATE in the caller transaction is the real consistency anchor.
+//
+// An `expired` order is still settleable: Stripe redirect methods (Alipay) are
+// asynchronous, so a buyer can pay, abandon the return redirect, and have the
+// payment confirm (via webhook retry / a later poll) AFTER the 30-min expiry
+// sweeper has flipped the order to `expired`. Refusing to settle those would
+// take real money without delivering the card. Mirrors the SaaS wallet's
+// pending-OR-expired credit guard.
 func lockPendingOrder(ctx context.Context, tx *sql.Tx, outTradeNo string) (*Order, error) {
 	row := tx.QueryRowContext(ctx, `SELECT `+orderCols+` FROM shop_orders WHERE out_trade_no = ?`, outTradeNo)
 	o, err := scanOrder(row)
@@ -561,7 +575,7 @@ func lockPendingOrder(ctx context.Context, tx *sql.Tx, outTradeNo string) (*Orde
 	if err != nil {
 		return nil, err
 	}
-	if o.Status != OrderPending {
+	if o.Status != OrderPending && o.Status != OrderExpired {
 		return nil, ErrOrderNotPending
 	}
 	return o, nil

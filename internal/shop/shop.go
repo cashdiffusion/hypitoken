@@ -23,7 +23,7 @@ import (
 type Shop struct {
 	cfg        Config
 	db         *DB
-	gw         billing.Gateway // Z-Pay aggregator
+	stripe     *billing.StripeGateway // hosted Checkout (card + Alipay)
 	mailer     mail.Mailer
 	adminToken string
 	tpl        *templateSet
@@ -37,13 +37,13 @@ type Shop struct {
 // New returns a configured Shop. mailer may be nil — the constructor will
 // build one from cfg.SMTP. adminToken is the operator password used to
 // gate the /admin/* surface (typically cfg.AdminToken from the top-level
-// config).
-func New(cfg Config, store *DB, gw billing.Gateway, mailer mail.Mailer, adminToken string) (*Shop, error) {
+// config). stripe is the hosted-Checkout payment gateway (card + Alipay).
+func New(cfg Config, store *DB, stripe *billing.StripeGateway, mailer mail.Mailer, adminToken string) (*Shop, error) {
 	if store == nil {
 		return nil, errors.New("shop: db is required")
 	}
-	if gw == nil {
-		return nil, errors.New("shop: z-pay gateway is required")
+	if stripe == nil {
+		return nil, errors.New("shop: stripe gateway is required")
 	}
 	if mailer == nil {
 		mailer = NewMailer(cfg.SMTP, cfg.SiteName)
@@ -55,7 +55,7 @@ func New(cfg Config, store *DB, gw billing.Gateway, mailer mail.Mailer, adminTok
 	return &Shop{
 		cfg:        cfg,
 		db:         store,
-		gw:         gw,
+		stripe:     stripe,
 		mailer:     mailer,
 		adminToken: strings.TrimSpace(adminToken),
 		tpl:        tpl,
@@ -74,9 +74,10 @@ func (s *Shop) RegisterRoutes(engine *gin.Engine) {
 	engine.POST("/order", s.handleQuery)
 	engine.GET("/order/:trade_no", s.pageOrderDetail)
 
-	// Z-Pay payment notify (server-to-server). Public, signature-verified.
-	engine.GET("/notify", s.handleNotify)
-	engine.POST("/notify", s.handleNotify) // some gateways send POST
+	// Stripe webhook (server-to-server). Public, signature-verified. Card
+	// settles via checkout.session.completed; Alipay settles async via
+	// checkout.session.async_payment_succeeded.
+	engine.POST("/stripe/webhook", s.handleStripeWebhook)
 
 	// JSON API (used by the storefront's small bits of JS).
 	api := engine.Group("/api")

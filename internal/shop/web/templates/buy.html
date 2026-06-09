@@ -93,21 +93,24 @@
         <div>
           <div class="flex items-baseline justify-between mb-3">
             <label class="text-[13px] font-medium text-foreground">支付方式</label>
+            <span class="eyebrow text-muted-fg opacity-80">Stripe 安全收银台</span>
           </div>
-          <div>
-            <label class="pay-pick">
-              <input type="radio" name="pay_method" value="alipay" checked>
-              <div class="flex-1">
-                <div class="text-[14px] font-medium text-foreground">支付宝</div>
-                <div class="eyebrow mt-0.5 text-muted-fg opacity-80">alipay</div>
-              </div>
-            </label>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="pill text-foreground bg-secondary border-border-strong">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-primary"></span>银行卡
+            </span>
+            <span class="pill text-foreground bg-secondary border-border-strong">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-primary"></span>支付宝 Alipay
+            </span>
           </div>
+          <p class="mt-2 text-[12px] text-muted-fg opacity-80 leading-relaxed">
+            点击下方按钮将跳转至 Stripe 托管的安全收银台完成支付，支持银行卡与支付宝。
+          </p>
         </div>
 
         <div class="hairline-t pt-7">
           <button type="submit" class="w-full btn-primary text-[14px] py-3.5">
-            <span>创建订单 · 应付 ¥{{printf "%.2f" .Product.PriceCNY}}</span>
+            <span>前往支付 · 应付 ¥{{printf "%.2f" .Product.PriceCNY}}</span>
             <span class="arrow">→</span>
           </button>
           <p class="mt-4 text-center text-[12px] text-muted-fg opacity-80">

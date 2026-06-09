@@ -247,10 +247,6 @@ shop:
   site_name: "Nova Shop"
   site_url: "https://shop.example.com"
 
-  # Public URL that Z-Pay will hit on payment success. Must be reachable
-  # from Z-Pay's servers — typically your Caddy / nginx → 127.0.0.1:8319.
-  notify_url: "https://shop.example.com/notify"
-
   # Prefix the buyer's browser lands on after paying. The shop appends
   # /<out_trade_no>. Defaults to <site_url>/order if empty.
   return_url_prefix: "https://shop.example.com/order"
@@ -259,8 +255,24 @@ shop:
   # sweeper. Late notifications against expired orders are rejected.
   order_ttl: 30m
 
-  # Z-Pay merchant. Reuses the same protocol as saas.zpay but with its
-  # own credentials so the shop can be billed under its own merchant.
+  # Stripe hosted Checkout — the active payment gateway (card + Alipay).
+  # The storefront redirects buyers to a Stripe-hosted page; settlement
+  # lands via the webhook below plus a poll fallback. May reuse the SaaS
+  # account's secret_key, but MUST use its own webhook endpoint secret
+  # (create a separate webhook endpoint → https://shop.example.com/stripe/webhook).
+  stripe:
+    enabled: true
+    secret_key: "@/etc/hypitoken/stripe_secret_key"     # sk_live_… or @/path
+    webhook_secret: "@/etc/hypitoken/shop_stripe_webhook_secret"  # whsec_… or @/path
+    # Products are priced in CNY; charging CNY directly makes Alipay natively
+    # eligible (card works in any currency). No Adaptive Pricing needed.
+    currency: "cny"
+    # Where Stripe sends the buyer on success. Stripe appends the session id.
+    # Defaults to return_url_prefix (then <site_url>/order) if empty.
+    success_url_prefix: "https://shop.example.com/order"
+
+  # Z-Pay merchant — retained for config back-compat; the shop now collects
+  # via Stripe (above). Leave blank unless re-enabling the legacy gateway.
   zpay:
     base_url: "https://zpayz.cn"
     pid: ""

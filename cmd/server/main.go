@@ -270,21 +270,12 @@ func main() {
 	// own SQLite + Z-Pay gateway + SMTP mailer onto its own gin engine,
 	// attached to the server's endpoint list so Start()/Shutdown() see it.
 	if cfg.Shop.Enabled && cfg.Endpoints.Shop.IsEnabled() {
-		// Same @file convention used by saas.zpay.key — keeps secrets out
-		// of the main config file when the operator prefers it.
-		shopZPayKey, err := loadKeyFile(cfg.Shop.ZPay.Key)
+		// Shop collects via Stripe hosted Checkout (card + Alipay). Secret +
+		// webhook values support the @file convention to keep them out of the
+		// committed config.
+		shopGw, err := buildShopStripeGateway(cfg.Shop)
 		if err != nil {
-			log.Fatalf("shop zpay key: %v", err)
-		}
-		shopGw, err := billing.NewZPayGateway(billing.ZPayParams{
-			BaseURL:   cfg.Shop.ZPay.BaseURL,
-			PID:       cfg.Shop.ZPay.PID,
-			Key:       shopZPayKey,
-			NotifyURL: cfg.Shop.NotifyURL,
-			ReturnURL: cfg.Shop.SiteURL, // generic return; per-order URL is the buyer-facing page
-		})
-		if err != nil {
-			log.Fatalf("shop zpay: %v", err)
+			log.Fatalf("shop stripe: %v", err)
 		}
 		shopDB, err := shop.Open(cfg.Shop.DBPath)
 		if err != nil {
@@ -306,7 +297,7 @@ func main() {
 		addr := fmt.Sprintf("%s:%d", cfg.Endpoints.Shop.Host, cfg.Endpoints.Shop.Port)
 		s.AttachExtraEndpoint("shop", addr, shopEng)
 		saasShutdown = append(saasShutdown, func() { _ = shopDB.Close() })
-		log.Infof("shop: enabled at %s (site=%q notify=%q)", addr, cfg.Shop.SiteName, cfg.Shop.NotifyURL)
+		log.Infof("shop: enabled at %s (site=%q stripe currency=%s webhook=%t)", addr, cfg.Shop.SiteName, shopGw.Currency(), shopGw.HasWebhookSecret())
 	}
 
 	for _, ep := range s.Endpoints() {
@@ -465,6 +456,29 @@ func buildStripeGateway(s saas.Config) (*billing.StripeGateway, error) {
 		Currency:                   sc.Currency,
 		PaymentMethodConfiguration: sc.PaymentMethodConfiguration,
 		ReturnURL:                  returnURL,
+	})
+}
+
+// buildShopStripeGateway constructs the shop's Stripe hosted-Checkout gateway.
+// Resolves the @path indirection on the secret + webhook secret. The shop may
+// reuse the SaaS account's secret_key with its own webhook endpoint secret.
+func buildShopStripeGateway(c shop.Config) (*billing.StripeGateway, error) {
+	sc := c.Stripe
+	secret, err := loadKeyFile(sc.SecretKey)
+	if err != nil {
+		return nil, fmt.Errorf("secret_key: %w", err)
+	}
+	if strings.TrimSpace(secret) == "" {
+		return nil, fmt.Errorf("secret_key is required (shop now collects via Stripe)")
+	}
+	whsec, err := loadKeyFile(sc.WebhookSecret)
+	if err != nil {
+		return nil, fmt.Errorf("webhook_secret: %w", err)
+	}
+	return billing.NewStripeGateway(billing.StripeParams{
+		SecretKey:     secret,
+		WebhookSecret: whsec,
+		Currency:      sc.Currency,
 	})
 }
 
