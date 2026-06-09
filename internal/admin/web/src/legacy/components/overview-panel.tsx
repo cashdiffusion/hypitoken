@@ -33,8 +33,12 @@ export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
       const from = `${fromD.getFullYear()}-${pad(fromD.getMonth() + 1)}-${pad(fromD.getDate())}`;
       const to = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
       const [d, all, hr, walletTotals] = await Promise.all([
-        api<RequestsResp>(`/admin/api/requests?limit=1&from=${from}&to=${to}`),
-        api<RequestsResp>(`/admin/api/requests?limit=1`),
+        // anon=1: the console must never expose real client identities (token
+        // labels or masked sk-… tokens). The backend returns pseudonymized
+        // by_client aggregates (Alice/Bob/…) even for operators here. Real
+        // labels live on the /admin management page only.
+        api<RequestsResp>(`/admin/api/requests?limit=1&from=${from}&to=${to}&anon=1`),
+        api<RequestsResp>(`/admin/api/requests?limit=1&anon=1`),
         api<HourlyResp>(`/admin/api/requests/hourly?hours=24`),
         // Fleet wallet totals — sum across all SaaS users of charges
         // post-multiplier. Powers the "Saved by us" card. SaaS-only

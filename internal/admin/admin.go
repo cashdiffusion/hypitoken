@@ -1266,14 +1266,20 @@ func (h *Handler) handleRequestsQuery(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if c.GetBool(ctxKeyPrivileged) {
+	// anon=1 forces the anonymized projection even for an operator. The
+	// /console overview passes it so client identities (real token labels or
+	// masked sk-… tokens) NEVER reach the browser there — the console mirrors
+	// the public-status/cpa-claude pseudonym scheme. Real labels stay on the
+	// /admin management surface (its requests/credentials tabs omit anon).
+	if c.GetBool(ctxKeyPrivileged) && c.Query("anon") != "1" {
 		h.remapDisplayNames(res.Entries)
 		res.ByClient = h.remapByClient(res.ByClient)
 	} else {
-		// Ordinary signed-in users see only anonymized aggregates: the raw
-		// per-request ledger and real client labels stay operator-only.
-		// ByClient keys are still masked tokens here (pre-remap), so the
-		// pseudonym map keys off a stable identifier.
+		// Ordinary signed-in users — and the operator's own /console overview
+		// (anon=1) — see only anonymized aggregates: the raw per-request
+		// ledger and real client labels stay operator-only. ByClient keys are
+		// still masked tokens here (pre-remap), so the pseudonym map keys off
+		// a stable identifier.
 		res.Entries = nil
 		res.ByClient = anonymizeByClient(res.ByClient)
 	}

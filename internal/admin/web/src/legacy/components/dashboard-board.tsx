@@ -889,7 +889,10 @@ export function DashboardBoard({
         <TopList
           title={t("legacy.topClients")}
           sub={t("legacy.topModelsBy")}
-          titleAdornment={publicView ? <PseudonymHint /> : undefined}
+          // This board is console-only and its by_client keys are always
+          // anonymized server-side (the /console fetch passes anon=1), so the
+          // pseudonym hint applies for operators too — not just publicView.
+          titleAdornment={<PseudonymHint />}
           rows={
             reqData
               ? Object.entries(reqData.by_client)
