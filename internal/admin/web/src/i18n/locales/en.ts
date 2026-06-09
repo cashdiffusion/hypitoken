@@ -482,16 +482,18 @@ export default {
   },
 
   home: {
-    badge: "Self-hosted LLM API gateway",
-    titleA: "One gateway for ",
-    titleB: "Claude & Codex.",
-    sub: "A reverse proxy for LLM clients with credential-pool routing, sticky sessions, transparent billing, and full Claude Code compatibility, including <strong>advisor, extended thinking, and sub-agents</strong>.",
-    ctaPrimary: "Get started",
+    badge: "Hit Claude Code weekly limits? There's a fix",
+    titleA: "Claude API at ",
+    titleB: "30% of official price.",
+    sub: "Save up to <strong>70% vs Claude</strong> and <strong>95% vs OpenAI</strong> — no weekly limits, fully compatible with Claude Code, Codex, advisor, extended thinking, and sub-agents. Start in under 2 minutes.",
+    ctaPrimary: "Start with free credit",
     ctaDocs: "Read the docs",
     bullets: {
-      advisor: "Advisor & sub-agent support",
-      compat: "Official CLI compatible",
-      perToken: "Per-token spend control",
+      claudePrice: "30% of official Claude pricing",
+      openaiPrice: "5% of OpenAI pricing",
+      noLimits: "No weekly limits",
+      ccCompat: "Claude Code compatible",
+      fastStart: "Start in 2 minutes",
     },
     compatStrip: "Compatible with",
 

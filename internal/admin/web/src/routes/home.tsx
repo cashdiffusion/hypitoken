@@ -392,7 +392,13 @@ function Hero({ t }: { t: (k: string) => string }) {
           {...heroAnim(0.62)}
           className="mt-9 flex flex-wrap items-center justify-center gap-2.5"
         >
-          {["home.bullets.advisor", "home.bullets.compat", "home.bullets.perToken"].map((k) => (
+          {[
+            "home.bullets.claudePrice",
+            "home.bullets.openaiPrice",
+            "home.bullets.noLimits",
+            "home.bullets.ccCompat",
+            "home.bullets.fastStart",
+          ].map((k) => (
             <span
               key={k}
               className="glass-dark inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-white/80"

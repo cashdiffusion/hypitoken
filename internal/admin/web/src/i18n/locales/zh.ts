@@ -477,16 +477,18 @@ export default {
   },
 
   home: {
-    badge: "自托管 LLM API 网关",
-    titleA: "统一接入 ",
-    titleB: "Claude 与 Codex。",
-    sub: "面向 LLM 客户端的反向代理：凭证池调度、粘性会话、透明计费，并完整兼容 Claude Code 的 <strong>advisor、深度思考和子 agent</strong>。",
-    ctaPrimary: "立即开始",
+    badge: "Claude Code 周限额用完了？有解法",
+    titleA: "Claude API，仅需 ",
+    titleB: "官方价的 30%。",
+    sub: "最高可省 <strong>Claude 70%</strong>、<strong>OpenAI 95%</strong> —— 没有周限额，完整兼容 Claude Code、Codex、advisor、深度思考与子 agent。2 分钟即可开始。",
+    ctaPrimary: "领取额度，免费开始",
     ctaDocs: "阅读文档",
     bullets: {
-      advisor: "支持 advisor 与子 agent",
-      compat: "兼容官方 CLI",
-      perToken: "按令牌控制额度",
+      claudePrice: "Claude 官方价 3 折",
+      openaiPrice: "OpenAI 官方价 1/20",
+      noLimits: "没有周限额",
+      ccCompat: "兼容 Claude Code",
+      fastStart: "2 分钟即可开始",
     },
     compatStrip: "原生兼容",
 
