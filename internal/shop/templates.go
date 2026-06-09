@@ -60,6 +60,14 @@ func parseTemplates() (*templateSet, error) {
 	return out, nil
 }
 
+// curSymbol maps a currency code to its display symbol (¥ for CNY, $ for USD).
+func curSymbol(currency string) string {
+	if NormalizeCurrency(currency) == CurrencyUSD {
+		return "$"
+	}
+	return "¥"
+}
+
 var tplFuncs = template.FuncMap{
 	"add": func(a, b int) int { return a + b },
 	"seq": func(n int) []int {
@@ -72,6 +80,12 @@ var tplFuncs = template.FuncMap{
 	"fmtCNY": func(v float64) string {
 		return fmt.Sprintf("¥%.2f", v)
 	},
+	// money renders an amount in its currency, e.g. "¥30.00" or "$5.00".
+	"money": func(v float64, currency string) string {
+		return curSymbol(currency) + fmt.Sprintf("%.2f", v)
+	},
+	// curSymbol maps a currency code to its display symbol.
+	"curSymbol": curSymbol,
 	"fmtTime": func(t time.Time) string {
 		if t.IsZero() {
 			return "—"

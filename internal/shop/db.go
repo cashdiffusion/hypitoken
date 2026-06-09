@@ -35,6 +35,24 @@ const (
 	DeliveryCard = "card" // pop one row from shop_card_secrets
 )
 
+// Pricing currencies. A product is priced in exactly one of these; the order
+// inherits the product's currency at purchase time. CNY charges Stripe directly
+// (Alipay natively eligible); USD charges in USD with Adaptive Pricing so Stripe
+// localizes the presentment currency for the buyer (which keeps Alipay eligible
+// on a non-US account).
+const (
+	CurrencyCNY = "cny"
+	CurrencyUSD = "usd"
+)
+
+// NormalizeCurrency lowercases and validates a currency, defaulting to CNY.
+func NormalizeCurrency(c string) string {
+	if strings.EqualFold(strings.TrimSpace(c), CurrencyUSD) {
+		return CurrencyUSD
+	}
+	return CurrencyCNY
+}
+
 // ErrNotFound is returned by lookups that miss.
 var ErrNotFound = errors.New("not found")
 
@@ -103,6 +121,14 @@ CREATE INDEX idx_shop_orders_status ON shop_orders(status, created_at);
 	`
 ALTER TABLE shop_orders ADD COLUMN pay_session_id TEXT NOT NULL DEFAULT '';
 `,
+	// v3 — per-product pricing currency (cny | usd). The legacy price_cny /
+	// amount_cny columns now hold the amount in this currency (the name is
+	// kept to avoid a table rebuild). Existing rows default to cny, matching
+	// their historical meaning.
+	`
+ALTER TABLE shop_products ADD COLUMN currency TEXT NOT NULL DEFAULT 'cny';
+ALTER TABLE shop_orders   ADD COLUMN currency TEXT NOT NULL DEFAULT 'cny';
+`,
 }
 
 // Open opens the shop SQLite at path with WAL + synchronous=FULL and
@@ -169,10 +195,12 @@ func (db *DB) migrate() error {
 // --- Product CRUD ---
 
 type Product struct {
-	ID               int64     `json:"id"`
-	Name             string    `json:"name"`
-	Description      string    `json:"description"`
-	PriceCNY         float64   `json:"price_cny"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Price is the amount in Currency (stored in the legacy price_cny column).
+	PriceCNY         float64   `json:"price"`
+	Currency         string    `json:"currency"`
 	DeliveryType     string    `json:"delivery_type"`
 	DeliveryTemplate string    `json:"delivery_template"`
 	StockAvailable   int       `json:"stock_available"`
@@ -182,15 +210,16 @@ type Product struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-const productCols = `id, name, description, price_cny, delivery_type, delivery_template, stock_available, active, sort_order, created_at, updated_at`
+const productCols = `id, name, description, price_cny, currency, delivery_type, delivery_template, stock_available, active, sort_order, created_at, updated_at`
 
 func scanProduct(row interface{ Scan(...any) error }) (*Product, error) {
 	var p Product
 	var act int
 	var c, u int64
-	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.PriceCNY, &p.DeliveryType, &p.DeliveryTemplate, &p.StockAvailable, &act, &p.SortOrder, &c, &u); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.PriceCNY, &p.Currency, &p.DeliveryType, &p.DeliveryTemplate, &p.StockAvailable, &act, &p.SortOrder, &c, &u); err != nil {
 		return nil, err
 	}
+	p.Currency = NormalizeCurrency(p.Currency)
 	p.Active = act == 1
 	p.CreatedAt = time.Unix(c, 0)
 	p.UpdatedAt = time.Unix(u, 0)
@@ -201,10 +230,11 @@ func scanProduct(row interface{ Scan(...any) error }) (*Product, error) {
 // callers can pass StockAvailable=0; AppendCardSecrets bumps it.
 func (db *DB) CreateProduct(ctx context.Context, p *Product) error {
 	now := time.Now().Unix()
+	p.Currency = NormalizeCurrency(p.Currency)
 	res, err := db.ExecContext(ctx, `INSERT INTO shop_products
-		(name, description, price_cny, delivery_type, delivery_template, stock_available, active, sort_order, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
-		p.Name, p.Description, p.PriceCNY, p.DeliveryType, p.DeliveryTemplate,
+		(name, description, price_cny, currency, delivery_type, delivery_template, stock_available, active, sort_order, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+		p.Name, p.Description, p.PriceCNY, p.Currency, p.DeliveryType, p.DeliveryTemplate,
 		boolToInt(p.Active), p.SortOrder, now, now)
 	if err != nil {
 		return err
@@ -252,11 +282,12 @@ func (db *DB) ListProducts(ctx context.Context, activeOnly bool) ([]*Product, er
 // are untouched (stock is managed via Append/RemoveCardSecrets).
 func (db *DB) UpdateProduct(ctx context.Context, p *Product) error {
 	now := time.Now().Unix()
+	p.Currency = NormalizeCurrency(p.Currency)
 	res, err := db.ExecContext(ctx, `UPDATE shop_products SET
-		name = ?, description = ?, price_cny = ?, delivery_type = ?,
+		name = ?, description = ?, price_cny = ?, currency = ?, delivery_type = ?,
 		delivery_template = ?, active = ?, sort_order = ?, updated_at = ?
 		WHERE id = ?`,
-		p.Name, p.Description, p.PriceCNY, p.DeliveryType, p.DeliveryTemplate,
+		p.Name, p.Description, p.PriceCNY, p.Currency, p.DeliveryType, p.DeliveryTemplate,
 		boolToInt(p.Active), p.SortOrder, now, p.ID)
 	if err != nil {
 		return err
@@ -406,8 +437,9 @@ type Order struct {
 	ProductID     int64     `json:"product_id"`
 	ProductName   string    `json:"product_name"`
 	Email         string    `json:"email"`
-	QueryPassHash string    `json:"-"` // never expose
-	AmountCNY     float64   `json:"amount_cny"`
+	QueryPassHash string    `json:"-"`      // never expose
+	AmountCNY     float64   `json:"amount"` // amount in Currency (legacy column amount_cny)
+	Currency      string    `json:"currency"`
 	Status        string    `json:"status"`
 	PayMethod     string    `json:"pay_method"`
 	TradeNo       string    `json:"trade_no,omitempty"`
@@ -421,17 +453,18 @@ type Order struct {
 	RemoteIP      string    `json:"remote_ip,omitempty"`
 }
 
-const orderCols = `out_trade_no, product_id, product_name, email, query_pass_hash, amount_cny, status, pay_method, trade_no, pay_url, qr_code, fulfillment, created_at, paid_at, email_sent, remote_ip, pay_session_id`
+const orderCols = `out_trade_no, product_id, product_name, email, query_pass_hash, amount_cny, currency, status, pay_method, trade_no, pay_url, qr_code, fulfillment, created_at, paid_at, email_sent, remote_ip, pay_session_id`
 
 func scanOrder(row interface{ Scan(...any) error }) (*Order, error) {
 	var o Order
 	var c, p int64
 	var emailSent int
 	if err := row.Scan(&o.OutTradeNo, &o.ProductID, &o.ProductName, &o.Email, &o.QueryPassHash,
-		&o.AmountCNY, &o.Status, &o.PayMethod, &o.TradeNo, &o.PayURL, &o.QRCode, &o.Fulfillment,
+		&o.AmountCNY, &o.Currency, &o.Status, &o.PayMethod, &o.TradeNo, &o.PayURL, &o.QRCode, &o.Fulfillment,
 		&c, &p, &emailSent, &o.RemoteIP, &o.PaySessionID); err != nil {
 		return nil, err
 	}
+	o.Currency = NormalizeCurrency(o.Currency)
 	o.EmailSent = emailSent == 1
 	o.CreatedAt = time.Unix(c, 0)
 	if p > 0 {
@@ -442,11 +475,12 @@ func scanOrder(row interface{ Scan(...any) error }) (*Order, error) {
 
 func (db *DB) CreateOrder(ctx context.Context, o *Order) error {
 	now := time.Now().Unix()
+	o.Currency = NormalizeCurrency(o.Currency)
 	_, err := db.ExecContext(ctx, `INSERT INTO shop_orders
-		(out_trade_no, product_id, product_name, email, query_pass_hash, amount_cny,
+		(out_trade_no, product_id, product_name, email, query_pass_hash, amount_cny, currency,
 		 status, pay_method, trade_no, pay_url, qr_code, fulfillment, created_at, paid_at, email_sent, remote_ip, pay_session_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, '', ?, 0, 0, ?, ?)`,
-		o.OutTradeNo, o.ProductID, o.ProductName, o.Email, o.QueryPassHash, o.AmountCNY,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, '', ?, 0, 0, ?, ?)`,
+		o.OutTradeNo, o.ProductID, o.ProductName, o.Email, o.QueryPassHash, o.AmountCNY, o.Currency,
 		OrderPending, o.PayMethod, o.PayURL, o.QRCode, now, o.RemoteIP, o.PaySessionID)
 	if err != nil {
 		return err

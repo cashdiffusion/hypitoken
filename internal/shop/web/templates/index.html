@@ -61,7 +61,7 @@
           <div>
             <div class="eyebrow text-muted-fg opacity-80 mb-1">售价</div>
             <div class="font-display text-[32px] leading-none text-foreground num tracking-tight">
-              <span class="text-[18px] text-muted-fg align-top mr-0.5">¥</span>{{printf "%.2f" $p.PriceCNY}}
+              <span class="text-[18px] text-muted-fg align-top mr-0.5">{{curSymbol $p.Currency}}</span>{{printf "%.2f" $p.PriceCNY}}
             </div>
           </div>
           {{if eq $p.DeliveryType "card"}}

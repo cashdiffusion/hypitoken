@@ -96,6 +96,71 @@ func TestApplyStripeSessionPaid(t *testing.T) {
 	}
 }
 
+// usdPaidSession builds a paid Checkout Session for a USD-priced product.
+// With Adaptive Pricing the session currency + amount_total stay in USD even
+// though the buyer paid a converted local amount.
+func usdPaidSession(id string, usd float64) *stripe.CheckoutSession {
+	s := paidSession(id, usd)
+	s.Currency = stripe.CurrencyUSD
+	return s
+}
+
+// TestApplyStripeSessionUSD — a USD-priced order settles against a USD session.
+func TestApplyStripeSessionUSD(t *testing.T) {
+	db := openTestDB(t)
+	mailer := &chanMailer{sent: make(chan string, 1)}
+	s := newTestShop(t, db, mailer)
+	ctx := context.Background()
+
+	p := &Product{Name: "USD", PriceCNY: 5, Currency: CurrencyUSD, DeliveryType: DeliveryCard, Active: true}
+	if err := db.CreateProduct(ctx, p); err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	if _, err := db.AppendCardSecrets(ctx, p.ID, []string{"USD-CARD"}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	o := &Order{OutTradeNo: "USD1", ProductID: p.ID, ProductName: p.Name, Email: "a@b.c", QueryPassHash: "x", AmountCNY: 5, Currency: CurrencyUSD, PaySessionID: "cs_USD1"}
+	if err := db.CreateOrder(ctx, o); err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+	got, _ := db.GetOrder(ctx, "USD1")
+	if got.Currency != CurrencyUSD {
+		t.Fatalf("order currency = %q, want usd", got.Currency)
+	}
+
+	if err := s.applyStripeSession(ctx, got, usdPaidSession("cs_USD1", 5), "test"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	settled, _ := db.GetOrder(ctx, "USD1")
+	if settled.Status != OrderPaid || settled.Fulfillment != "USD-CARD" {
+		t.Fatalf("USD order not settled: status=%q fulfilment=%q", settled.Status, settled.Fulfillment)
+	}
+}
+
+// TestApplyStripeSessionCurrencyMismatch — a USD order must NOT settle against
+// a CNY session (currency tampering / wrong session); fulfilment is refused.
+func TestApplyStripeSessionCurrencyMismatch(t *testing.T) {
+	db := openTestDB(t)
+	s := newTestShop(t, db, &chanMailer{sent: make(chan string, 1)})
+	ctx := context.Background()
+
+	p := &Product{Name: "USD", PriceCNY: 5, Currency: CurrencyUSD, DeliveryType: DeliveryCard, Active: true}
+	_ = db.CreateProduct(ctx, p)
+	_, _ = db.AppendCardSecrets(ctx, p.ID, []string{"USD-CARD"})
+	o := &Order{OutTradeNo: "MIS1", ProductID: p.ID, ProductName: p.Name, Email: "a@b.c", QueryPassHash: "x", AmountCNY: 5, Currency: CurrencyUSD, PaySessionID: "cs_MIS1"}
+	_ = db.CreateOrder(ctx, o)
+	got, _ := db.GetOrder(ctx, "MIS1")
+
+	// CNY session (amount 5) against a USD order → currency mismatch.
+	if err := s.applyStripeSession(ctx, got, paidSession("cs_MIS1", 5), "test"); err != nil {
+		t.Fatalf("apply (mismatch should be a swallowed no-op): %v", err)
+	}
+	settled, _ := db.GetOrder(ctx, "MIS1")
+	if settled.Status != OrderPending {
+		t.Fatalf("status = %q, want pending (currency mismatch must not fulfil)", settled.Status)
+	}
+}
+
 // TestApplyStripeSessionUnpaidNoop — an async method still processing
 // (payment_status != paid) must NOT fulfil; the order stays pending so the
 // poll/webhook can settle it later.

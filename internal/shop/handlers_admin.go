@@ -273,6 +273,7 @@ func parseProductForm(c *gin.Context) (*Product, error) {
 		Name:             name,
 		Description:      strings.TrimSpace(c.PostForm("description")),
 		PriceCNY:         price,
+		Currency:         NormalizeCurrency(c.PostForm("currency")),
 		DeliveryType:     delivery,
 		DeliveryTemplate: c.PostForm("delivery_template"),
 		Active:           c.PostForm("active") == "1",

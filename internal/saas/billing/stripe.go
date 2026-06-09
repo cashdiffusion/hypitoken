@@ -104,7 +104,17 @@ type StripeSession struct {
 // {CHECKOUT_SESSION_ID} placeholder so the return page can poll-settle. extra
 // metadata is merged into the session (e.g. out_trade_no) for webhook/poll
 // mapping back to the order.
-func (g *StripeGateway) CreateHostedCheckout(ctx context.Context, outTradeNo string, amount float64, email, successURL, cancelURL, description string, extra map[string]string) (*StripeSession, error) {
+// currency is the presentment currency of the line item (e.g. "cny" or "usd").
+// When adaptivePricing is true, Stripe localizes that currency to the buyer's
+// locale at checkout — required for a USD-priced product to keep Alipay et al.
+// eligible on a non-US account. CNY-priced products pass adaptivePricing=false
+// (Alipay is natively eligible in its home currency, so no conversion is
+// needed). Pass currency="" to fall back to the gateway's configured currency.
+func (g *StripeGateway) CreateHostedCheckout(ctx context.Context, outTradeNo string, amount float64, currency string, adaptivePricing bool, email, successURL, cancelURL, description string, extra map[string]string) (*StripeSession, error) {
+	cur := strings.ToLower(strings.TrimSpace(currency))
+	if cur == "" {
+		cur = g.currency
+	}
 	meta := map[string]string{"out_trade_no": outTradeNo}
 	for k, v := range extra {
 		meta[k] = v
@@ -115,7 +125,7 @@ func (g *StripeGateway) CreateHostedCheckout(ctx context.Context, outTradeNo str
 		LineItems: []*stripe.CheckoutSessionCreateLineItemParams{{
 			Quantity: stripe.Int64(1),
 			PriceData: &stripe.CheckoutSessionCreateLineItemPriceDataParams{
-				Currency:   stripe.String(g.currency),
+				Currency:   stripe.String(cur),
 				UnitAmount: stripe.Int64(minorUnits(amount)),
 				ProductData: &stripe.CheckoutSessionCreateLineItemPriceDataProductDataParams{
 					Name: stripe.String(description),
@@ -123,6 +133,13 @@ func (g *StripeGateway) CreateHostedCheckout(ctx context.Context, outTradeNo str
 			},
 		}},
 		Metadata: meta,
+	}
+	// Always set Adaptive Pricing explicitly (true for USD localization, false
+	// for a direct CNY charge) so behaviour doesn't depend on the account's
+	// default — some accounts default it ON, which would silently convert a
+	// CNY-priced product for non-CNY buyers.
+	params.AdaptivePricing = &stripe.CheckoutSessionCreateAdaptivePricingParams{
+		Enabled: stripe.Bool(adaptivePricing),
 	}
 	if cancelURL != "" {
 		params.CancelURL = stripe.String(cancelURL)
@@ -141,11 +158,13 @@ func (g *StripeGateway) CreateHostedCheckout(ctx context.Context, outTradeNo str
 }
 
 // VerifyPaidSession is the exported guard used by callers outside this package
-// (e.g. the shop): the session must be paid, in g.currency, and total at least
-// amount (major units). Returns nil when safe to fulfil. Wraps the same checks
-// the top-up path uses internally.
-func (g *StripeGateway) VerifyPaidSession(sess *stripe.CheckoutSession, amount float64) error {
-	return verifySessionForOrder(sess, amount, g.currency)
+// (e.g. the shop): the session must be paid, in wantCurrency, and total at
+// least amount (major units). With Adaptive Pricing the session currency +
+// amount_total stay in the integration currency (what we priced in), even
+// though the buyer paid a converted local amount — so wantCurrency is the
+// product's pricing currency. Pass wantCurrency="" to skip the currency check.
+func (g *StripeGateway) VerifyPaidSession(sess *stripe.CheckoutSession, amount float64, wantCurrency string) error {
+	return verifySessionForOrder(sess, amount, strings.ToLower(strings.TrimSpace(wantCurrency)))
 }
 
 // CreateTopUpSession creates a custom-UI-mode Checkout Session for a wallet

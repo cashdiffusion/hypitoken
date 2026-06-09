@@ -70,7 +70,7 @@
             </td>
             <td class="px-5 py-3 text-foreground">{{.ProductName}}</td>
             <td class="px-5 py-3 text-muted-fg font-mono text-[12px]">{{.Email}}</td>
-            <td class="px-5 py-3 text-right num font-mono text-foreground">¥{{printf "%.2f" .AmountCNY}}</td>
+            <td class="px-5 py-3 text-right num font-mono text-foreground">{{money .AmountCNY .Currency}}</td>
             <td class="px-5 py-3">
               {{if eq .Status "paid"}}
                 <span class="pill text-primary border-primary-soft">已完成</span>

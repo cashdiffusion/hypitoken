@@ -36,8 +36,15 @@
         <input type="text" name="name" required value="{{.Product.Name}}" class="field">
       </label>
       <label class="space-y-2">
-        <span class="text-[13px] font-medium text-foreground block">价格（元）</span>
+        <span class="text-[13px] font-medium text-foreground block">价格</span>
         <input type="number" name="price_cny" step="0.01" min="0.01" required value="{{.Product.PriceCNY}}" class="field font-mono">
+      </label>
+      <label class="space-y-2">
+        <span class="text-[13px] font-medium text-foreground block">结算币种</span>
+        <select name="currency" class="field bg-card">
+          <option value="cny" {{if eq .Product.Currency "cny"}}selected{{end}}>人民币 CNY（¥，直接收款）</option>
+          <option value="usd" {{if eq .Product.Currency "usd"}}selected{{end}}>美元 USD（$，Adaptive Pricing 转换）</option>
+        </select>
       </label>
       <label class="space-y-2">
         <span class="text-[13px] font-medium text-foreground block">排序权重</span>

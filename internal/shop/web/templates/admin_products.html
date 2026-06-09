@@ -38,7 +38,7 @@
         {{range .Products}}
         <tr class="hairline-b last:border-b-0 hover:bg-secondary/50 transition-colors">
           <td class="px-5 py-4 text-foreground font-medium">{{.Name}}</td>
-          <td class="px-5 py-4 text-right font-mono num text-foreground">¥{{printf "%.2f" .PriceCNY}}</td>
+          <td class="px-5 py-4 text-right font-mono num text-foreground">{{money .PriceCNY .Currency}}</td>
           <td class="px-5 py-4 text-muted-fg eyebrow">{{deliveryLabel .DeliveryType}}</td>
           <td class="px-5 py-4 text-right font-mono num text-muted-fg">{{if eq .DeliveryType "card"}}{{.StockAvailable}}{{else}}—{{end}}</td>
           <td class="px-5 py-4">
@@ -77,8 +77,15 @@
         <input type="text" name="name" required class="field">
       </label>
       <label class="space-y-2">
-        <span class="text-[13px] font-medium text-foreground block">价格（元）</span>
+        <span class="text-[13px] font-medium text-foreground block">价格</span>
         <input type="number" name="price_cny" min="0.01" step="0.01" required class="field font-mono">
+      </label>
+      <label class="space-y-2">
+        <span class="text-[13px] font-medium text-foreground block">结算币种</span>
+        <select name="currency" class="field bg-card">
+          <option value="cny">人民币 CNY（¥，直接收款）</option>
+          <option value="usd">美元 USD（$，Adaptive Pricing 转换）</option>
+        </select>
       </label>
       <label class="space-y-2">
         <span class="text-[13px] font-medium text-foreground block">排序权重</span>

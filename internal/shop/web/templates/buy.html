@@ -26,7 +26,7 @@
         <div class="flex items-baseline justify-between">
           <dt class="eyebrow">售价</dt>
           <dd class="font-display text-[44px] leading-none text-foreground num tracking-tight">
-            <span class="text-[20px] text-muted-fg align-top">¥</span>{{printf "%.2f" .Product.PriceCNY}}
+            <span class="text-[20px] text-muted-fg align-top">{{curSymbol .Product.Currency}}</span>{{printf "%.2f" .Product.PriceCNY}}
           </dd>
         </div>
         <div class="flex items-baseline justify-between hairline-t pt-4">
@@ -110,7 +110,7 @@
 
         <div class="hairline-t pt-7">
           <button type="submit" class="w-full btn-primary text-[14px] py-3.5">
-            <span>前往支付 · 应付 ¥{{printf "%.2f" .Product.PriceCNY}}</span>
+            <span>前往支付 · 应付 {{money .Product.PriceCNY .Product.Currency}}</span>
             <span class="arrow">→</span>
           </button>
           <p class="mt-4 text-center text-[12px] text-muted-fg opacity-80">

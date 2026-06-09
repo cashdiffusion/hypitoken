@@ -105,7 +105,11 @@ func (s *Shop) handleCreateOrder(c *gin.Context) {
 	// can poll-settle. Cancel returns the buyer to the product page.
 	successURL := s.successURL(out)
 	cancelURL := fmt.Sprintf("%s/buy/%d", strings.TrimRight(s.cfg.SiteURL, "/"), p.ID)
-	sess, err := s.stripe.CreateHostedCheckout(ctx, out, p.PriceCNY, email, successURL, cancelURL, subject, nil)
+	// USD products charge in USD with Adaptive Pricing (Stripe localizes the
+	// presentment currency so Alipay stays eligible); CNY charges directly.
+	cur := NormalizeCurrency(p.Currency)
+	adaptive := cur == CurrencyUSD
+	sess, err := s.stripe.CreateHostedCheckout(ctx, out, p.PriceCNY, cur, adaptive, email, successURL, cancelURL, subject, nil)
 	if err != nil {
 		log.Errorf("shop: stripe checkout create failed: %v", err)
 		s.renderError(c, http.StatusBadGateway, "创建支付订单失败，请稍后重试", err)
@@ -119,6 +123,7 @@ func (s *Shop) handleCreateOrder(c *gin.Context) {
 		Email:         email,
 		QueryPassHash: hash,
 		AmountCNY:     p.PriceCNY,
+		Currency:      cur,
 		PayMethod:     "stripe",
 		PayURL:        sess.URL,
 		PaySessionID:  sess.SessionID,
@@ -307,7 +312,7 @@ func (s *Shop) applyStripeSession(ctx context.Context, o *Order, sess *stripe.Ch
 	if sess.PaymentStatus != stripe.CheckoutSessionPaymentStatusPaid {
 		return nil // not settled yet — keep polling (async methods settle later)
 	}
-	if err := s.stripe.VerifyPaidSession(sess, o.AmountCNY); err != nil {
+	if err := s.stripe.VerifyPaidSession(sess, o.AmountCNY, o.Currency); err != nil {
 		// Amount/currency tampering — refuse to fulfil. Terminal; logged.
 		log.Warnf("shop: stripe verify order=%s: %v", o.OutTradeNo, err)
 		return nil
@@ -323,8 +328,8 @@ func (s *Shop) applyStripeSession(ctx context.Context, o *Order, sess *stripe.Ch
 	if err != nil {
 		return err
 	}
-	log.Infof("shop: stripe [%s] settled order=%s amount=¥%.2f session=%s status=%s",
-		source, updated.OutTradeNo, updated.AmountCNY, sess.ID, updated.Status)
+	log.Infof("shop: stripe [%s] settled order=%s amount=%s%.2f(%s) session=%s status=%s",
+		source, updated.OutTradeNo, curSymbol(updated.Currency), updated.AmountCNY, updated.Currency, sess.ID, updated.Status)
 	// Fire the delivery email; failures don't block — admin can resend. The
 	// goroutine deliberately uses its own background context (dispatchOrderEmail)
 	// since it must outlive this request/webhook.

@@ -33,7 +33,7 @@
       <div class="bg-card p-5">
         <dt class="eyebrow mb-2">金额</dt>
         <dd class="font-display text-[22px] text-foreground num leading-none">
-          <span class="text-[12px] text-muted-fg align-top">¥</span>{{printf "%.2f" .Order.AmountCNY}}
+          <span class="text-[12px] text-muted-fg align-top">{{curSymbol .Order.Currency}}</span>{{printf "%.2f" .Order.AmountCNY}}
         </dd>
       </div>
       <div class="bg-card p-5">
