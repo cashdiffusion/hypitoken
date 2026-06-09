@@ -11,8 +11,15 @@ import {
   Network,
   ShieldCheck,
 } from "lucide-react";
-import { motion, useMotionValueEvent, useReducedMotion, useScroll } from "motion/react";
-import { lazy, type ReactNode, Suspense, useRef, useState } from "react";
+import {
+  animate,
+  motion,
+  useInView,
+  useMotionValueEvent,
+  useReducedMotion,
+  useScroll,
+} from "motion/react";
+import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { DiscordIcon } from "@/components/icons/discord";
@@ -60,7 +67,10 @@ export default function HomePage() {
       <div className="page-canvas relative z-10 mb-[460px] sm:mb-[600px]">
         <Hero t={t} />
 
-        {/* Compatible-with strip — infinite marquee */}
+        {/* Savings — pricing comparison (hierarchy #2: how much do I save?) */}
+        <Savings />
+
+        {/* Compatible-with strip — infinite marquee (hierarchy #3: compatibility) */}
         <section className="border-b border-border bg-muted/20 py-8">
           <div className="mx-auto max-w-7xl px-4 md:px-6">
             <p className="mb-5 text-center text-xs font-mono uppercase tracking-wider text-muted-foreground">
@@ -83,6 +93,38 @@ export default function HomePage() {
             </Marquee>
           </div>
         </section>
+
+        {/* How it works — answers "how fast can I start" */}
+        <section className="mx-auto max-w-7xl px-4 py-24 md:px-6">
+          <Reveal className="mb-16 max-w-2xl">
+            <SectionEyebrow>{t("home.workflowEyebrow")}</SectionEyebrow>
+            <h2 className="mt-3 font-display text-4xl font-semibold tracking-tight md:text-5xl">
+              {t("home.workflowTitle")}
+            </h2>
+          </Reveal>
+          <RevealStagger className="grid gap-4 md:grid-cols-3">
+            {steps.map((s, i) => (
+              <RevealItem key={s.titleKey}>
+                <SpotlightCard className="h-full">
+                  <div className="font-mono text-5xl font-semibold leading-none text-primary/30">
+                    {(i + 1).toString().padStart(2, "0")}
+                  </div>
+                  <h3 className="mt-4 font-display text-xl font-medium tracking-tight">
+                    {t(s.titleKey)}
+                  </h3>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                    {t(s.bodyKey)}
+                  </p>
+                </SpotlightCard>
+              </RevealItem>
+            ))}
+          </RevealStagger>
+        </section>
+
+        {/* Testimonials — vertical glass marquee (hierarchy #4: trust) */}
+        <Testimonials />
+
+        {/* ── Technical detail, below the fold (hierarchy #5: features) ── */}
 
         {/* Features — Bento grid */}
         <section className="mx-auto max-w-7xl px-4 py-24 md:px-6">
@@ -163,36 +205,6 @@ export default function HomePage() {
 
         {/* Capability constellation — interactive radial orbital timeline */}
         <FeatureOrbit t={t} />
-
-        {/* How it works */}
-        <section className="mx-auto max-w-7xl px-4 py-24 md:px-6">
-          <Reveal className="mb-16 max-w-2xl">
-            <SectionEyebrow>{t("home.workflowEyebrow")}</SectionEyebrow>
-            <h2 className="mt-3 font-display text-4xl font-semibold tracking-tight md:text-5xl">
-              {t("home.workflowTitle")}
-            </h2>
-          </Reveal>
-          <RevealStagger className="grid gap-4 md:grid-cols-3">
-            {steps.map((s, i) => (
-              <RevealItem key={s.titleKey}>
-                <SpotlightCard className="h-full">
-                  <div className="font-mono text-5xl font-semibold leading-none text-primary/30">
-                    {(i + 1).toString().padStart(2, "0")}
-                  </div>
-                  <h3 className="mt-4 font-display text-xl font-medium tracking-tight">
-                    {t(s.titleKey)}
-                  </h3>
-                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    {t(s.bodyKey)}
-                  </p>
-                </SpotlightCard>
-              </RevealItem>
-            ))}
-          </RevealStagger>
-        </section>
-
-        {/* Testimonials — vertical glass marquee */}
-        <Testimonials />
 
         {/* Community — social platforms (Discord) */}
         <Community />
@@ -689,6 +701,186 @@ function FeatureOrbit({ t }: { t: (k: string) => string }) {
         <p className="mt-2 text-center text-xs font-mono uppercase tracking-wider text-muted-foreground">
           {t("home.orbit.hint")}
         </p>
+      </div>
+    </section>
+  );
+}
+
+/* ── Savings (pricing comparison) ──────────────────────────────────────── */
+
+// CountUp — eases a number from 0 to `to` the first time it scrolls into view.
+// Honours reduced motion (renders the final value immediately).
+function CountUp({ to }: { to: number }) {
+  const reduce = useReducedMotion();
+  const ref = useRef<HTMLSpanElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-15%" });
+  const [n, setN] = useState(reduce ? to : 0);
+
+  useEffect(() => {
+    if (reduce || !inView) return;
+    const controls = animate(0, to, {
+      duration: 1.2,
+      ease: EASE,
+      onUpdate: (v) => setN(Math.round(v)),
+    });
+    return () => controls.stop();
+  }, [inView, to, reduce]);
+
+  return <span ref={ref}>{n}</span>;
+}
+
+// SavingsGauge — a radial dial. The arc sweeps to `savePct` (the headline win,
+// nearly-full for OpenAI) while the centre counts up to `payPct` (what you
+// actually pay). The arc draws itself on scroll-in via strokeDashoffset.
+function SavingsGauge({
+  payPct,
+  savePct,
+  gradId,
+}: {
+  payPct: number;
+  savePct: number;
+  gradId: string;
+}) {
+  const reduce = useReducedMotion();
+  const R = 58;
+  const C = 2 * Math.PI * R;
+  const offset = C * (1 - savePct / 100);
+
+  return (
+    <div className="relative mx-auto aspect-square w-40">
+      <svg viewBox="0 0 140 140" className="h-full w-full -rotate-90" role="img">
+        <title>{`${savePct}% saved`}</title>
+        <defs>
+          <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#6ee7b7" />
+            <stop offset="55%" stopColor="#34d399" />
+            <stop offset="100%" stopColor="#22d3ee" />
+          </linearGradient>
+        </defs>
+        <circle cx="70" cy="70" r={R} fill="none" strokeWidth="9" className="stroke-muted" />
+        <motion.circle
+          cx="70"
+          cy="70"
+          r={R}
+          fill="none"
+          strokeWidth="9"
+          strokeLinecap="round"
+          stroke={`url(#${gradId})`}
+          strokeDasharray={C}
+          initial={{ strokeDashoffset: reduce ? offset : C }}
+          whileInView={{ strokeDashoffset: offset }}
+          viewport={{ once: true, margin: "-15%" }}
+          transition={{ duration: 1.3, ease: EASE }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span
+          className="bg-clip-text font-display text-5xl font-semibold tracking-tight text-transparent"
+          style={{ backgroundImage: "linear-gradient(120deg, #6ee7b7, #34d399 55%, #22d3ee)" }}
+        >
+          <CountUp to={payPct} />%
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// The "how much do I save" beat — hierarchy #2. The 30% / 5% figures are the
+// prod default access-group multipliers (claude 0.3, codex 0.05), so this
+// stays consistent with the effective price a visitor sees one click later on
+// /pricing. Kept to a light compare — full per-model rates live there.
+function Savings() {
+  const { t } = useTranslation();
+  const cards = [
+    {
+      name: t("home.savings.claudeName"),
+      pay: 30,
+      save: 70,
+      saveLabel: t("home.savings.claudeSave"),
+      gradId: "gauge-claude",
+    },
+    {
+      name: t("home.savings.openaiName"),
+      pay: 5,
+      save: 95,
+      saveLabel: t("home.savings.openaiSave"),
+      gradId: "gauge-openai",
+    },
+  ];
+  const chips = [
+    t("home.savings.chipNoSub"),
+    t("home.savings.chipPerToken"),
+    t("home.savings.chipItemized"),
+  ];
+
+  return (
+    <section className="relative overflow-hidden border-b border-border">
+      <BackgroundMesh />
+      <div className="relative mx-auto max-w-7xl px-4 py-24 md:px-6">
+        <Reveal className="mx-auto mb-12 max-w-2xl text-center">
+          <SectionEyebrow>{t("home.savingsEyebrow")}</SectionEyebrow>
+          <h2 className="mt-3 font-display text-4xl font-semibold tracking-tight md:text-5xl">
+            {t("home.savingsTitle")}
+          </h2>
+          <p className="mt-3 text-lg text-muted-foreground">{t("home.savingsSub")}</p>
+        </Reveal>
+
+        {/* Bento: two gauge dials over a full-width highlight bar */}
+        <RevealStagger className="grid gap-4 md:grid-cols-6">
+          {cards.map((c) => (
+            <RevealItem key={c.name} className="md:col-span-3">
+              <SpotlightCard className="h-full">
+                <div className="flex items-center justify-between">
+                  <span className="font-display text-xl font-medium tracking-tight">{c.name}</span>
+                  <span className="inline-flex items-center rounded-full bg-success/15 px-2.5 py-1 text-xs font-medium text-success">
+                    {c.saveLabel}
+                  </span>
+                </div>
+
+                <div className="mt-6">
+                  <SavingsGauge payPct={c.pay} savePct={c.save} gradId={c.gradId} />
+                </div>
+
+                <p className="mt-5 text-center text-sm text-muted-foreground">
+                  {t("home.savings.ofOfficial")} ·{" "}
+                  <span className="text-foreground/85">
+                    {c.save}% {t("home.savings.saved")}
+                  </span>
+                </p>
+              </SpotlightCard>
+            </RevealItem>
+          ))}
+
+          <RevealItem className="md:col-span-6">
+            <SpotlightCard className="h-full" tiltDeg={0}>
+              <div className="flex flex-col items-start gap-6 md:flex-row md:items-center md:justify-between">
+                <div className="max-w-xl">
+                  <p className="font-display text-2xl font-semibold tracking-tight">
+                    {t("home.savings.noLimitsTitle")}
+                  </p>
+                  <p className="mt-1.5 text-sm text-muted-foreground">
+                    {t("home.savings.noLimitsSub")}
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {chips.map((chip) => (
+                      <span
+                        key={chip}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/50 px-3 py-1 text-xs text-foreground/80 backdrop-blur"
+                      >
+                        <Check className="h-3.5 w-3.5 text-primary" /> {chip}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <Magnetic strength={0.3} className="shrink-0">
+                  <PrimaryLink to="/pricing">
+                    {t("home.savings.cta")} <ArrowRight className="h-4 w-4" />
+                  </PrimaryLink>
+                </Magnetic>
+              </div>
+            </SpotlightCard>
+          </RevealItem>
+        </RevealStagger>
       </div>
     </section>
   );

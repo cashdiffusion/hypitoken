@@ -495,6 +495,27 @@ export default {
       ccCompat: "Claude Code compatible",
       fastStart: "Start in 2 minutes",
     },
+
+    savingsEyebrow: "Savings",
+    savingsTitle: "A fraction of official API pricing.",
+    savingsSub:
+      "Same models, same official rates — billed at your group multiplier. No subscription, no weekly limits.",
+    savings: {
+      claudeName: "Claude API",
+      openaiName: "OpenAI API",
+      official: "Official price",
+      ofOfficial: "of official price",
+      claudeSave: "Save 70%",
+      openaiSave: "Save 95%",
+      noLimitsTitle: "No weekly limits.",
+      noLimitsSub: "Keep building past the point where Claude Code subscriptions cut you off.",
+      cta: "See full pricing",
+      saved: "saved",
+      chipNoSub: "No subscription",
+      chipPerToken: "Per-token billing",
+      chipItemized: "Itemized & transparent",
+    },
+
     compatStrip: "Compatible with",
 
     featuresEyebrow: "Engineering",

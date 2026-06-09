@@ -490,6 +490,26 @@ export default {
       ccCompat: "兼容 Claude Code",
       fastStart: "2 分钟即可开始",
     },
+
+    savingsEyebrow: "省钱",
+    savingsTitle: "只付官方 API 价格的零头。",
+    savingsSub: "同样的模型、同样的官方目录价，按你的分组倍率计费。无需订阅，没有周限额。",
+    savings: {
+      claudeName: "Claude API",
+      openaiName: "OpenAI API",
+      official: "官方价",
+      ofOfficial: "官方价",
+      claudeSave: "省 70%",
+      openaiSave: "省 95%",
+      noLimitsTitle: "没有周限额。",
+      noLimitsSub: "在 Claude Code 订阅把你掐断的地方，继续往下写。",
+      cta: "查看完整价格",
+      saved: "已省下",
+      chipNoSub: "无需订阅",
+      chipPerToken: "按 token 计费",
+      chipItemized: "明细透明",
+    },
+
     compatStrip: "原生兼容",
 
     featuresEyebrow: "工程",
