@@ -1,5 +1,5 @@
 // Package health probes upstream credentials (both OAuth and API-key) using
-// the standard Claude Code 2.1.126 request format captured in crack/oauth/.
+// the standard Claude Code 2.1.126 request format captured in cc-core/crack/oauth/.
 // Only claude-haiku is probed per credential — it's the cheapest model and a
 // successful probe implies the credential is usable for all Claude models.
 package health
@@ -278,7 +278,7 @@ func (c *Checker) probe(ctx context.Context, a *auth.Auth, provider, model strin
 }
 
 // probeAnthropic sends a standard Claude Code quota-probe request.
-// Format matches crack/oauth/rows/06-POST-api.anthropic.com_v1_messages.json
+// Format matches cc-core/crack/oauth/rows/06-POST-api.anthropic.com_v1_messages.json
 // (the sidecar's quota probe) — same shape real CC sends on startup.
 func (c *Checker) probeAnthropic(ctx context.Context, cli *http.Client, a *auth.Auth, model string) (string, string) {
 	sessionID := newUUID()
@@ -337,7 +337,7 @@ func (c *Checker) probeAnthropic(ctx context.Context, cli *http.Client, a *auth.
 		req.Header.Set("anthropic-beta", "oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05")
 	} else {
 		// API key: x-api-key + full CC beta list.
-		// Verbatim from crack/apikey/rows/14-POST-…v1_messages.json — the
+		// Verbatim from cc-core/crack/apikey/rows/14-POST-…v1_messages.json — the
 		// strict third-party gateways (fucheers etc.) reject any unknown
 		// token, so we use exactly what real CC 2.1.126 sends and nothing
 		// more (no advanced-tool-use, no cache-diagnosis on the apikey path).

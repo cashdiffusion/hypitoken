@@ -89,7 +89,7 @@ func (p *PKCESessions) Finish(ctx context.Context, code, state, loginOption stri
 
 	// Kiro echoes back redirect_uri with the /oauth/callback path appended —
 	// not the bare base URL the SignInURL uses. Verified against the captured
-	// real-CLI flow in crack/kiro/login/docs/04: body sends
+	// real-CLI flow in cc-core/crack/kiro/login/docs/04: body sends
 	// "http://localhost:3128/oauth/callback?login_option=github".
 	echo := strings.TrimRight(s.RedirectURI, "/") + "/oauth/callback"
 	if loginOption != "" {

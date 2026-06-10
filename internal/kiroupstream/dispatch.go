@@ -144,7 +144,7 @@ func (d *Dispatcher) Forward(ctx context.Context, c *gin.Context, areq *kirobrid
 	// Build the typed Kiro request from the Anthropic-format input.
 	// Origin must match the transport flavor — we use kirotransport.FlavorCLI
 	// for the UA, so the body must self-identify as the CLI too. Real Kiro CLI
-	// (verified in crack/kiro/rows/06) sends "KIRO_CLI", and the same string
+	// (verified in cc-core/crack/kiro/rows/06) sends "KIRO_CLI", and the same string
 	// is echoed into every history entry. Sending "AI_EDITOR" with a CLI UA is
 	// the classic fingerprint-mismatch shape Kiro's abuse layer throttles.
 	convertOpts := kirobridge.ConvertOptions{
@@ -162,7 +162,7 @@ func (d *Dispatcher) Forward(ctx context.Context, c *gin.Context, areq *kirobrid
 	}
 
 	// Real Kiro CLI sends x-amzn-codewhisperer-optout: false on every call
-	// (verified in crack/kiro/rows/06). Omitting it is a fingerprint signal.
+	// (verified in cc-core/crack/kiro/rows/06). Omitting it is a fingerprint signal.
 	optOut := false
 	kc := &kiroapi.Client{
 		Token:    cred.Cred.AccessToken,

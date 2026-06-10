@@ -19,7 +19,9 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/requestlog"
+	"github.com/wjsoj/cc-core/sidecar"
 	"github.com/wjsoj/cc-core/thinkingsig"
 	"github.com/wjsoj/cc-core/usage"
 )
@@ -478,8 +480,8 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	// preserved verbatim — only the surrounding wrapper is normalized.
 	// Only runs on /v1/messages (count_tokens isn't billed and shouldn't
 	// be modified). Haiku requests skip mimicry inside the function.
-	id := SimIdentity{
-		AccountKey:  accountAnchorFor(a),
+	id := mimicry.SimIdentity{
+		AccountKey:  a.AccountKey(),
 		AccountUUID: a.AccountUUIDValue(),
 		ClientToken: clientToken,
 	}
@@ -496,7 +498,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	// so a stuck sidecar can't hang user traffic.
 	bootstrapReady := s.sidecar.Notify(a, clientToken)
 	if path == "/v1/messages" {
-		upstreamBody = applyClaudeCodeBodyMimicry(upstreamBody, model, id)
+		upstreamBody = mimicry.ApplyClaudeCodeBodyMimicry(upstreamBody, model, id)
 	}
 
 	ctx := c.Request.Context()
@@ -510,7 +512,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		case <-bootstrapReady:
 		case <-ctx.Done():
 			// client cancelled — let downstream layer handle it normally
-		case <-time.After(bootstrapWaitCap):
+		case <-time.After(sidecar.BootstrapWaitCap):
 			log.Warnf("sidecar: bootstrap-wait timeout for %s — proceeding without preceding bootstrap traffic", a.ID)
 		}
 	}
@@ -597,7 +599,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 						retryUpstream = rewritten
 					}
 				}
-				retryUpstream = applyClaudeCodeBodyMimicry(retryUpstream, model, id)
+				retryUpstream = mimicry.ApplyClaudeCodeBodyMimicry(retryUpstream, model, id)
 				log.Warnf("proxy: %s returned 400 signature-in-thinking — sanitizing and retrying once on same credential", a.ID)
 				if retryReq, rerr := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(retryUpstream)); rerr == nil {
 					copyForwardableHeaders(c.Request.Header, retryReq.Header)
@@ -1159,122 +1161,23 @@ func writeResponseHeaders(c *gin.Context, resp *http.Response) {
 	c.Writer.WriteHeader(resp.StatusCode)
 }
 
-// applyAnthropicHeaders rewrites the upstream request to look like a real
-// Claude Code CLI client. Header set and values mirror upstream CLIProxyAPI's
-// runtime/executor/claude_executor.go (Claude Code 2.1.63 / SDK 0.74.0).
-//
-// Two layers of fingerprint matter to Anthropic's edge:
-//  1. TLS — handled by auth.ClientFor + utls Chrome_Auto.
-//  2. HTTP headers — handled here. We must send the same User-Agent /
-//     X-Stainless-* / X-App / Anthropic-Beta / X-Claude-Code-Session-Id /
-//     x-client-request-id set the official client sends, otherwise the
-//     application layer trivially exposes us.
-//
-// Client-supplied values (already populated by copyForwardableHeaders) win
-// over our defaults, except for the Authorization / x-api-key pair which we
-// always overwrite with credentials from the pool.
-//
-// Known intentional deviations:
-//   - Accept-Encoding stays "identity" for both stream and non-stream because
-//     our response path streams raw bytes without decompression. Real Claude
-//     Code sends "gzip, deflate, br, zstd" on non-stream requests.
-//
-// accountAnchorFor returns a never-empty, per-credential anchor used to
-// derive the device_id (and session_id) for one OAuth account. AccountKey()
-// already falls back account_uuid > email > file-basename, and the basename
-// is always set, so in practice this equals AccountKey() for every real
-// credential — a no-op that does NOT rotate any live account's device_id.
-// It exists purely as an explicit last line of defense: should every account
-// field somehow be blank, anchor on the credential's stable ID rather than
-// let the empty string collapse multiple credentials onto one shared
-// device_id (which would make distinct accounts look like one device — a
-// ban signal). Keeps the "one credential = one device_id" guarantee local
-// to this package instead of depending on cc-core's ID=basename detail.
-func accountAnchorFor(a *auth.Auth) string {
-	if k := strings.TrimSpace(a.AccountKey()); k != "" {
-		return k
-	}
-	if id := strings.TrimSpace(a.ID); id != "" {
-		return id
-	}
-	return "cpa-unknown-account"
+// applyAnthropicHeaders is a thin adapter from this fork's *auth.Auth to
+// cc-core/mimicry.ApplyClaudeCodeHeaders. The full header policy — pinned
+// User-Agent / X-Stainless-* / Anthropic-Beta (OAuth vs API-key list) /
+// X-Claude-Code-Session-Id / x-client-request-id / Accept-Encoding — lives in
+// cc-core/mimicry so hypitoken and CPA-Claude stay byte-identical against the
+// pinned Claude Code version target. Bumping the fingerprint is a cc-core +
+// dependency-bump, not a per-fork edit.
+func applyAnthropicHeaders(req *http.Request, a *auth.Auth, stream, isAnthropicBase bool, id mimicry.SimIdentity, body []byte) {
+	token, kind := a.Credentials()
+	mimicry.ApplyClaudeCodeHeaders(req, token, kindToMimicry(kind), stream, isAnthropicBase, id, body)
 }
 
-func applyAnthropicHeaders(req *http.Request, a *auth.Auth, stream, isAnthropicBase bool, id SimIdentity, body []byte) {
-	token, kind := a.Credentials()
-
-	// Auth header — always overwrite whatever the client sent.
-	if kind == auth.KindAPIKey {
-		req.Header.Del("Authorization")
-		req.Header.Set("x-api-key", token)
-	} else {
-		req.Header.Del("x-api-key")
-		req.Header.Set("Authorization", "Bearer "+token)
+func kindToMimicry(k auth.Kind) string {
+	if k == auth.KindAPIKey {
+		return mimicry.KindAPIKey
 	}
-	req.Header.Set("Content-Type", "application/json")
-
-	// Anthropic protocol headers.
-	ensureHeader(req.Header, "Anthropic-Version", claudeAnthropicVersion)
-	if existing := strings.TrimSpace(req.Header.Get("Anthropic-Beta")); existing != "" {
-		// Client supplied its own beta list; make sure oauth marker is in it
-		// when we're using OAuth (mirrors upstream behavior).
-		if kind == auth.KindOAuth && !strings.Contains(existing, "oauth") {
-			req.Header.Set("Anthropic-Beta", existing+",oauth-2025-04-20")
-		}
-	} else {
-		// Pick the right captured beta list per credential kind. The OAuth
-		// list contains tokens (oauth-2025-04-20, advanced-tool-use-2025-11-20,
-		// cache-diagnosis-2026-04-07) that strict 3rd-party apikey gateways
-		// will reject — real CC's apikey path doesn't send them either.
-		if kind == auth.KindAPIKey {
-			req.Header.Set("Anthropic-Beta", claudeAnthropicBetaApikey)
-		} else {
-			req.Header.Set("Anthropic-Beta", claudeAnthropicBetaFull)
-		}
-	}
-	// Real CC 2.1.126 OAuth captures show this header is sent on every
-	// /v1/messages, contradicting the older "OAuth never sends it" assumption.
-	// Set unconditionally when targeting the first-party endpoint.
-	if isAnthropicBase {
-		ensureHeader(req.Header, "Anthropic-Dangerous-Direct-Browser-Access", "true")
-	}
-
-	// Stainless SDK / device profile fingerprint headers.
-	ensureHeader(req.Header, "X-App", "cli")
-	ensureHeader(req.Header, "X-Stainless-Retry-Count", claudeStainlessRetryCnt)
-	ensureHeader(req.Header, "X-Stainless-Lang", claudeStainlessLang)
-	ensureHeader(req.Header, "X-Stainless-Runtime", claudeStainlessRuntime)
-	ensureHeader(req.Header, "X-Stainless-Runtime-Version", claudeStainlessRuntimeV)
-	ensureHeader(req.Header, "X-Stainless-Package-Version", claudeStainlessPackageV)
-	ensureHeader(req.Header, "X-Stainless-Os", claudeStainlessOS)
-	ensureHeader(req.Header, "X-Stainless-Arch", claudeStainlessArch)
-	ensureHeader(req.Header, "X-Stainless-Timeout", claudeStainlessTimeout)
-
-	// Stable per-credential session ID; new UUID per request.
-	ensureHeader(req.Header, "X-Claude-Code-Session-Id", SessionIDFor(id, body))
-	if isAnthropicBase {
-		ensureHeader(req.Header, "x-client-request-id", newRequestUUID())
-	}
-
-	// User-Agent: keep the client value if it's already a Claude Code UA,
-	// otherwise overwrite with our pinned default. Mirrors upstream's legacy
-	// device-profile mode (helps/claude_device_profile.go:ApplyClaudeLegacyDeviceHeaders).
-	curUA := strings.TrimSpace(req.Header.Get("User-Agent"))
-	if !strings.HasPrefix(curUA, "claude-cli/") {
-		req.Header.Set("User-Agent", claudeCLIUserAgent)
-	}
-
-	req.Header.Set("Connection", "keep-alive")
-	// Match real CC 2.1.126 — it advertises gzip,br on every request even
-	// for SSE (Anthropic's edge typically doesn't compress text/event-stream
-	// anyway, but the advertise is part of the fingerprint). Response-side
-	// decompression for non-stream paths is handled by maybeDecompressResponse.
-	req.Header.Set("Accept-Encoding", "gzip, br")
-	if stream {
-		req.Header.Set("Accept", "text/event-stream")
-	} else {
-		ensureHeader(req.Header, "Accept", "application/json")
-	}
+	return mimicry.KindOAuth
 }
 
 // maybeDecompressResponse swaps resp.Body for a transparent decoder when

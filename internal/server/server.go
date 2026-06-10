@@ -20,6 +20,7 @@ import (
 	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/cc-core/ratelimit"
 	"github.com/wjsoj/cc-core/requestlog"
+	ccsidecar "github.com/wjsoj/cc-core/sidecar"
 	"github.com/wjsoj/cc-core/thinkingsig"
 	"github.com/wjsoj/cc-core/usage"
 )
@@ -55,7 +56,7 @@ type Server struct {
 	// Reduces the strongest stealth-detection signal — a healthy OAuth
 	// account whose request stream contains zero quota probes is
 	// trivially flagged as a third-party tool.
-	sidecar *sidecarMgr
+	sidecar *ccsidecar.Manager
 
 	// saas, when non-nil, layers multi-tenant user-token resolution + balance
 	// billing on top of the legacy clienttoken.Store. nil-safe: when unset,
@@ -94,10 +95,10 @@ func New(cfg *config.Config, pool *auth.Pool, store *usage.Store, reqLog *reques
 	gin.SetMode(gin.ReleaseMode)
 	cat := pricing.NewCatalog(cfg.Pricing)
 	s := &Server{cfg: cfg, pool: pool, usage: store, pricing: cat, tokens: tokens, reqLog: reqLog}
-	s.sidecar = newSidecarMgr(sidecarConfig{
-		enabled: true,
-		useUTLS: cfg.UseUTLS,
-		baseURL: cfg.AnthropicBaseURL,
+	s.sidecar = ccsidecar.New(ccsidecar.Config{
+		Enabled: true,
+		UseUTLS: cfg.UseUTLS,
+		BaseURL: cfg.AnthropicBaseURL,
 	})
 	s.switchTracker = thinkingsig.NewSwitchTracker()
 

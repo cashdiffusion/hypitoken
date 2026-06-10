@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/usage"
 )
@@ -22,13 +23,14 @@ import (
 // The ChatGPT Codex backend expects the OpenAI /v1/responses schema with a
 // handful of upstream-private fields stripped. The upstream request headers
 // below mimic the Codex CLI fingerprint, pinned to codex-tui/0.135.0 and
-// verified against a live ChatGPT Pro capture (CPA-Claude crack/codex/SPEC.md).
+// verified against a live ChatGPT Pro capture (cc-core/crack/codex/SPEC.md).
 // We forward over the legacy HTTP POST /codex/responses path (OpenAI-Beta:
 // responses=experimental); real 0.135.0 streams over a WebSocket, but the HTTP
 // path still works and is what an HTTP-API proxy needs. We mimic the 0.135.0
-// identity (Originator codex-tui / UA / Version) over it. (hypitoken vendors
-// its fingerprint code, so this stays inline rather than importing cc-core's
-// mimicry.ApplyCodexCLIHeaders.)
+// identity (Originator codex-tui / UA / Version) over it. (These Codex
+// constants stay inline because this fork's Codex OAuth body/transport path
+// diverged from cc-core's mimicry.ApplyCodexCLIHeaders; the Claude path now
+// imports cc-core/mimicry directly — see applyAnthropicHeaders in proxy.go.)
 const (
 	codexCLIVersion        = "0.135.0"
 	codexBackendUserAgent  = "codex-tui/0.135.0 (Arch Linux Rolling Release; x86_64) Konsole/260401 (codex-tui; 0.135.0)"
@@ -331,7 +333,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	// in our logs. Identity keeps everything human-readable end-to-end.
 	upReq.Header.Set("Accept-Encoding", "identity")
 	upReq.Header.Set("Connection", "Keep-Alive")
-	upReq.Header.Set("Session_id", newRequestUUID())
+	upReq.Header.Set("Session_id", mimicry.NewRequestUUID())
 	upReq.Header.Set("Originator", codexBackendOriginator)
 	// Always overwrite UA — forwarding client's UA (e.g. "curl/X.Y") makes
 	// Cloudflare's edge rules 403 the request before it reaches the OpenAI
