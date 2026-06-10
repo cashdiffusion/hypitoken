@@ -53,8 +53,10 @@ type SMTPConfig struct {
 	UseTLS   bool
 }
 
+// Mailer sends one transactional message. text is the plain-text alternative;
+// pass "" to send HTML-only (e.g. the shop's order mail).
 type Mailer interface {
-	Send(to, subject, body string) error
+	Send(to, subject, html, text string) error
 }
 
 func New(cfg SMTPConfig, siteName string) Mailer {
@@ -90,24 +92,28 @@ type ResendMailer struct {
 	fallback Mailer
 }
 
-func (m *ResendMailer) Send(to, subject, body string) error {
-	if err := m.sendAPI(to, subject, body); err != nil {
+func (m *ResendMailer) Send(to, subject, html, text string) error {
+	if err := m.sendAPI(to, subject, html, text); err != nil {
 		log.Warnf("mailer: Resend API send to %s failed (%v); falling back to SMTP", to, err)
 		if m.fallback != nil {
-			return m.fallback.Send(to, subject, body)
+			return m.fallback.Send(to, subject, html, text)
 		}
 		return err
 	}
 	return nil
 }
 
-func (m *ResendMailer) sendAPI(to, subject, body string) error {
-	payload, err := json.Marshal(map[string]any{
+func (m *ResendMailer) sendAPI(to, subject, html, text string) error {
+	body := map[string]any{
 		"from":    m.from,
 		"to":      []string{to},
 		"subject": subject,
-		"html":    body,
-	})
+		"html":    html,
+	}
+	if strings.TrimSpace(text) != "" {
+		body["text"] = text
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
@@ -153,7 +159,11 @@ type LogMailer struct {
 	site string
 }
 
-func (m *LogMailer) Send(to, subject, body string) error {
+func (m *LogMailer) Send(to, subject, html, text string) error {
+	body := text
+	if strings.TrimSpace(body) == "" {
+		body = html
+	}
 	log.Infof("[mail-stub site=%s] to=%s subject=%q\n%s", m.site, to, subject, body)
 	return nil
 }
@@ -163,7 +173,7 @@ type SMTPMailer struct {
 	site string
 }
 
-func (m *SMTPMailer) Send(to, subject, body string) error {
+func (m *SMTPMailer) Send(to, subject, html, text string) error {
 	from := m.cfg.From
 	if from == "" {
 		from = m.cfg.Username
@@ -171,19 +181,24 @@ func (m *SMTPMailer) Send(to, subject, body string) error {
 	addr := fmt.Sprintf("%s:%d", m.cfg.Host, m.cfg.Port)
 	auth := smtp.PlainAuth("", m.cfg.Username, m.cfg.Password, m.cfg.Host)
 
-	headers := map[string]string{
-		"From":         fmt.Sprintf("%s <%s>", m.site, from),
-		"To":           to,
-		"Subject":      subject,
-		"MIME-Version": "1.0",
-		"Content-Type": "text/html; charset=UTF-8",
-	}
 	var msg strings.Builder
-	for k, v := range headers {
-		fmt.Fprintf(&msg, "%s: %s\r\n", k, v)
+	fmt.Fprintf(&msg, "From: %s <%s>\r\n", m.site, from)
+	fmt.Fprintf(&msg, "To: %s\r\n", to)
+	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
+	msg.WriteString("MIME-Version: 1.0\r\n")
+	if strings.TrimSpace(text) != "" {
+		// multipart/alternative: text first, HTML second (clients render the
+		// last part they understand). Boundary is fixed — fine, each message
+		// is self-contained.
+		const boundary = "==hypitoken_alt_boundary=="
+		fmt.Fprintf(&msg, "Content-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", boundary)
+		fmt.Fprintf(&msg, "--%s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s\r\n", boundary, text)
+		fmt.Fprintf(&msg, "--%s\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s\r\n", boundary, html)
+		fmt.Fprintf(&msg, "--%s--\r\n", boundary)
+	} else {
+		msg.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
+		msg.WriteString(html)
 	}
-	msg.WriteString("\r\n")
-	msg.WriteString(body)
 
 	if err := m.send(addr, auth, from, to, []byte(msg.String())); err != nil {
 		return err
@@ -245,35 +260,24 @@ func (m *SMTPMailer) send(addr string, auth smtp.Auth, from, to string, body []b
 	return w.Close()
 }
 
-// VerificationEmail builds the subject + HTML body for the email-verification
-// code that the user types during sign-up. Wraps the polished email shell
-// in templates.go so layout/branding stays consistent with the reset flow.
-func VerificationEmail(siteName, code string) (string, string) {
-	subject := fmt.Sprintf("Your %s verification code: %s", siteName, code)
-	body := renderShell(
-		siteName,
-		fmt.Sprintf("Your verification code is %s. It expires in 10 minutes.", code),
-		"Confirm your email address",
-		"Welcome aboard! To finish creating your account, enter the 6-digit code below in the verification screen.",
-		code,
-		"This code expires in 10 minutes. For your security, never share it with anyone.",
-		"Verify Email",
-	)
-	return subject, body
+// VerificationEmail builds the subject, HTML body, and plain-text body for the
+// email-verification code typed during sign-up.
+func VerificationEmail(siteName, code string) (subject, html, text string) {
+	subject = fmt.Sprintf("Your %s verification code: %s", siteName, code)
+	intro := "Enter this code to verify your email address and finish signing in:"
+	expiry := "This code expires in 10 minutes. For your security, never share it with anyone."
+	html = renderShell(siteName, intro, code, expiry)
+	text = renderText(siteName, intro, code, expiry)
+	return
 }
 
-// ResetEmail builds the subject + HTML body for the password-reset code that
-// the user types on the forgot-password screen.
-func ResetEmail(siteName, code string) (string, string) {
-	subject := fmt.Sprintf("%s password reset — code: %s", siteName, code)
-	body := renderShell(
-		siteName,
-		fmt.Sprintf("Your password reset code is %s. It expires in 10 minutes.", code),
-		"Reset your password",
-		"We received a request to reset the password on your account. Enter the 6-digit code below to choose a new one.",
-		code,
-		"This code expires in 10 minutes. If you didn't request a reset, you can ignore this email — your password will stay the same.",
-		"Reset Password",
-	)
-	return subject, body
+// ResetEmail builds the subject, HTML body, and plain-text body for the
+// password-reset code typed on the forgot-password screen.
+func ResetEmail(siteName, code string) (subject, html, text string) {
+	subject = fmt.Sprintf("Your %s password reset code: %s", siteName, code)
+	intro := "Use this code to reset your password:"
+	expiry := "This code expires in 10 minutes. If you didn't request a reset, you can ignore this email — your password will stay the same."
+	html = renderShell(siteName, intro, code, expiry)
+	text = renderText(siteName, intro, code, expiry)
+	return
 }

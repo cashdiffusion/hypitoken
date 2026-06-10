@@ -14,7 +14,7 @@ import (
 // assert (or not) that a delivery email fired without touching SMTP.
 type chanMailer struct{ sent chan string }
 
-func (m *chanMailer) Send(to, _ /*subject*/, _ /*body*/ string) error {
+func (m *chanMailer) Send(to, _ /*subject*/, _ /*html*/, _ /*text*/ string) error {
 	select {
 	case m.sent <- to:
 	default:

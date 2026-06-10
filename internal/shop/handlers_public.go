@@ -360,7 +360,7 @@ func (s *Shop) maybeSettleStripeOrder(ctx context.Context, o *Order) {
 // callback isn't blocked on SMTP latency.
 func (s *Shop) dispatchOrderEmail(o *Order) {
 	subject, body := OrderEmail(s.cfg.SiteName, o.ProductName, o.Status, o.Fulfillment, s.orderReturnURL(o.OutTradeNo))
-	if err := s.mailer.Send(o.Email, subject, body); err != nil {
+	if err := s.mailer.Send(o.Email, subject, body, ""); err != nil {
 		log.Errorf("shop: send order email failed to=%s out=%s: %v", o.Email, o.OutTradeNo, err)
 		return
 	}

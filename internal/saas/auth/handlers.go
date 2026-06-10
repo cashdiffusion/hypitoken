@@ -193,13 +193,13 @@ func (h *Handler) sendCode(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	var subject, body string
+	var subject, htmlBody, textBody string
 	if req.Purpose == db.PurposeReset {
-		subject, body = mail.ResetEmail(h.SiteName, code)
+		subject, htmlBody, textBody = mail.ResetEmail(h.SiteName, code)
 	} else {
-		subject, body = mail.VerificationEmail(h.SiteName, code)
+		subject, htmlBody, textBody = mail.VerificationEmail(h.SiteName, code)
 	}
-	if err := h.Mailer.Send(req.Email, subject, body); err != nil {
+	if err := h.Mailer.Send(req.Email, subject, htmlBody, textBody); err != nil {
 		// Log the real cause for the operator; hand the user a generic,
 		// non-leaky message they can act on (retry).
 		log.Warnf("send-code: mail to %s (purpose=%s) failed: %v", req.Email, req.Purpose, err)

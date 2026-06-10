@@ -14,7 +14,7 @@ type fakeMailer struct {
 	to     string
 }
 
-func (f *fakeMailer) Send(to, _, _ string) error {
+func (f *fakeMailer) Send(to, _, _, _ string) error {
 	f.called = true
 	f.to = to
 	return nil
@@ -46,7 +46,7 @@ func TestResendMailer_Send_HappyPath(t *testing.T) {
 
 	fb := &fakeMailer{}
 	m := newTestResend(srv.URL, fb)
-	if err := m.Send("user@example.com", "Your code: 123456", "<b>123456</b>"); err != nil {
+	if err := m.Send("user@example.com", "Your code: 123456", "<b>123456</b>", "123456 plain"); err != nil {
 		t.Fatalf("Send returned error: %v", err)
 	}
 
@@ -61,6 +61,9 @@ func TestResendMailer_Send_HappyPath(t *testing.T) {
 	}
 	if gotBody["subject"] != "Your code: 123456" {
 		t.Errorf("subject = %v", gotBody["subject"])
+	}
+	if gotBody["text"] != "123456 plain" {
+		t.Errorf("text = %v, want plain-text part included", gotBody["text"])
 	}
 	to, ok := gotBody["to"].([]any)
 	if !ok || len(to) != 1 || to[0] != "user@example.com" {
@@ -80,7 +83,7 @@ func TestResendMailer_Send_FallsBackOnAPIError(t *testing.T) {
 
 	fb := &fakeMailer{}
 	m := newTestResend(srv.URL, fb)
-	if err := m.Send("user@example.com", "subj", "body"); err != nil {
+	if err := m.Send("user@example.com", "subj", "body", "body"); err != nil {
 		t.Fatalf("Send should succeed via fallback, got: %v", err)
 	}
 	if !fb.called {
@@ -99,7 +102,7 @@ func TestResendMailer_Send_NoFallbackReturnsError(t *testing.T) {
 	defer srv.Close()
 
 	m := newTestResend(srv.URL, nil)
-	err := m.Send("user@example.com", "subj", "body")
+	err := m.Send("user@example.com", "subj", "body", "body")
 	if err == nil {
 		t.Fatal("expected error when API fails and no fallback is set")
 	}
