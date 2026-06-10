@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 	"github.com/wjsoj/CPA-Claude/internal/saas/mail"
@@ -199,7 +200,10 @@ func (h *Handler) sendCode(c *gin.Context) {
 		subject, body = mail.VerificationEmail(h.SiteName, code)
 	}
 	if err := h.Mailer.Send(req.Email, subject, body); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "send mail: " + err.Error()})
+		// Log the real cause for the operator; hand the user a generic,
+		// non-leaky message they can act on (retry).
+		log.Warnf("send-code: mail to %s (purpose=%s) failed: %v", req.Email, req.Purpose, err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "could not send the verification email — please try again in a moment"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"sent": true})

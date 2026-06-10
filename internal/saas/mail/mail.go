@@ -1,19 +1,49 @@
-// Package mail sends transactional email. SMTPMailer talks to a real SMTP
-// server; LogMailer just prints to stderr (used when SMTP isn't configured —
-// the verification code shows up in server logs so dev can copy-paste it).
+// Package mail sends transactional email.
+//
+// Three implementations behind the Mailer interface:
+//   - ResendMailer — POSTs https://api.resend.com/emails (a single CDN-edge
+//     HTTPS round-trip with a hard timeout). This is the default whenever the
+//     configured host points at Resend, because the SMTP path's multi-RTT
+//     handshake to AWS SES (Tokyo) is both slow and — without a timeout — prone
+//     to hanging the /auth/send-code request, which strands the user mid-signup.
+//     It falls back to SMTP if the API call fails.
+//   - SMTPMailer — a plain SMTP client (now with dial + I/O deadlines). Used for
+//     self-hosted SMTP, and as the Resend fallback.
+//   - LogMailer — prints to stderr (used when nothing is configured — the
+//     verification code shows up in server logs so dev can copy-paste it).
 package mail
 
 import (
+	"bytes"
+	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"net/smtp"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
 
+// smtpTimeout bounds the whole SMTP exchange (dial + TLS + AUTH + DATA). The
+// previous code had no timeout at all, so a flaky HK→Tokyo hop could hang the
+// request indefinitely.
+const smtpTimeout = 15 * time.Second
+
+// resendAPITimeout bounds a single Resend HTTP API call.
+const resendAPITimeout = 12 * time.Second
+
+// resendEndpoint is the transactional-send endpoint.
+const resendEndpoint = "https://api.resend.com/emails"
+
 // SMTPConfig is a local copy of SMTPConfig (mirrored to avoid an import
 // cycle). Callers in the top-level saas package construct it from saas.Config.
+// When Host points at Resend, Password is the Resend API key (re_…), which
+// doubles as the HTTP API bearer token.
 type SMTPConfig struct {
 	Host     string
 	Port     int
@@ -32,7 +62,91 @@ func New(cfg SMTPConfig, siteName string) Mailer {
 		log.Warn("SMTP not configured; mailer running in log-only mode (verification codes will appear in server logs)")
 		return &LogMailer{site: siteName}
 	}
-	return &SMTPMailer{cfg: cfg, site: siteName}
+	smtpMailer := &SMTPMailer{cfg: cfg, site: siteName}
+
+	// Resend HTTP API path. Requires the API key (Password) and a real From
+	// address — the SMTP username is the literal "resend", not a mailbox, so we
+	// can't synthesize a sender from it. Keep SMTP as the fallback.
+	if strings.Contains(strings.ToLower(cfg.Host), "resend") &&
+		strings.TrimSpace(cfg.Password) != "" && strings.TrimSpace(cfg.From) != "" {
+		log.Infof("mailer: using Resend HTTP API (from=%s, smtp fallback enabled)", cfg.From)
+		return &ResendMailer{
+			apiKey:   cfg.Password,
+			from:     fmt.Sprintf("%s <%s>", siteName, cfg.From),
+			endpoint: resendEndpoint,
+			client:   &http.Client{Timeout: resendAPITimeout},
+			fallback: smtpMailer,
+		}
+	}
+	return smtpMailer
+}
+
+// ResendMailer sends via the Resend HTTP API, falling back to SMTP on failure.
+type ResendMailer struct {
+	apiKey   string
+	from     string // pre-formatted "Site <addr>"
+	endpoint string
+	client   *http.Client
+	fallback Mailer
+}
+
+func (m *ResendMailer) Send(to, subject, body string) error {
+	if err := m.sendAPI(to, subject, body); err != nil {
+		log.Warnf("mailer: Resend API send to %s failed (%v); falling back to SMTP", to, err)
+		if m.fallback != nil {
+			return m.fallback.Send(to, subject, body)
+		}
+		return err
+	}
+	return nil
+}
+
+func (m *ResendMailer) sendAPI(to, subject, body string) error {
+	payload, err := json.Marshal(map[string]any{
+		"from":    m.from,
+		"to":      []string{to},
+		"subject": subject,
+		"html":    body,
+	})
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), resendAPITimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+m.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		var ok struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal(respBody, &ok)
+		log.Infof("mailer: Resend accepted mail to=%s subject=%q id=%s", to, subject, ok.ID)
+		return nil
+	}
+	// Surface Resend's structured error in logs only — callers map this to a
+	// generic user-facing message.
+	var apiErr struct {
+		Name    string `json:"name"`
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(respBody, &apiErr)
+	msg := strings.TrimSpace(apiErr.Message)
+	if msg == "" {
+		msg = strings.TrimSpace(string(respBody))
+	}
+	return fmt.Errorf("resend api status %d: %s", resp.StatusCode, msg)
 }
 
 type LogMailer struct {
@@ -71,23 +185,45 @@ func (m *SMTPMailer) Send(to, subject, body string) error {
 	msg.WriteString("\r\n")
 	msg.WriteString(body)
 
-	if m.cfg.UseTLS {
-		return m.sendTLS(addr, auth, from, []string{to}, []byte(msg.String()))
+	if err := m.send(addr, auth, from, to, []byte(msg.String())); err != nil {
+		return err
 	}
-	return smtp.SendMail(addr, auth, from, []string{to}, []byte(msg.String()))
+	log.Infof("mailer: SMTP accepted mail to=%s subject=%q", to, subject)
+	return nil
 }
 
-func (m *SMTPMailer) sendTLS(addr string, auth smtp.Auth, from string, to []string, body []byte) error {
-	tlsCfg := &tls.Config{ServerName: m.cfg.Host}
-	conn, err := tls.Dial("tcp", addr, tlsCfg)
+// send performs the full SMTP exchange with a dial timeout and a connection
+// deadline so a stalled HK→SES hop can't hang the request forever. Handles both
+// implicit-TLS (465) and plaintext/STARTTLS (587).
+func (m *SMTPMailer) send(addr string, auth smtp.Auth, from, to string, body []byte) error {
+	dialer := &net.Dialer{Timeout: smtpTimeout}
+	var conn net.Conn
+	var err error
+	if m.cfg.UseTLS {
+		conn, err = tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: m.cfg.Host})
+	} else {
+		conn, err = dialer.Dial("tcp", addr)
+	}
 	if err != nil {
 		return err
 	}
+	_ = conn.SetDeadline(time.Now().Add(smtpTimeout))
+
 	c, err := smtp.NewClient(conn, m.cfg.Host)
 	if err != nil {
+		_ = conn.Close()
 		return err
 	}
 	defer c.Quit()
+
+	// On a plaintext connection, upgrade to STARTTLS when offered before auth.
+	if !m.cfg.UseTLS {
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			if err := c.StartTLS(&tls.Config{ServerName: m.cfg.Host}); err != nil {
+				return err
+			}
+		}
+	}
 	if auth != nil {
 		if err := c.Auth(auth); err != nil {
 			return err
@@ -96,10 +232,8 @@ func (m *SMTPMailer) sendTLS(addr string, auth smtp.Auth, from string, to []stri
 	if err := c.Mail(from); err != nil {
 		return err
 	}
-	for _, addr := range to {
-		if err := c.Rcpt(addr); err != nil {
-			return err
-		}
+	if err := c.Rcpt(to); err != nil {
+		return err
 	}
 	w, err := c.Data()
 	if err != nil {
