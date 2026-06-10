@@ -106,7 +106,7 @@ saas:
     port: 587
     username: postmaster
     password: ${SMTP_PASS}
-    from: noreply@example.com
+    from: support@example.com   # use a real, replyable mailbox — Gmail downranks/filters "no-reply" senders, which buries verification codes
     use_tls: true
   alipay:
     app_id: ""        # empty = mock gateway (dev auto-confirms in 2s)
