@@ -152,7 +152,7 @@ func TestBootstrapFiresAllStepsWithCorrectUA(t *testing.T) {
 		"/v1/messages":                   {"claude-cli/", quotaProbeBeta},
 		"/mcp-registry/v0/servers":       {"axios/", ""},
 		"/v1/mcp_servers":                {"axios/", "mcp-servers-2025-12-04"},
-		"/v1/code/triggers":              {"axios/", "ccr-triggers-2026-01-30"},
+		"/v1/code/triggers":              {"claude-cli/", "ccr-triggers-2026-01-30"},
 		// /claude-code-releases/latest is on a different host (downloads.claude.ai)
 		// — won't hit our test server, so it's not in this list.
 	}
@@ -409,7 +409,7 @@ func TestStartupBatchSuppressedUnderCooldown(t *testing.T) {
 }
 
 // TestDatadogHeartbeatBodyShape verifies the Datadog payload matches the
-// captured crack/cc2156 shape: a JSON ARRAY of one tengu_feature_ok event
+// captured crack/cc2170 shape: a JSON ARRAY of one tengu_feature_ok event
 // with all the flattened fields, ddtags carrying the indexed dimensions, and
 // user_bucket present at the top level (as int).
 func TestDatadogHeartbeatBodyShape(t *testing.T) {

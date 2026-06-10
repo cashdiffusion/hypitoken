@@ -3,13 +3,13 @@
   "url": "https://api.anthropic.com/v1/messages?beta=true",
   "method": "POST",
   "status": 200,
-  "reqSize": 481053,
-  "resSize": 11844,
+  "reqSize": 219310,
+  "resSize": 4049,
   "reqHeaders": {
     "accept": "application/json",
     "authorization": "<masked>",
     "content-type": "application/json",
-    "user-agent": "claude-cli/2.1.156 (external, cli)",
+    "user-agent": "claude-cli/2.1.170 (external, cli)",
     "x-claude-code-session-id": "<masked>",
     "x-stainless-arch": "x64",
     "x-stainless-lang": "js",
@@ -19,7 +19,7 @@
     "x-stainless-runtime": "node",
     "x-stainless-runtime-version": "v24.3.0",
     "x-stainless-timeout": "600",
-    "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07",
+    "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,effort-2025-11-24,server-side-fallback-2026-06-01,fallback-credit-2026-06-01,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07",
     "anthropic-dangerous-direct-browser-access": "true",
     "anthropic-version": "2023-06-01",
     "x-app": "cli",
@@ -27,30 +27,30 @@
     "connection": "keep-alive",
     "host": "api.anthropic.com",
     "accept-encoding": "gzip, br",
-    "content-length": "481053"
+    "content-length": "219310"
   },
   "resHeaders": {
-    "date": "Fri, 29 May 2026 06:33:06 GMT",
+    "date": "Wed, 10 Jun 2026 02:33:44 GMT",
     "content-type": "text/event-stream; charset=utf-8",
     "transfer-encoding": "chunked",
     "connection": "keep-alive",
     "cache-control": "no-cache",
     "anthropic-ratelimit-unified-status": "allowed",
     "anthropic-ratelimit-unified-5h-status": "allowed",
-    "anthropic-ratelimit-unified-5h-reset": "1780039800",
-    "anthropic-ratelimit-unified-5h-utilization": "0.07",
+    "anthropic-ratelimit-unified-5h-reset": "1781074200",
+    "anthropic-ratelimit-unified-5h-utilization": "0.03",
     "anthropic-ratelimit-unified-7d-status": "allowed",
-    "anthropic-ratelimit-unified-7d-reset": "1780495200",
+    "anthropic-ratelimit-unified-7d-reset": "1781586000",
     "anthropic-ratelimit-unified-7d-utilization": "0.01",
     "anthropic-ratelimit-unified-representative-claim": "five_hour",
     "anthropic-ratelimit-unified-fallback-percentage": "0.5",
-    "anthropic-ratelimit-unified-reset": "1780039800",
+    "anthropic-ratelimit-unified-reset": "1781074200",
     "anthropic-ratelimit-unified-overage-disabled-reason": "org_level_disabled",
     "anthropic-ratelimit-unified-overage-status": "rejected",
     "request-id": "<masked>",
     "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
-    "anthropic-organization-id": "2f49bffa-5cc6-4fbb-9dee-5e81284cfb93",
-    "traceresponse": "00-f4b4d2f9e944f1e174202be2a3302721-0ef90be3b4f04009-01",
+    "anthropic-organization-id": "<masked>",
+    "traceresponse": "00-a6df9c3a6a5a853dbd2547dd4fd1fc04-a0ca823802bb118d-01",
     "server": "cloudflare",
     "content-encoding": "gzip",
     "vary": "Accept-Encoding",
@@ -58,7 +58,7 @@
     "set-cookie": "<masked>",
     "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
     "x-robots-tag": "none",
-    "cf-ray": "a033772a898b932c-EWR"
+    "cf-ray": "<masked>"
   },
   "reqBody": {
     "body": {
@@ -69,31 +69,41 @@
           "content": [
             {
               "type": "text",
-              "text": "<text:16484 chars>"
+              "text": "<text:19553 chars>"
             },
             {
               "type": "text",
-              "text": "<text:128 chars>"
+              "text": "<text:246 chars>"
+            },
+            "<… 9 more items redacted …>",
+            {
+              "type": "text",
+              "text": "调研一下项目架构"
             }
           ]
         },
         {
           "role": "system",
-          "content": "<text:2378 chars>"
+          "content": "<text:29478 chars>"
         },
-        "<… 224 more items redacted …>",
+        "<… 14 more items redacted …>",
         {
           "role": "user",
           "content": [
             {
-              "tool_use_id": "toolu_01S2WMkuHUxppXMRAJtSYrnH",
+              "tool_use_id": "toolu_01QtjUagHGTUDhSY1rWzYYrh",
               "type": "tool_result",
-              "content": "<text:366 chars>",
-              "is_error": false
+              "content": "<text:8935 chars>"
             },
             {
-              "type": "text",
-              "text": "<text:5978 chars>"
+              "tool_use_id": "toolu_01C2c9UMEs918tJ3HCRVhVxb",
+              "type": "tool_result",
+              "content": "<text:3606 chars>",
+              "is_error": false,
+              "cache_control": {
+                "type": "ephemeral",
+                "ttl": "1h"
+              }
             }
           ]
         }
@@ -101,7 +111,7 @@
       "system": [
         {
           "type": "text",
-          "text": "x-anthropic-billing-header: cc_version=2.1.156.297; cc_entrypoint=cli; cch=4156c;"
+          "text": "x-anthropic-billing-header: cc_version=2.1.170.005; cc_entrypoint=cli; cch=1e3bb;"
         },
         {
           "type": "text",
@@ -118,7 +128,7 @@
         },
         {
           "type": "text",
-          "text": "<text:9797 chars>",
+          "text": "<text:10961 chars>",
           "cache_control": {
             "type": "ephemeral",
             "ttl": "1h"
@@ -128,7 +138,7 @@
       "tools": [
         {
           "name": "Agent",
-          "description": "<text:3495 chars>",
+          "description": "<text:1227 chars>",
           "input_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
@@ -151,7 +161,8 @@
                 "enum": [
                   "sonnet",
                   "opus",
-                  "haiku"
+                  "haiku",
+                  "fable"
                 ]
               },
               "run_in_background": {
@@ -290,7 +301,7 @@
           },
           "eager_input_streaming": true
         },
-        "<… 9 more items redacted …>",
+        "<… 7 more items redacted …>",
         {
           "name": "Write",
           "description": "<text:240 chars>",
@@ -319,7 +330,7 @@
       "metadata": {
         "user_id": "<masked:user_id>"
       },
-      "max_tokens": 20000,
+      "max_tokens": 64000,
       "thinking": {
         "type": "adaptive"
       },
@@ -334,14 +345,17 @@
       "output_config": {
         "effort": "high"
       },
+      "diagnostics": {
+        "previous_message_id": "<masked:previous_message_id>"
+      },
       "stream": true
     },
     "_notes": {
-      "message_count": 227,
+      "message_count": 17,
       "roles": {
-        "user": 104,
-        "system": 20,
-        "assistant": 103
+        "user": 8,
+        "system": 2,
+        "assistant": 7
       },
       "system_cache_pattern": [
         null,
@@ -357,8 +371,6 @@
         "Read",
         "ScheduleWakeup",
         "Skill",
-        "TaskCreate",
-        "TaskUpdate",
         "ToolSearch",
         "Workflow",
         "Write"

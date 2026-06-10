@@ -20,7 +20,7 @@ import (
 	"github.com/wjsoj/cc-core/auth"
 )
 
-// Sidecar emulates the auxiliary traffic real Claude Code 2.1.167 fires
+// Sidecar emulates the auxiliary traffic real Claude Code 2.1.170 fires
 // alongside /v1/messages. Three phases:
 //
 //   - Phase A (always): quota probe (Haiku "quota") at session start.
@@ -38,7 +38,7 @@ import (
 //   - Phase C (heartbeat): a goroutine that POSTs
 //     /api/event_logging/v2/batch every ~18s ±40% with a realistic
 //     ClaudeCodeInternalEvent payload (env block matches our pinned
-//     2.1.167 / Linux / x64 / Node v24.3.0 fingerprint). Stops 5 min
+//     2.1.170 / Linux / x64 / Node v24.3.0 fingerprint). Stops 5 min
 //     after the session goes idle — mirrors a real CLI process exit.
 //
 // A virtual session is identified by accountKey alone. Multiple downstream
@@ -130,7 +130,7 @@ const (
 	quotaProbeModel = "claude-haiku-4-5-20251001"
 )
 
-// User-Agent strings used across sidecar endpoints. Real CC 2.1.167 uses
+// User-Agent strings used across sidecar endpoints. Real CC 2.1.170 uses
 // FOUR distinct HTTP clients: Bun fetch (GrowthBook only), axios 1.15.2
 // (penguin / mcp-registry / mcp_servers / downloads), claude-code/<ver>
 // (oauth/account/settings, bootstrap, event_logging), and the main
@@ -150,9 +150,9 @@ const (
 // advertise one identical host. platform/arch/node_version/is_running_with_bun
 // stay fixed (one ground-truth capture; runtime bundle moves with the release).
 const (
-	ccBuildTime      = "2026-06-05T23:07:45Z"
-	ccTelemetryModel = "claude-opus-4-8[1m]" // event_logging event_data.model
-	ccDatadogModel   = "claude-opus-4-8"     // datadog model field + ddtags (no [1m])
+	ccBuildTime      = "2026-06-09T15:09:09Z"
+	ccTelemetryModel = "claude-fable-5[1m]" // event_logging event_data.model
+	ccDatadogModel   = "claude-fable-5"     // datadog model field + ddtags (no [1m])
 )
 
 // sidecarMgr tracks the lifecycle of every virtual session and dispatches
@@ -402,7 +402,7 @@ func realBootstrapSteps(baseURL string) []bootstrapStep {
 			// the entrypoint and the model the user is launching with.
 			name:            "claude_cli_bootstrap",
 			method:          "GET",
-			url:             baseURL + "/api/claude_cli/bootstrap?entrypoint=cli&model=claude-opus-4-8",
+			url:             baseURL + "/api/claude_cli/bootstrap?entrypoint=cli&model=claude-fable-5",
 			delayFromStart:  1250 * time.Millisecond,
 			userAgent:       uaClaudeCode,
 			beta:            "oauth-2025-04-20",
@@ -467,11 +467,13 @@ func realBootstrapSteps(baseURL string) []bootstrapStep {
 			// behind the ccr-triggers-2026-01-30 beta. Carries
 			// anthropic-client-platform and X-Organization-UUID;
 			// extraHeaders below sets the latter from the auth at dispatch.
+			// UA is the main claude-cli agent, NOT axios — verified in the
+			// 2.1.170 capture (crack/cc2170/rows/07-code_triggers.json).
 			name:           "code_triggers",
 			method:         "GET",
 			url:            baseURL + "/v1/code/triggers",
 			delayFromStart: 1960 * time.Millisecond,
-			userAgent:      uaAxios,
+			userAgent:      uaClaudeCLI,
 			beta:           "ccr-triggers-2026-01-30",
 			anthropicVer:   claudeAnthropicVersion,
 			contentType:    "application/json",
@@ -881,7 +883,7 @@ func (m *sidecarMgr) sendHeartbeat(parent context.Context, a *auth.Auth, session
 
 // buildHeartbeatBody constructs a single-event batch shaped like row 14.
 // Volatile fields (timestamps, event_id, process metric) are refreshed
-// each tick; the env block stays fixed at our pinned 2.1.167 / Linux /
+// each tick; the env block stays fixed at our pinned 2.1.170 / Linux /
 // x64 / Node v24.3.0 fingerprint so it matches the X-Stainless headers.
 //
 // Event name `tengu_dir_search` is what real CC emits most frequently
@@ -1155,7 +1157,7 @@ func jitteredDatadogInterval() time.Duration {
 }
 
 // sendDatadogHeartbeat POSTs one tengu_feature_ok event to the Datadog
-// intake. Headers and body match crack/claude (SPEC.md §5) — note that the
+// intake. Headers and body match crack/cc2170 (SPEC.md §5) — note that the
 // Authorization header is NOT set (the dd-api-key header carries auth)
 // and User-Agent is axios/1.15.2 (the Datadog client lib in CC). Real CC's
 // datadog stream only carries tengu_feature_ok / tengu_api_success /
@@ -1212,7 +1214,7 @@ func userBucketFor(accountKey string) int {
 }
 
 // buildDatadogHeartbeatBody returns a JSON array of one event matching
-// the crack/claude shape — all the per-event "env" fields are flattened
+// the crack/cc2170 shape — all the per-event "env" fields are flattened
 // into the top level (Datadog's preferred indexing layout), and ddtags
 // is a comma-joined string of indexed dimensions.
 func buildDatadogHeartbeatBody(a *auth.Auth, sessionID string) ([]byte, error) {

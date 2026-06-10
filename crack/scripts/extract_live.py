@@ -11,7 +11,7 @@ descriptions, and identity values with `<redacted …>` placeholders.
 Usage:
     python3 crack/scripts/extract_live.py /path/to/whistle-dump.json [outdir]
 
-Default outdir = crack/cc2156/rows/. The source dump is NOT copied or committed.
+Default outdir = crack/cc2170/rows/. The source dump is NOT copied or committed.
 """
 import json, base64, gzip, subprocess, sys, os, collections
 
@@ -21,7 +21,9 @@ CRACK_ROOT = os.path.dirname(HERE)
 MASK_KEYS = {"device_id", "account_uuid", "organization_uuid", "email",
              "session_id", "user_id", "event_id", "rh", "previous_message_id"}
 MASK_HEADERS = {"authorization", "x-api-key", "cookie", "set-cookie",
-                "x-claude-code-session-id", "x-client-request-id", "request-id"}
+                "x-claude-code-session-id", "x-client-request-id", "request-id",
+                "x-organization-uuid", "anthropic-organization-id",
+                "anthropic-organization-uuid", "cf-ray"}
 KEEP_TEXT_PREFIXES = ("x-anthropic-billing-header:",
                       "You are Claude Code, Anthropic's official CLI for Claude.")
 TEXT_LIMIT = 80
@@ -55,7 +57,10 @@ def redact(o, key=None):
             return head + [f"<… {len(o) - 3} more items redacted …>", redact(o[-1])]
         return [redact(x) for x in o]
     if isinstance(o, str):
-        if key in MASK_KEYS:
+        if key in MASK_KEYS or (key and (key.endswith("_session_id")
+                                         or key.endswith("_uuid")
+                                         or "email" in key
+                                         or key == "organization_name")):
             return f"<masked:{key}>"
         if any(o.startswith(p) for p in KEEP_TEXT_PREFIXES):
             return o  # fingerprint-bearing — keep verbatim
@@ -126,6 +131,11 @@ CLASSES = [
     ("event_logging_steady",  lambda u: "event_logging" in u),  # smallest = single event
     ("datadog",       lambda u: "datadoghq" in u),
     ("releases",      lambda u: "claude-code-releases/latest" in u),
+    # endpoints introduced after 2.1.156 — capture so the fingerprint surface
+    # (new betas, new bootstrap probes) stays in the ground-truth rows.
+    ("bootstrap",     lambda u: "claude_cli/bootstrap" in u),
+    ("code_triggers", lambda u: "/v1/code/triggers" in u),       # NEW in 2.1.170
+    ("plugins_latest", lambda u: "plugins/claude-plugins-official" in u),  # NEW in 2.1.170
 ]
 
 
@@ -133,7 +143,7 @@ def main():
     if len(sys.argv) < 2:
         sys.exit("usage: extract_live.py <whistle-dump.json> [outdir]")
     src = json.load(open(sys.argv[1]))
-    out_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.join(CRACK_ROOT, "cc2156", "rows")
+    out_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.join(CRACK_ROOT, "cc2170", "rows")
     os.makedirs(out_dir, exist_ok=True)
     sessions = src["data"]["data"]
 
@@ -154,13 +164,18 @@ def main():
 
     picked, manifest = {}, []
     for cls, pred in CLASSES:
-        cands = [r for r in rows if pred(r["url"]) and r["_reqText"] is not None
-                 or (pred(r["url"]) and cls == "releases")]
         cands = [r for r in rows if pred(r["url"])]
         if not cands:
             continue
         reverse = "steady" not in cls  # steady = smallest, else largest
-        cand = sorted(cands, key=lambda r: r.get("reqSize") or 0, reverse=reverse)[0]
+
+        def keyfn(r):
+            # numeric (completed) status first — drop "aborted"/None to the end;
+            # then by size (largest for non-steady, smallest for steady).
+            ok = 0 if isinstance(r.get("status"), int) else 1
+            sz = r.get("reqSize") or 0
+            return (ok, -sz if reverse else sz)
+        cand = sorted(cands, key=keyfn)[0]
         if cand["rowId"] in picked and cls != "event_logging_steady":
             continue
         picked.setdefault(cand["rowId"], cls)

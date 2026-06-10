@@ -1,0 +1,66 @@
+[
+  {
+    "idx": 1,
+    "class": "v1_messages",
+    "file": "01-v1_messages.json",
+    "url": "https://api.anthropic.com/v1/messages?beta=true",
+    "status": 200,
+    "reqSize": 219310
+  },
+  {
+    "idx": 2,
+    "class": "event_logging_startup",
+    "file": "02-event_logging_startup.json",
+    "url": "https://api.anthropic.com/api/event_logging/v2/batch",
+    "status": 200,
+    "reqSize": 575283
+  },
+  {
+    "idx": 3,
+    "class": "event_logging_steady",
+    "file": "03-event_logging_steady.json",
+    "url": "https://api.anthropic.com/api/event_logging/v2/batch",
+    "status": 200,
+    "reqSize": 1869
+  },
+  {
+    "idx": 4,
+    "class": "datadog",
+    "file": "04-datadog.json",
+    "url": "https://http-intake.logs.us5.datadoghq.com/api/v2/logs",
+    "status": 202,
+    "reqSize": 174689
+  },
+  {
+    "idx": 5,
+    "class": "releases",
+    "file": "05-releases.json",
+    "url": "https://downloads.claude.ai/claude-code-releases/latest",
+    "status": 200,
+    "reqSize": 0
+  },
+  {
+    "idx": 6,
+    "class": "bootstrap",
+    "file": "06-bootstrap.json",
+    "url": "https://api.anthropic.com/api/claude_cli/bootstrap?entrypoint=cli&model=claude-fable-5",
+    "status": 200,
+    "reqSize": 0
+  },
+  {
+    "idx": 7,
+    "class": "code_triggers",
+    "file": "07-code_triggers.json",
+    "url": "https://api.anthropic.com/v1/code/triggers",
+    "status": 200,
+    "reqSize": 0
+  },
+  {
+    "idx": 8,
+    "class": "plugins_latest",
+    "file": "08-plugins_latest.json",
+    "url": "https://downloads.claude.ai/claude-code-releases/plugins/claude-plugins-official/latest",
+    "status": 200,
+    "reqSize": 0
+  }
+]
