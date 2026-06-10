@@ -1669,6 +1669,18 @@ func (h *Handler) handleInheritToken(c *gin.Context) {
 // does NOT install the legacy admin_token gate. The expected use is binding
 // it under /api/v2/admin/* after the SaaS RequireAdmin middleware.
 func (h *Handler) RegisterSaaSBridge(g *gin.RouterGroup) {
+	// The caller binds this group behind the SaaS RequireAdmin middleware, so
+	// every request that reaches these handlers is a verified operator. Mark it
+	// privileged here — the legacy adminAuth() gate (the only other place that
+	// sets this) is never in the chain on the SaaS path, so without this the
+	// read-only handlers redact operator-only detail: handleRequestsQuery would
+	// null out res.Entries and the Requests tab renders empty. The /console
+	// overview still anonymizes via its explicit anon=1 query param, which
+	// handleRequestsQuery honors regardless of this flag.
+	g.Use(func(c *gin.Context) {
+		c.Set(ctxKeyPrivileged, true)
+		c.Next()
+	})
 	g.GET("/requests", h.handleRequestsQuery)
 	g.GET("/requests/clients", h.handleRequestsClients)
 	g.GET("/requests/hourly", h.handleRequestsHourly)
