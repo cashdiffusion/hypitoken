@@ -2,8 +2,10 @@ import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { OtpField } from "@/components/auth/otp-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { OtpState } from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { apiPost } from "@/lib/api";
@@ -22,6 +24,7 @@ export default function ForgotPasswordPage() {
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [otpState, setOtpState] = useState<OtpState>("idle");
 
   if (user) return <Navigate to="/app" replace />;
 
@@ -41,15 +44,28 @@ export default function ForgotPasswordPage() {
 
   const resetPassword = async (e: FormEvent) => {
     e.preventDefault();
+    if (busy || otpState === "success") return;
+    if (code.length !== 6) {
+      setOtpState("error");
+      window.setTimeout(() => setOtpState("idle"), 650);
+      return;
+    }
     setBusy(true);
+    setOtpState("verifying");
     try {
       await apiPost("/auth/reset-password", { email, code, new_password: newPassword });
+      setOtpState("success");
       toast.success(t("auth.forgot.reset"));
-      nav("/login");
+      // hold on the celebration before sending them to sign in
+      window.setTimeout(() => nav("/login"), 1200);
     } catch (e) {
-      toast.error(errMsg(e, t("common.error")));
-    } finally {
+      setOtpState("error");
       setBusy(false);
+      toast.error(errMsg(e, t("common.error")));
+      window.setTimeout(() => {
+        setCode("");
+        setOtpState("idle");
+      }, 650);
     }
   };
 
@@ -60,19 +76,14 @@ export default function ForgotPasswordPage() {
         title={t("auth.forgot.step2Title")}
         sub={t("auth.forgot.step2Sub", { email })}
       >
-        <AuthForm key="reset" onSubmit={resetPassword} className="space-y-4">
-          <AuthRow className="space-y-2">
-            <Label htmlFor="code">{t("auth.register.codeLabel")}</Label>
-            <Input
-              id="code"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              required
+        <AuthForm key="reset" onSubmit={resetPassword} className="space-y-5">
+          <AuthRow>
+            <OtpField
               value={code}
-              onChange={(e) => setCode(e.target.value)}
-              className="font-mono text-lg tracking-widest text-center"
-              placeholder="000000"
+              onChange={setCode}
+              onComplete={() => document.getElementById("new-password")?.focus()}
+              state={otpState}
+              disabled={busy}
             />
           </AuthRow>
           <AuthRow className="space-y-2">
@@ -89,8 +100,16 @@ export default function ForgotPasswordPage() {
             <p className="text-xs text-muted-foreground">{t("auth.forgot.newPasswordHint")}</p>
           </AuthRow>
           <AuthRow>
-            <Button type="submit" className={cn("w-full", authBtn)} disabled={busy}>
-              {busy ? t("auth.forgot.resetting") : t("auth.forgot.submit")}
+            <Button
+              type="submit"
+              className={cn("w-full", authBtn)}
+              disabled={busy || code.length !== 6 || otpState === "success"}
+            >
+              {otpState === "success"
+                ? t("auth.forgot.verified")
+                : busy
+                  ? t("auth.forgot.resetting")
+                  : t("auth.forgot.submit")}
             </Button>
           </AuthRow>
           <AuthRow>
@@ -99,7 +118,11 @@ export default function ForgotPasswordPage() {
               variant="ghost"
               className={cn("w-full", authBtn)}
               disabled={busy}
-              onClick={() => setStep("start")}
+              onClick={() => {
+                setOtpState("idle");
+                setCode("");
+                setStep("start");
+              }}
             >
               {t("common.back")}
             </Button>

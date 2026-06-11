@@ -2,8 +2,10 @@ import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { OtpField } from "@/components/auth/otp-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { OtpState } from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { apiPost } from "@/lib/api";
@@ -20,6 +22,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const [otpState, setOtpState] = useState<OtpState>("idle");
 
   if (user) return <Navigate to="/app" replace />;
 
@@ -37,22 +40,36 @@ export default function RegisterPage() {
     }
   };
 
-  const register = async (e: FormEvent) => {
-    e.preventDefault();
+  // codeArg lets onComplete submit the just-typed value without waiting for the
+  // code state to flush; the form-submit path passes nothing and uses state.
+  const register = async (e?: FormEvent, codeArg?: string) => {
+    e?.preventDefault();
+    const c = codeArg ?? code;
+    if (c.length !== 6 || busy || otpState === "success") return;
     setBusy(true);
+    setOtpState("verifying");
     try {
       const r = await apiPost<{ token: string; user: User }>("/auth/register", {
         email,
         password,
-        code,
+        code: c,
       });
-      signIn(r.token, r.user);
+      setOtpState("success");
       toast.success(t("auth.register.created"));
-      nav("/app");
+      // hold on the celebration (confetti + green cells) before navigating
+      window.setTimeout(() => {
+        signIn(r.token, r.user);
+        nav("/app");
+      }, 1200);
     } catch (e) {
-      toast.error(errMsg(e, t("auth.register.registerFailed")));
-    } finally {
+      setOtpState("error");
       setBusy(false);
+      toast.error(errMsg(e, t("auth.register.registerFailed")));
+      // clear the cells and let the user retry after the shake settles
+      window.setTimeout(() => {
+        setCode("");
+        setOtpState("idle");
+      }, 650);
     }
   };
 
@@ -63,23 +80,27 @@ export default function RegisterPage() {
         title={t("auth.register.verifyTitle")}
         sub={t("auth.register.verifySub", { email })}
       >
-        <AuthForm key="verify" onSubmit={register} className="space-y-4">
-          <AuthRow className="space-y-2">
-            <Label htmlFor="code">{t("auth.register.codeLabel")}</Label>
-            <Input
-              id="code"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              required
+        <AuthForm key="verify" onSubmit={register} className="space-y-6">
+          <AuthRow>
+            <OtpField
               value={code}
-              onChange={(e) => setCode(e.target.value)}
-              className="font-mono text-lg tracking-widest text-center"
+              onChange={setCode}
+              onComplete={(c) => register(undefined, c)}
+              state={otpState}
+              disabled={busy}
             />
           </AuthRow>
           <AuthRow>
-            <Button type="submit" className={cn("w-full", authBtn)} disabled={busy}>
-              {busy ? t("auth.register.verifying") : t("auth.register.verifySubmit")}
+            <Button
+              type="submit"
+              className={cn("w-full", authBtn)}
+              disabled={busy || code.length !== 6 || otpState === "success"}
+            >
+              {otpState === "success"
+                ? t("auth.register.verified")
+                : busy
+                  ? t("auth.register.verifying")
+                  : t("auth.register.verifySubmit")}
             </Button>
           </AuthRow>
           <AuthRow>
@@ -87,7 +108,12 @@ export default function RegisterPage() {
               type="button"
               variant="ghost"
               className={cn("w-full", authBtn)}
-              onClick={() => setStep("start")}
+              disabled={busy}
+              onClick={() => {
+                setOtpState("idle");
+                setCode("");
+                setStep("start");
+              }}
             >
               {t("common.back")}
             </Button>
