@@ -14,6 +14,7 @@ import (
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
+	"github.com/wjsoj/CPA-Claude/internal/saas/growth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/pricing"
@@ -25,7 +26,7 @@ import (
 // /api/v2/admin/credentials/* is exposed. legacyH may be nil — when set, the
 // /api/v2/admin/* group also exposes request-log queries + Anthropic OAuth
 // quota probe (handlers reused from the legacy operator API).
-func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog) {
+func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service) {
 	v2 := engine.Group("/api/v2")
 
 	// Public.
@@ -36,6 +37,12 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	authG := v2.Group("/auth")
 	authH.Routes(authG)
 	billingH.PublicRoutes(v2)
+
+	// Growth (marketing attribution) — public, unauthenticated visit/dwell
+	// tracking beacons. nil when the module is disabled.
+	if growthH != nil {
+		growthH.PublicRoutes(v2)
+	}
 
 	// Authenticated.
 	authed := v2.Group("")
@@ -571,6 +578,9 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	adminH.Routes(adminG)
 	if credH != nil {
 		credH.Routes(adminG)
+	}
+	if growthH != nil {
+		growthH.AdminRoutes(adminG)
 	}
 	if legacyH != nil {
 		legacyH.RegisterSaaSBridge(adminG)

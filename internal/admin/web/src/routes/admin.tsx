@@ -6,6 +6,7 @@ import {
   Gauge,
   KeyRound,
   LayoutDashboard,
+  Megaphone,
   Pencil,
   RefreshCw,
   ScrollText,
@@ -23,6 +24,7 @@ import { useTranslation } from "react-i18next";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { AdminDashboard } from "@/components/admin/admin-dashboard";
+import { AttributionTab } from "@/components/admin/attribution-tab";
 import { OverviewPanel } from "@/components/admin/overview-panel";
 import { RequestsExplorer } from "@/components/admin/requests-explorer";
 import { Sparkline as MiniSpark } from "@/components/admin/sparkline";
@@ -61,6 +63,7 @@ const TABS = [
   { to: "credentials", labelKey: "admin.tabs.credentials", icon: KeyRound },
   { to: "requests", labelKey: "admin.tabs.requests", icon: ScrollText },
   { to: "payments", labelKey: "admin.tabs.payments", icon: ShoppingCart },
+  { to: "growth", labelKey: "admin.tabs.growth", icon: Megaphone },
 ];
 
 export default function AdminPage() {
@@ -98,6 +101,7 @@ export default function AdminPage() {
         <Route path="credentials" element={<CredentialsTab />} />
         <Route path="requests" element={<RequestsExplorer refreshTick={0} />} />
         <Route path="payments" element={<PaymentsTab />} />
+        <Route path="growth" element={<AttributionTab />} />
       </Routes>
     </div>
   );

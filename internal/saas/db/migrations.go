@@ -154,6 +154,53 @@ WHERE  is_default = 1
 	`
 ALTER TABLE user_tokens ADD COLUMN groups TEXT NOT NULL DEFAULT '';
 `,
+	// 5: marketing-channel attribution (the internal/saas/growth module).
+	//    Three self-contained tables — growth owns them entirely and the rest
+	//    of the SaaS layer never reads them. Kept here only because the schema
+	//    migrator is centralized (append-only + pre-migrate backup); all query
+	//    and handler logic lives in internal/saas/growth.
+	//
+	//      marketing_channels — one row per referral link (?ref=<slug>), with a
+	//                           configurable USD signup bonus.
+	//      channel_visits     — first-touch visit per (slug, anonymous visitor),
+	//                           accumulating dwell time and a converted flag.
+	//      channel_referrals  — the signup→channel link, one channel credited
+	//                           per user, recording the bonus actually granted.
+	`
+CREATE TABLE marketing_channels (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug        TEXT NOT NULL UNIQUE,                  -- url ?ref=<slug>
+    name        TEXT NOT NULL DEFAULT '',              -- display name, e.g. "Twitter / X"
+    description TEXT NOT NULL DEFAULT '',
+    bonus_usd   REAL NOT NULL DEFAULT 0,               -- signup bonus granted to referees
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE channel_visits (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug              TEXT NOT NULL,
+    visitor_id        TEXT NOT NULL,                   -- anonymous, localStorage-persisted
+    first_seen        INTEGER NOT NULL,
+    last_seen         INTEGER NOT NULL,
+    duration_ms       INTEGER NOT NULL DEFAULT 0,      -- accumulated dwell time
+    converted_user_id INTEGER NOT NULL DEFAULT 0,      -- 0 = not (yet) converted
+    created_at        INTEGER NOT NULL,
+    UNIQUE(slug, visitor_id)                           -- first-touch: one row per (channel, visitor)
+);
+CREATE INDEX idx_channel_visits_slug ON channel_visits(slug, first_seen);
+
+CREATE TABLE channel_referrals (
+    user_id    INTEGER PRIMARY KEY,                    -- one channel credited per user
+    slug       TEXT NOT NULL,
+    bonus_usd  REAL NOT NULL DEFAULT 0,                -- bonus actually granted at signup
+    visitor_id TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_channel_referrals_slug ON channel_referrals(slug);
+`,
 }
 
 func (db *DB) migrate() error {

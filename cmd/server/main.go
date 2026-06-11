@@ -24,6 +24,7 @@ import (
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	saasdb "github.com/wjsoj/CPA-Claude/internal/saas/db"
+	"github.com/wjsoj/CPA-Claude/internal/saas/growth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/health"
 	"github.com/wjsoj/CPA-Claude/internal/saas/mail"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
@@ -220,6 +221,13 @@ func main() {
 		adminH := saasadmin.New(saasDB)
 		credH := saasadmin.NewCred(pool, cfg.AuthDir, cfg.UseUTLS)
 
+		// Growth (marketing-channel attribution). Self-contained module: owns
+		// its own tables, credits the signup bonus through the audited wallet
+		// ledger (saasDB satisfies growth.Wallet), and registers the conversion
+		// hook on the auth handler so ?ref= signups are attributed.
+		growthSvc := growth.New(saasDB.DB, saasDB)
+		authH.Referral = growthSvc
+
 		// Catalog used for pricing computation (same instance as the proxy's
 		// internal billing — the SaaS layer only adds the multiplier on top).
 		catalog := pricing.NewCatalog(cfg.Pricing)
@@ -251,7 +259,7 @@ func main() {
 			return true, claims.Role == "admin"
 		}
 		for _, h := range s.GinEngines() {
-			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog)
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc)
 			if spaFS != nil {
 				saasadapter.MountSPA(h, spaFS)
 			}

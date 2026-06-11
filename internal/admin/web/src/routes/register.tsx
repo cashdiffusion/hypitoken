@@ -9,6 +9,7 @@ import type { OtpState } from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { apiPost } from "@/lib/api";
+import { clearReferral, getReferral } from "@/lib/attribution";
 import type { User } from "@/lib/types";
 import { cn, errMsg } from "@/lib/utils";
 import { AuthForm, AuthLayout, AuthRow, authBtn } from "./login";
@@ -49,11 +50,17 @@ export default function RegisterPage() {
     setBusy(true);
     setOtpState("verifying");
     try {
+      // Attach marketing attribution (?ref=) if this visitor arrived through a
+      // channel link, so the backend can grant the channel's signup bonus.
+      const referral = getReferral();
       const r = await apiPost<{ token: string; user: User }>("/auth/register", {
         email,
         password,
         code: c,
+        ref: referral?.ref,
+        vid: referral?.vid,
       });
+      clearReferral();
       setOtpState("success");
       toast.success(t("auth.register.created"));
       // hold on the celebration (confetti + green cells) before navigating

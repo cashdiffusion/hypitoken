@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AppShell, PublicLayout } from "@/components/layout/shell";
@@ -5,6 +6,7 @@ import { RequireAdmin, RequireAuth } from "@/components/require-auth";
 import { TitleWatcher } from "@/components/title-watcher";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { AuthProvider } from "@/hooks/use-auth";
+import { initAttribution } from "@/lib/attribution";
 import AdminPage from "@/routes/admin";
 import BillingPage from "@/routes/billing";
 import ConsolePage from "@/routes/console";
@@ -20,6 +22,12 @@ import StatusPage from "@/routes/status";
 import TokensPage from "@/routes/tokens";
 
 export default function App() {
+  // Capture marketing attribution (?ref=) on first load and start dwell
+  // tracking. Best-effort and self-contained — see lib/attribution.
+  useEffect(() => {
+    initAttribution();
+  }, []);
+
   return (
     <AuthProvider>
       <ConfirmProvider>

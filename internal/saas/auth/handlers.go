@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +14,16 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/mail"
 )
 
+// ReferralGranter is the optional growth-module seam. After a user registers
+// through a ?ref=<channel> link, it credits the channel's configured signup
+// bonus and records the conversion. nil when the growth module is disabled;
+// implemented by *saas/growth.Service. Defined here (not imported from growth)
+// so the auth package keeps no dependency on growth — wiring is one-way, set by
+// main.go. Its error is logged, never blocks registration.
+type ReferralGranter interface {
+	GrantSignupBonus(ctx context.Context, userID int64, ref, vid string) (bonusUSD float64, channel string, err error)
+}
+
 type Handler struct {
 	DB           *db.DB
 	Issuer       *Issuer
@@ -20,6 +31,10 @@ type Handler struct {
 	SiteName     string
 	FreeRegister bool
 	CodeTTL      time.Duration
+
+	// Referral is optional; when set, signups carrying a ?ref= channel get the
+	// channel's bonus. Left nil disables attribution entirely.
+	Referral ReferralGranter
 
 	codeLimiter *codeRateLimiter
 }
@@ -44,6 +59,11 @@ type registerReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 	Code     string `json:"code"` // email verification code (optional in dev)
+	// Marketing attribution (optional): the ?ref= channel slug the browser
+	// captured at first touch and the anonymous visitor id, used to grant the
+	// channel's signup bonus and mark the originating visit converted.
+	Ref string `json:"ref"`
+	Vid string `json:"vid"`
 }
 
 func (h *Handler) register(c *gin.Context) {
@@ -101,6 +121,19 @@ func (h *Handler) register(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// Marketing attribution: credit the channel signup bonus (best-effort —
+	// a growth-module failure must never fail an otherwise-valid signup). On
+	// success re-read the user so the response reflects the credited balance.
+	if h.Referral != nil && strings.TrimSpace(req.Ref) != "" {
+		if bonus, channel, gerr := h.Referral.GrantSignupBonus(c.Request.Context(), u.ID, req.Ref, req.Vid); gerr != nil {
+			log.Warnf("register: signup bonus for user %d (ref=%q) failed: %v", u.ID, req.Ref, gerr)
+		} else if bonus > 0 {
+			if fresh, ferr := h.DB.GetUser(c.Request.Context(), u.ID); ferr == nil {
+				u = fresh
+			}
+			log.Infof("register: user %d granted $%.2f signup bonus via channel %q", u.ID, bonus, channel)
+		}
 	}
 	tok, exp, err := h.Issuer.Issue(u.ID, u.Role)
 	if err != nil {
