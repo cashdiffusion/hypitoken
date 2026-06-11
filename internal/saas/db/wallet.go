@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -72,20 +73,35 @@ func (db *DB) GetBalance(ctx context.Context, userID int64) (float64, error) {
 	return bal, err
 }
 
-// ListWalletTx returns a page of the user's transactions plus the user's
-// total transaction count (for pagination).
-func (db *DB) ListWalletTx(ctx context.Context, userID int64, limit, offset int) ([]*WalletTx, int, error) {
+// ListWalletTx returns a page of the user's transactions plus the matching
+// total count (for pagination). When `kinds` is non-empty the ledger is
+// filtered to those kinds — the billing wallet-history view passes the
+// non-charge kinds so the displayed rows and the `total` count stay in lock
+// step (per-request charges live in /app/logs instead). Pass nil for the full
+// ledger (the admin per-user view).
+func (db *DB) ListWalletTx(ctx context.Context, userID int64, kinds []string, limit, offset int) ([]*WalletTx, int, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if offset < 0 {
 		offset = 0
 	}
+	where := `WHERE user_id = ?`
+	args := []any{userID}
+	if len(kinds) > 0 {
+		ph := make([]string, len(kinds))
+		for i, k := range kinds {
+			ph[i] = "?"
+			args = append(args, k)
+		}
+		where += ` AND kind IN (` + strings.Join(ph, ",") + `)`
+	}
 	var total int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM wallet_tx WHERE user_id = ?`, userID).Scan(&total); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM wallet_tx `+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id, user_id, kind, amount_usd, ref, note, created_at FROM wallet_tx WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`, userID, limit, offset)
+	args = append(args, limit, offset)
+	rows, err := db.QueryContext(ctx, `SELECT id, user_id, kind, amount_usd, ref, note, created_at FROM wallet_tx `+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -99,6 +115,54 @@ func (db *DB) ListWalletTx(ctx context.Context, userID int64, limit, offset int)
 		}
 		t.CreatedAt = time.Unix(c, 0)
 		out = append(out, &t)
+	}
+	return out, total, rows.Err()
+}
+
+// FleetAdjustment is one admin balance adjustment / signup bonus joined to the
+// owning user's email, for the operator's fleet-wide adjustments view.
+type FleetAdjustment struct {
+	ID        int64
+	UserID    int64
+	Email     string
+	AmountUSD float64
+	Ref       string
+	Note      string
+	CreatedAt time.Time
+}
+
+// ListFleetAdjustments returns a page of every wallet adjustment across all
+// users (kind='adjust' — both manual operator grants and channel signup
+// bonuses, told apart by ref), newest first, plus the total count. This is
+// the money that entered wallets without a payment order, so it's surfaced
+// separately from the alipay_orders payment list.
+func (db *DB) ListFleetAdjustments(ctx context.Context, limit, offset int) ([]*FleetAdjustment, int, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM wallet_tx WHERE kind = ?`, TxKindAdjust).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := db.QueryContext(ctx, `SELECT w.id, w.user_id, COALESCE(u.email, ''), w.amount_usd, w.ref, w.note, w.created_at
+		FROM wallet_tx w LEFT JOIN users u ON u.id = w.user_id
+		WHERE w.kind = ? ORDER BY w.id DESC LIMIT ? OFFSET ?`, TxKindAdjust, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []*FleetAdjustment
+	for rows.Next() {
+		var a FleetAdjustment
+		var c int64
+		if err := rows.Scan(&a.ID, &a.UserID, &a.Email, &a.AmountUSD, &a.Ref, &a.Note, &c); err != nil {
+			return nil, 0, err
+		}
+		a.CreatedAt = time.Unix(c, 0)
+		out = append(out, &a)
 	}
 	return out, total, rows.Err()
 }

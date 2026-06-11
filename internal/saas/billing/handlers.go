@@ -192,10 +192,22 @@ func pageParams(c *gin.Context) (limit, offset int) {
 	return limit, offset
 }
 
+// walletHistoryKinds are the wallet-history kinds the billing page shows:
+// everything except per-request charges (those live in /app/logs). Filtering
+// server-side keeps the displayed rows in step with the paginated total.
+var walletHistoryKinds = []string{db.TxKindTopup, db.TxKindAdjust, db.TxKindRefund}
+
 func (h *Handler) transactions(c *gin.Context) {
 	u := saasauth.CurrentUser(c)
 	limit, offset := pageParams(c)
-	txs, total, err := h.DB.ListWalletTx(c.Request.Context(), u.ID, limit, offset)
+	// Default to the wallet-history view (charges hidden). `all=1` returns the
+	// full ledger — used by the page's lifetime-usage stat cards, which need
+	// the charge rows to tally spend.
+	kinds := walletHistoryKinds
+	if c.Query("all") == "1" {
+		kinds = nil
+	}
+	txs, total, err := h.DB.ListWalletTx(c.Request.Context(), u.ID, kinds, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -537,9 +549,15 @@ func (h *Handler) allowCreate(userID int64) (bool, int) {
 	return true, 0
 }
 
+// expiredOrderRetention is how long an expired/failed order lingers in the
+// table before the sweeper deletes it. Comfortably past any late-settlement
+// rescue window (the Stripe poll/webhook path settles within minutes).
+const expiredOrderRetention = 48 * time.Hour
+
 // RunExpirySweeper periodically marks pending orders older than OrderTTL as
-// expired, so late notifications and reconciliation calls can't credit them.
-// Cancel ctx to stop. Cheap — it's a single UPDATE.
+// expired (so late notifications and reconciliation calls can't credit them)
+// and garbage-collects long-dead expired/failed orders. Cancel ctx to stop.
+// Cheap — one UPDATE plus one DELETE.
 func (h *Handler) RunExpirySweeper(ctx context.Context) {
 	if h.OrderTTL <= 0 {
 		return
@@ -551,14 +569,25 @@ func (h *Handler) RunExpirySweeper(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			cutoff := time.Now().Add(-h.OrderTTL)
-			n, err := h.DB.ExpirePendingOrdersBefore(ctx, cutoff)
+			now := time.Now()
+			n, err := h.DB.ExpirePendingOrdersBefore(ctx, now.Add(-h.OrderTTL))
 			if err != nil {
 				log.Warnf("billing: expiry sweep failed: %v", err)
 				continue
 			}
 			if n > 0 {
 				log.Infof("billing: expired %d stale pending order(s) older than %s", n, h.OrderTTL)
+			}
+			// Garbage-collect long-dead expired/failed orders (already hidden
+			// from every view). 48h is far past any late-settlement rescue
+			// window, so this can't drop a row a slow payment still needs.
+			d, err := h.DB.DeleteExpiredOrdersBefore(ctx, now.Add(-expiredOrderRetention))
+			if err != nil {
+				log.Warnf("billing: expired-order cleanup failed: %v", err)
+				continue
+			}
+			if d > 0 {
+				log.Infof("billing: cleaned up %d old expired/failed order(s)", d)
 			}
 		}
 	}

@@ -108,8 +108,10 @@ export default function BillingPage() {
 
   const loadStats = async () => {
     try {
+      // all=1 → full ledger incl. charges, which the lifetime/requests cards
+      // tally (the wallet-history table fetches the charge-free default).
       const r = await apiGet<{ transactions: WalletTx[] }>(
-        `/billing/transactions?limit=${STATS_WINDOW}`,
+        `/billing/transactions?limit=${STATS_WINDOW}&all=1`,
       );
       setStatsTx(r.transactions || []);
     } catch {
@@ -245,12 +247,11 @@ export default function BillingPage() {
                   <Loader2 className="h-4 w-4 animate-spin" /> {t("common.loading")}
                 </div>
               );
-            // Expired/failed orders stay hidden, but only within the current
-            // page — the pager walks the unfiltered server-side list.
-            const visible = orders.filter((o) => o.status === "pending" || o.status === "paid");
+            // The server returns only active (pending|paid) orders, and its
+            // `total` counts the same set — so rows and the pager agree.
             return (
               <>
-                {visible.length === 0 ? (
+                {orders.length === 0 ? (
                   <div className="p-8 text-center text-sm text-muted-foreground">
                     {t("billing.noActiveOrders")}
                   </div>
@@ -266,7 +267,7 @@ export default function BillingPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {visible.map((o) => (
+                        {orders.map((o) => (
                           <TableRow key={o.out_trade_no}>
                             <TableCell className="font-mono text-xs">
                               {o.out_trade_no.slice(0, 16)}…
@@ -326,15 +327,14 @@ export default function BillingPage() {
                   <Loader2 className="h-4 w-4 animate-spin" /> {t("common.loading")}
                 </div>
               );
-            // Per-request charges are hidden here (they live in /app/logs), but
-            // only within the current page — pagination walks the unfiltered
-            // server-side ledger, so a page can be partially (or fully) charges.
-            const visible = tx.filter((w) => w.kind !== "charge");
+            // Per-request charges are excluded server-side (they live in
+            // /app/logs), so the rows and the pager `total` count the same
+            // non-charge ledger.
             return (
               <>
-                {visible.length === 0 ? (
+                {tx.length === 0 ? (
                   <div className="p-8 text-center text-sm text-muted-foreground">
-                    {tx.length === 0 ? t("billing.noWalletYet") : t("billing.chargesOnlyPage")}
+                    {t("billing.noWalletYet")}
                   </div>
                 ) : (
                   <div className={txBusy ? "pointer-events-none opacity-50" : undefined}>
@@ -350,7 +350,7 @@ export default function BillingPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {visible.map((tr) => (
+                        {tx.map((tr) => (
                           <TableRow key={tr.id}>
                             <TableCell className="capitalize font-medium">{tr.kind}</TableCell>
                             <TableCell

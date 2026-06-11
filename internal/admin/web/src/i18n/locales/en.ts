@@ -202,8 +202,6 @@ export default {
     topUpOrdersSub:
       "Pending and recently paid top-up orders. Expired orders are hidden automatically.",
     noActiveOrders: "No active orders.",
-    chargesOnlyPage:
-      "This page contains only per-request charges (hidden here) — flip the page or see the request logs.",
     walletHistory: "Wallet history",
     walletHistorySub:
       "Top-ups, refunds, and admin adjustments only. Per-request charges are available in <logs>Logs</logs> with token-level detail.",
@@ -487,7 +485,8 @@ export default {
       newApiCreated: "API key added",
     },
     payments: {
-      heading: "All payments ({{n}})",
+      heading: "Top-up orders ({{n}})",
+      sub: "Pending and completed top-up orders. Expired/failed orders are hidden automatically and cleaned up periodically.",
       cols: {
         order: "Order",
         user: "User",
@@ -501,6 +500,20 @@ export default {
       reconcile: "Sync payment status",
       reconciled: "Reconciled · current status {{state}}",
       reconcileFailed: "Reconcile failed",
+    },
+    adjustments: {
+      heading: "Balance adjustments & bonuses ({{n}})",
+      sub: "Credit that entered wallets without a payment order — manual operator adjustments and new-user channel bonuses.",
+      cols: {
+        user: "User",
+        amount: "Amount",
+        source: "Source",
+        note: "Note",
+        created: "When",
+      },
+      bonus: "Signup bonus",
+      manual: "Manual",
+      empty: "No adjustments yet.",
     },
     dashboard: {
       eyebrow: "Admin overview",

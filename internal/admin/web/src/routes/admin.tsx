@@ -53,7 +53,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
-import type { AdminOrder, Credential, PricingGroup, User } from "@/lib/types";
+import type { AdminAdjustment, AdminOrder, Credential, PricingGroup, User } from "@/lib/types";
 import { cn, errMsg, fmtInt, fmtUSD } from "@/lib/utils";
 
 const TABS = [
@@ -2333,61 +2333,164 @@ function PaymentsTab() {
     };
   }, [offset]);
   return (
+    <div className="space-y-6">
+      <Reveal>
+        <GlassPanel
+          title={t("admin.payments.heading", { n: total ?? orders.length })}
+          description={t("admin.payments.sub")}
+          bodyClassName="p-0"
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("admin.payments.cols.order")}</TableHead>
+                <TableHead>{t("admin.payments.cols.user")}</TableHead>
+                <TableHead className="text-right">{t("admin.payments.cols.usd")}</TableHead>
+                <TableHead>{t("admin.payments.cols.status")}</TableHead>
+                <TableHead>{t("admin.payments.cols.created")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {orders.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
+                    {busy ? t("common.loading") : t("admin.payments.empty")}
+                  </TableCell>
+                </TableRow>
+              )}
+              {orders.map((o) => (
+                <TableRow key={o.OutTradeNo}>
+                  <TableCell className="font-mono text-xs">{o.OutTradeNo}</TableCell>
+                  <TableCell>#{o.UserID}</TableCell>
+                  <TableCell className="font-mono tabular-nums text-right">
+                    {fmtUSD(o.USDCredit)}
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className={`rounded border px-2 py-0.5 text-xs font-mono uppercase ${o.Status === "paid" ? "border-success/30 bg-success/15 text-success" : "border-warning/30 bg-warning/15 text-warning"}`}
+                    >
+                      {o.Status === "paid"
+                        ? t("common.paid")
+                        : o.Status === "pending"
+                          ? t("common.pending")
+                          : o.Status === "expired"
+                            ? t("common.expired")
+                            : o.Status}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {o.CreatedAt && new Date(o.CreatedAt).toLocaleString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Pager
+            offset={offset}
+            limit={ORDERS_PAGE}
+            total={total}
+            count={orders.length}
+            busy={busy}
+            onChange={setOffset}
+            className="border-t border-border px-4 py-3"
+          />
+        </GlassPanel>
+      </Reveal>
+      <AdjustmentsPanel />
+    </div>
+  );
+}
+
+const ADJUSTMENTS_PAGE = 50;
+
+// AdjustmentsPanel surfaces wallet credits that arrived without a payment
+// order — manual operator grants and channel signup bonuses (new-user
+// rewards). Both are kind='adjust' server-side; a "signup_bonus:" ref marks
+// the bonus, which this view badges distinctly.
+function AdjustmentsPanel() {
+  const { t } = useTranslation();
+  const [rows, setRows] = useState<AdminAdjustment[]>([]);
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState<number | undefined>(undefined);
+  const [busy, setBusy] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    setBusy(true);
+    apiGet<{ adjustments: AdminAdjustment[]; total?: number }>(
+      `/admin/adjustments?limit=${ADJUSTMENTS_PAGE}&offset=${offset}`,
+    )
+      .then((r) => {
+        if (cancelled) return;
+        setRows(r.adjustments || []);
+        setTotal(r.total);
+      })
+      .catch((e) => {
+        if (!cancelled) toast.error(errMsg(e));
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [offset]);
+  return (
     <Reveal>
       <GlassPanel
-        title={t("admin.payments.heading", { n: total ?? orders.length })}
+        title={t("admin.adjustments.heading", { n: total ?? rows.length })}
+        description={t("admin.adjustments.sub")}
         bodyClassName="p-0"
       >
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t("admin.payments.cols.order")}</TableHead>
-              <TableHead>{t("admin.payments.cols.user")}</TableHead>
-              <TableHead className="text-right">{t("admin.payments.cols.usd")}</TableHead>
-              <TableHead>{t("admin.payments.cols.status")}</TableHead>
-              <TableHead>{t("admin.payments.cols.created")}</TableHead>
+              <TableHead>{t("admin.adjustments.cols.user")}</TableHead>
+              <TableHead className="text-right">{t("admin.adjustments.cols.amount")}</TableHead>
+              <TableHead>{t("admin.adjustments.cols.source")}</TableHead>
+              <TableHead>{t("admin.adjustments.cols.note")}</TableHead>
+              <TableHead>{t("admin.adjustments.cols.created")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {orders.length === 0 && (
+            {rows.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
-                  {busy ? t("common.loading") : t("admin.payments.empty")}
+                  {busy ? t("common.loading") : t("admin.adjustments.empty")}
                 </TableCell>
               </TableRow>
             )}
-            {orders.map((o) => (
-              <TableRow key={o.OutTradeNo}>
-                <TableCell className="font-mono text-xs">{o.OutTradeNo}</TableCell>
-                <TableCell>#{o.UserID}</TableCell>
-                <TableCell className="font-mono tabular-nums text-right">
-                  {fmtUSD(o.USDCredit)}
-                </TableCell>
-                <TableCell>
-                  <span
-                    className={`rounded border px-2 py-0.5 text-xs font-mono uppercase ${o.Status === "paid" ? "border-success/30 bg-success/15 text-success" : "border-warning/30 bg-warning/15 text-warning"}`}
+            {rows.map((a) => {
+              const isBonus = a.ref.startsWith("signup_bonus:");
+              return (
+                <TableRow key={a.id}>
+                  <TableCell className="text-xs">{a.email || `#${a.user_id}`}</TableCell>
+                  <TableCell
+                    className={`font-mono tabular-nums text-right ${a.amount_usd >= 0 ? "text-success" : ""}`}
                   >
-                    {o.Status === "paid"
-                      ? t("common.paid")
-                      : o.Status === "pending"
-                        ? t("common.pending")
-                        : o.Status === "expired"
-                          ? t("common.expired")
-                          : o.Status}
-                  </span>
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {o.CreatedAt && new Date(o.CreatedAt).toLocaleString()}
-                </TableCell>
-              </TableRow>
-            ))}
+                    {a.amount_usd >= 0 ? "+" : ""}
+                    {fmtUSD(a.amount_usd)}
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className={`rounded border px-2 py-0.5 text-xs font-medium ${isBonus ? "border-primary/30 bg-primary/15 text-primary" : "border-border bg-muted/40 text-muted-foreground"}`}
+                    >
+                      {isBonus ? t("admin.adjustments.bonus") : t("admin.adjustments.manual")}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{a.note || "—"}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {new Date(a.created_at * 1000).toLocaleString()}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
         <Pager
           offset={offset}
-          limit={ORDERS_PAGE}
+          limit={ADJUSTMENTS_PAGE}
           total={total}
-          count={orders.length}
+          count={rows.length}
           busy={busy}
           onChange={setOffset}
           className="border-t border-border px-4 py-3"

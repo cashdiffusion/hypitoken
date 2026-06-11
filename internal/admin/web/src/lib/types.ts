@@ -167,3 +167,16 @@ export interface AdminOrder {
   CreatedAt: string;
   PaidAt: string;
 }
+
+// AdminAdjustment is one fleet-wide wallet adjustment (kind='adjust') served
+// by /admin/adjustments — a manual operator grant or a channel signup bonus.
+// A `ref` of "signup_bonus:<slug>" marks the latter.
+export interface AdminAdjustment {
+  id: number;
+  user_id: number;
+  email: string;
+  amount_usd: number;
+  ref: string;
+  note: string;
+  created_at: number;
+}

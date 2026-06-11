@@ -199,7 +199,6 @@ export default {
     topUpOrders: "充值订单",
     topUpOrdersSub: "展示待支付和最近完成的充值订单，已过期订单会自动隐藏。",
     noActiveOrders: "暂无活动订单。",
-    chargesOnlyPage: "本页流水均为请求计费（此处已隐藏），请翻页或前往调用日志查看。",
     walletHistory: "钱包流水",
     walletHistorySub:
       "仅展示充值、退款和管理员调整。逐笔请求扣费请查看 <logs>日志</logs>，精确到 token 级。",
@@ -478,7 +477,8 @@ export default {
       newApiCreated: "API key 已添加",
     },
     payments: {
-      heading: "所有支付 ({{n}})",
+      heading: "充值订单 ({{n}})",
+      sub: "待支付与已完成的充值订单。已过期/失败的订单会自动隐藏并定期清理。",
       cols: {
         order: "订单",
         user: "用户",
@@ -492,6 +492,20 @@ export default {
       reconcile: "同步支付状态",
       reconciled: "已对账，当前状态 {{state}}",
       reconcileFailed: "对账失败",
+    },
+    adjustments: {
+      heading: "余额调整与赠送 ({{n}})",
+      sub: "未经支付订单进入钱包的额度——管理员手动调整与新用户渠道奖励。",
+      cols: {
+        user: "用户",
+        amount: "金额",
+        source: "来源",
+        note: "备注",
+        created: "时间",
+      },
+      bonus: "新用户奖励",
+      manual: "手动调整",
+      empty: "暂无调整记录。",
     },
     dashboard: {
       eyebrow: "管理员指挥中心",

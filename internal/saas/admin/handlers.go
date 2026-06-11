@@ -36,6 +36,9 @@ func (h *Handler) Routes(g *gin.RouterGroup) {
 	// orders / payments
 	g.GET("/orders", h.listOrders)
 	g.POST("/orders/:id/reconcile", h.reconcileOrder)
+	// balance adjustments / signup bonuses (money that entered wallets
+	// without a payment order)
+	g.GET("/adjustments", h.listAdjustments)
 
 	// model health
 	g.GET("/health", h.listHealth)
@@ -240,7 +243,9 @@ func (h *Handler) userTx(c *gin.Context) {
 		return
 	}
 	limit, offset := pageParams(c)
-	txs, total, err := h.DB.ListWalletTx(c.Request.Context(), id, limit, offset)
+	// nil kinds → the full per-user ledger (charges included), unlike the
+	// user-facing billing history which hides charges.
+	txs, total, err := h.DB.ListWalletTx(c.Request.Context(), id, nil, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -362,6 +367,28 @@ func (h *Handler) listOrders(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"orders": os, "total": total})
+}
+
+// listAdjustments returns the fleet-wide list of wallet adjustments — manual
+// operator grants and channel signup bonuses (kind='adjust') — that credited
+// wallets without a payment order. The frontend tells the two apart by `ref`
+// (signup bonuses carry "signup_bonus:<slug>").
+func (h *Handler) listAdjustments(c *gin.Context) {
+	limit, offset := pageParams(c)
+	adj, total, err := h.DB.ListFleetAdjustments(c.Request.Context(), limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	out := make([]gin.H, 0, len(adj))
+	for _, a := range adj {
+		out = append(out, gin.H{
+			"id": a.ID, "user_id": a.UserID, "email": a.Email,
+			"amount_usd": a.AmountUSD, "ref": a.Ref, "note": a.Note,
+			"created_at": a.CreatedAt.Unix(),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"adjustments": out, "total": total})
 }
 
 func (h *Handler) listHealth(c *gin.Context) {

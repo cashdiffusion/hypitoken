@@ -208,8 +208,17 @@ func (db *DB) CountPendingOrders(ctx context.Context, userID int64) (int, error)
 	return n, err
 }
 
-// ListOrders returns a page of the user's orders plus the user's total
-// order count (for pagination).
+// activeOrderStatuses are the only states surfaced in the order lists —
+// in-flight (pending) and completed (paid). Expired and failed orders are
+// abandoned checkout attempts with no financial meaning, so both the admin
+// payments view and the user billing view hide them. Filtering here (not in
+// the frontend) keeps the row count consistent with the paginated `total`:
+// the list and the COUNT walk the identical predicate.
+const activeOrderFilter = `status IN ('pending', 'paid')`
+
+// ListOrders returns a page of the user's active (pending|paid) orders plus
+// the count of such orders (for pagination). Expired/failed orders are
+// excluded from both the rows and the total.
 func (db *DB) ListOrders(ctx context.Context, userID int64, limit, offset int) ([]*AlipayOrder, int, error) {
 	if limit <= 0 {
 		limit = 50
@@ -218,10 +227,10 @@ func (db *DB) ListOrders(ctx context.Context, userID int64, limit, offset int) (
 		offset = 0
 	}
 	var total int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alipay_orders WHERE user_id = ?`, userID).Scan(&total); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alipay_orders WHERE user_id = ? AND `+activeOrderFilter, userID).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT `+orderCols+` FROM alipay_orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`, userID, limit, offset)
+	rows, err := db.QueryContext(ctx, `SELECT `+orderCols+` FROM alipay_orders WHERE user_id = ? AND `+activeOrderFilter+` ORDER BY created_at DESC LIMIT ? OFFSET ?`, userID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -237,8 +246,9 @@ func (db *DB) ListOrders(ctx context.Context, userID int64, limit, offset int) (
 	return out, total, rows.Err()
 }
 
-// ListAllOrders returns a page of all orders plus the total order count
-// (for pagination).
+// ListAllOrders returns a page of all active (pending|paid) orders plus the
+// count of such orders (for pagination). Expired/failed orders are excluded
+// from both the rows and the total.
 func (db *DB) ListAllOrders(ctx context.Context, limit, offset int) ([]*AlipayOrder, int, error) {
 	if limit <= 0 {
 		limit = 100
@@ -247,10 +257,10 @@ func (db *DB) ListAllOrders(ctx context.Context, limit, offset int) ([]*AlipayOr
 		offset = 0
 	}
 	var total int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alipay_orders`).Scan(&total); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alipay_orders WHERE `+activeOrderFilter).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT `+orderCols+` FROM alipay_orders ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
+	rows, err := db.QueryContext(ctx, `SELECT `+orderCols+` FROM alipay_orders WHERE `+activeOrderFilter+` ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -264,4 +274,21 @@ func (db *DB) ListAllOrders(ctx context.Context, limit, offset int) ([]*AlipayOr
 		out = append(out, o)
 	}
 	return out, total, rows.Err()
+}
+
+// DeleteExpiredOrdersBefore permanently removes expired/failed orders created
+// before `cutoff`. These are abandoned checkout attempts (never paid) that
+// are already hidden from every list view; deleting the old ones keeps the
+// table from accumulating dead rows indefinitely. The cutoff is kept well
+// beyond any plausible late-settlement window, so a slow Alipay/WeChat
+// confirmation (rescued via CreditStripeOrder) can never lose its row.
+func (db *DB) DeleteExpiredOrdersBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := db.ExecContext(ctx,
+		`DELETE FROM alipay_orders WHERE status IN ('expired', 'failed') AND created_at < ?`,
+		cutoff.Unix())
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
