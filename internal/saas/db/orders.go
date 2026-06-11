@@ -208,42 +208,60 @@ func (db *DB) CountPendingOrders(ctx context.Context, userID int64) (int, error)
 	return n, err
 }
 
-func (db *DB) ListOrders(ctx context.Context, userID int64, limit int) ([]*AlipayOrder, error) {
+// ListOrders returns a page of the user's orders plus the user's total
+// order count (for pagination).
+func (db *DB) ListOrders(ctx context.Context, userID int64, limit, offset int) ([]*AlipayOrder, int, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := db.QueryContext(ctx, `SELECT `+orderCols+` FROM alipay_orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`, userID, limit)
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alipay_orders WHERE user_id = ?`, userID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := db.QueryContext(ctx, `SELECT `+orderCols+` FROM alipay_orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`, userID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	var out []*AlipayOrder
 	for rows.Next() {
 		o, err := scanOrder(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, o)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
-func (db *DB) ListAllOrders(ctx context.Context, limit int) ([]*AlipayOrder, error) {
+// ListAllOrders returns a page of all orders plus the total order count
+// (for pagination).
+func (db *DB) ListAllOrders(ctx context.Context, limit, offset int) ([]*AlipayOrder, int, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := db.QueryContext(ctx, `SELECT `+orderCols+` FROM alipay_orders ORDER BY created_at DESC LIMIT ?`, limit)
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alipay_orders`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := db.QueryContext(ctx, `SELECT `+orderCols+` FROM alipay_orders ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	var out []*AlipayOrder
 	for rows.Next() {
 		o, err := scanOrder(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, o)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }

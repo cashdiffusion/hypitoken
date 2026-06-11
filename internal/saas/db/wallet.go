@@ -72,14 +72,22 @@ func (db *DB) GetBalance(ctx context.Context, userID int64) (float64, error) {
 	return bal, err
 }
 
-// ListWalletTx returns recent transactions for a user.
-func (db *DB) ListWalletTx(ctx context.Context, userID int64, limit int) ([]*WalletTx, error) {
+// ListWalletTx returns a page of the user's transactions plus the user's
+// total transaction count (for pagination).
+func (db *DB) ListWalletTx(ctx context.Context, userID int64, limit, offset int) ([]*WalletTx, int, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id, user_id, kind, amount_usd, ref, note, created_at FROM wallet_tx WHERE user_id = ? ORDER BY id DESC LIMIT ?`, userID, limit)
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM wallet_tx WHERE user_id = ?`, userID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id, user_id, kind, amount_usd, ref, note, created_at FROM wallet_tx WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`, userID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	var out []*WalletTx
@@ -87,12 +95,12 @@ func (db *DB) ListWalletTx(ctx context.Context, userID int64, limit int) ([]*Wal
 		var t WalletTx
 		var c int64
 		if err := rows.Scan(&t.ID, &t.UserID, &t.Kind, &t.AmountUSD, &t.Ref, &t.Note, &c); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		t.CreatedAt = time.Unix(c, 0)
 		out = append(out, &t)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // FleetWalletTotals is the aggregate summary used by the operator console

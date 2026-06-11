@@ -1,7 +1,8 @@
 import { Receipt, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/app/page-primitives";
+import { Pager } from "@/components/app/pager";
 import { SpotlightCard } from "@/components/landing/interactions";
 import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { Button } from "@/components/ui/button";
@@ -102,17 +103,23 @@ export default function LogsPage() {
   const [offset, setOffset] = useState(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // Monotonic request sequence — a stale response (rapid paging / refresh
+  // racing a page change) must never overwrite a newer page's data.
+  const reqSeq = useRef(0);
 
   const reload = async (o = offset) => {
+    const seq = ++reqSeq.current;
     setBusy(true);
     setErr("");
     try {
       const r = await api<QueryResult>(`/me/requests?limit=${PAGE}&offset=${o}`);
+      if (seq !== reqSeq.current) return;
       setData(r);
     } catch (e) {
+      if (seq !== reqSeq.current) return;
       setErr(errMsg(e, "load failed"));
     } finally {
-      setBusy(false);
+      if (seq === reqSeq.current) setBusy(false);
     }
   };
 
@@ -243,40 +250,26 @@ export default function LogsPage() {
         </div>
       </Reveal>
 
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>
-          {t("logs.showing", {
-            shown: entries.length,
-            total: data?.summary.count.toLocaleString() || 0,
-          })}
-          {data ? t("logs.scanned", { n: data.scanned.toLocaleString() }) : ""}
-        </span>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={offset === 0 || busy}
-            onClick={() => {
-              const next = Math.max(0, offset - PAGE);
-              setOffset(next);
-              reload(next);
-            }}
-          >
-            {t("logs.newer")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={entries.length < PAGE || busy}
-            onClick={() => {
-              const next = offset + PAGE;
-              setOffset(next);
-              reload(next);
-            }}
-          >
-            {t("logs.older")}
-          </Button>
-        </div>
+      <div className="space-y-1.5">
+        <Pager
+          offset={offset}
+          limit={PAGE}
+          total={data?.summary.count}
+          count={entries.length}
+          busy={busy}
+          onChange={(next) => {
+            setOffset(next);
+            reload(next);
+          }}
+        />
+        {data && (
+          <div className="text-right font-mono text-[11px] tabular-nums text-muted-foreground/60">
+            {t("logs.scannedInfo", {
+              n: data.scanned.toLocaleString(),
+              defaultValue: "Scanned {{n}} log lines",
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

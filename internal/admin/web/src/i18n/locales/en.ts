@@ -4,6 +4,10 @@
 export default {
   common: {
     loading: "Loading…",
+    pagerRange: "{{from}}–{{to}} of {{total}}",
+    pagerEmpty: "0 items",
+    pagerPrev: "Previous",
+    pagerNext: "Next",
     refresh: "Refresh",
     cancel: "Cancel",
     save: "Save",
@@ -198,6 +202,8 @@ export default {
     topUpOrdersSub:
       "Pending and recently paid top-up orders. Expired orders are hidden automatically.",
     noActiveOrders: "No active orders.",
+    chargesOnlyPage:
+      "This page contains only per-request charges (hidden here) — flip the page or see the request logs.",
     walletHistory: "Wallet history",
     walletHistorySub:
       "Top-ups, refunds, and admin adjustments only. Per-request charges are available in <logs>Logs</logs> with token-level detail.",
@@ -287,10 +293,7 @@ export default {
       latency: "Latency",
     },
     none: "No requests billed yet. Spin up an API call against /v1/messages or /v1/chat/completions and the charge will appear here.",
-    showing: "Showing {{shown}} of {{total}} matching records",
-    scanned: " · scanned {{n}} log lines",
-    newer: "← Newer",
-    older: "Older →",
+    scannedInfo: "Scanned {{n}} log lines",
     popup: {
       header: "How this charge was calculated",
       input: "Input",
@@ -394,6 +397,7 @@ export default {
       heading: "Users",
       headingCount: "Users ({{n}})",
       searchPlaceholder: "Search email…",
+      empty: "No users found.",
       cols: { email: "Email", role: "Role", group: "Group", balance: "Balance" },
       adjust: "Adjust",
       adjustTitle: "Adjust balance",

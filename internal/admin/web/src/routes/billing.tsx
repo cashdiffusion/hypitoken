@@ -4,6 +4,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { CountUp, GlassPanel, PageHeader } from "@/components/app/page-primitives";
+import { Pager } from "@/components/app/pager";
 import { preloadStripe, StripeTopUp } from "@/components/app/stripe-topup";
 import { SpotlightCard } from "@/components/landing/interactions";
 import { Reveal } from "@/components/landing/reveal";
@@ -33,6 +34,12 @@ import { errMsg, fmtUSD } from "@/lib/utils";
 
 const PRESETS = [5, 10, 20, 50, 100, 200];
 
+// Server-side page size for both billing tables.
+const PAGE = 50;
+// Snapshot size for the lifetime-usage stat cards (matches the pre-pagination
+// fetch depth so the cards keep their historical behavior).
+const STATS_WINDOW = 200;
+
 interface OrderStatus {
   status: "pending" | "paid" | "expired" | "failed";
   usd_credit: number;
@@ -44,21 +51,76 @@ interface OrderStatus {
 export default function BillingPage() {
   const { t } = useTranslation();
   const { user, refresh } = useAuth();
+  // Wallet-tx table page (server-side limit/offset pagination).
   const [tx, setTx] = useState<WalletTx[]>([]);
+  const [txTotal, setTxTotal] = useState<number | undefined>(undefined);
+  const [txOffset, setTxOffset] = useState(0);
+  const [txBusy, setTxBusy] = useState(false);
+  const [txLoaded, setTxLoaded] = useState(false);
+  // Top-up orders table page.
   const [orders, setOrders] = useState<AlipayOrder[]>([]);
+  const [ordersTotal, setOrdersTotal] = useState<number | undefined>(undefined);
+  const [ordersOffset, setOrdersOffset] = useState(0);
+  const [ordersBusy, setOrdersBusy] = useState(false);
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
+  // Recent-tx snapshot used only by the lifetime/requests stat cards — kept
+  // separate from the paginated table so paging doesn't change the cards.
+  const [statsTx, setStatsTx] = useState<WalletTx[]>([]);
   const [open, setOpen] = useState(false);
   // Post-redirect settlement modal — Stripe Alipay/WeChat bounce back to
   // ?out=<order>; we poll it to paid and show the success animation.
   const [settleOut, setSettleOut] = useState<string | null>(null);
   const [settlePaid, setSettlePaid] = useState<number | null>(null);
 
+  const loadTx = async (offset: number) => {
+    setTxBusy(true);
+    try {
+      const r = await apiGet<{ transactions: WalletTx[]; total?: number }>(
+        `/billing/transactions?limit=${PAGE}&offset=${offset}`,
+      );
+      setTx(r.transactions || []);
+      setTxTotal(typeof r.total === "number" ? r.total : undefined);
+      setTxOffset(offset);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setTxBusy(false);
+      setTxLoaded(true);
+    }
+  };
+
+  const loadOrders = async (offset: number) => {
+    setOrdersBusy(true);
+    try {
+      const r = await apiGet<{ orders: AlipayOrder[]; total?: number }>(
+        `/billing/orders?limit=${PAGE}&offset=${offset}`,
+      );
+      setOrders(r.orders || []);
+      setOrdersTotal(typeof r.total === "number" ? r.total : undefined);
+      setOrdersOffset(offset);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setOrdersBusy(false);
+      setOrdersLoaded(true);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const r = await apiGet<{ transactions: WalletTx[] }>(
+        `/billing/transactions?limit=${STATS_WINDOW}`,
+      );
+      setStatsTx(r.transactions || []);
+    } catch {
+      // Stat cards are best-effort; the tables surface their own errors.
+    }
+  };
+
+  // Full reload (refresh button / after a successful top-up): jump both tables
+  // back to the first page so the newest rows are visible, and re-snapshot stats.
   const reload = async () => {
-    const [tr, o] = await Promise.all([
-      apiGet<{ transactions: WalletTx[] }>("/billing/transactions"),
-      apiGet<{ orders: AlipayOrder[] }>("/billing/orders"),
-    ]);
-    setTx(tr.transactions || []);
-    setOrders(o.orders || []);
+    await Promise.all([loadTx(0), loadOrders(0), loadStats()]);
   };
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only fetch; reload is a stable inline async fn recreated each render but intentionally not re-run
@@ -111,9 +173,9 @@ export default function BillingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const lifetime = tx
-    .filter((t) => t.kind === "charge")
-    .reduce((s, t) => s + Math.abs(t.amount_usd), 0);
+  const lifetime = statsTx
+    .filter((w) => w.kind === "charge")
+    .reduce((s, w) => s + Math.abs(w.amount_usd), 0);
 
   return (
     <div className="space-y-8">
@@ -162,8 +224,8 @@ export default function BillingPage() {
             </div>
             <p className="mt-4 text-sm text-muted-foreground">
               {t("billing.requestsBilledTopups", {
-                r: tx.filter((t) => t.kind === "charge").length,
-                t: tx.filter((t) => t.kind === "topup").length,
+                r: statsTx.filter((w) => w.kind === "charge").length,
+                t: statsTx.filter((w) => w.kind === "topup").length,
               })}
             </p>
           </SpotlightCard>
@@ -177,42 +239,63 @@ export default function BillingPage() {
           bodyClassName="p-0"
         >
           {(() => {
-            const visible = orders.filter((o) => o.status === "pending" || o.status === "paid");
-            if (visible.length === 0)
+            if (!ordersLoaded)
               return (
-                <div className="p-8 text-center text-sm text-muted-foreground">
-                  {t("billing.noActiveOrders")}
+                <div className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> {t("common.loading")}
                 </div>
               );
+            // Expired/failed orders stay hidden, but only within the current
+            // page — the pager walks the unfiltered server-side list.
+            const visible = orders.filter((o) => o.status === "pending" || o.status === "paid");
             return (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("billing.columns.order")}</TableHead>
-                    <TableHead className="text-right">{t("billing.columns.usd")}</TableHead>
-                    <TableHead>{t("billing.columns.status")}</TableHead>
-                    <TableHead>{t("billing.columns.created")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visible.map((o) => (
-                    <TableRow key={o.out_trade_no}>
-                      <TableCell className="font-mono text-xs">
-                        {o.out_trade_no.slice(0, 16)}…
-                      </TableCell>
-                      <TableCell className="font-mono tabular-nums text-right">
-                        {fmtUSD(o.usd_credit)}
-                      </TableCell>
-                      <TableCell>
-                        <StatusPill status={o.status} />
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {new Date(o.created_at * 1000).toLocaleString()}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <>
+                {visible.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-muted-foreground">
+                    {t("billing.noActiveOrders")}
+                  </div>
+                ) : (
+                  <div className={ordersBusy ? "pointer-events-none opacity-50" : undefined}>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{t("billing.columns.order")}</TableHead>
+                          <TableHead className="text-right">{t("billing.columns.usd")}</TableHead>
+                          <TableHead>{t("billing.columns.status")}</TableHead>
+                          <TableHead>{t("billing.columns.created")}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {visible.map((o) => (
+                          <TableRow key={o.out_trade_no}>
+                            <TableCell className="font-mono text-xs">
+                              {o.out_trade_no.slice(0, 16)}…
+                            </TableCell>
+                            <TableCell className="font-mono tabular-nums text-right">
+                              {fmtUSD(o.usd_credit)}
+                            </TableCell>
+                            <TableCell>
+                              <StatusPill status={o.status} />
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {new Date(o.created_at * 1000).toLocaleString()}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+                <Pager
+                  offset={ordersOffset}
+                  limit={PAGE}
+                  total={ordersTotal}
+                  count={orders.length}
+                  busy={ordersBusy}
+                  onChange={loadOrders}
+                  className="border-t border-border px-4 py-3"
+                />
+              </>
             );
           })()}
         </GlassPanel>
@@ -237,43 +320,67 @@ export default function BillingPage() {
           bodyClassName="p-0"
         >
           {(() => {
-            const visible = tx.filter((t) => t.kind !== "charge");
-            if (visible.length === 0)
+            if (!txLoaded)
               return (
-                <div className="p-8 text-center text-sm text-muted-foreground">
-                  {t("billing.noWalletYet")}
+                <div className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> {t("common.loading")}
                 </div>
               );
+            // Per-request charges are hidden here (they live in /app/logs), but
+            // only within the current page — pagination walks the unfiltered
+            // server-side ledger, so a page can be partially (or fully) charges.
+            const visible = tx.filter((w) => w.kind !== "charge");
             return (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("billing.columns.kind")}</TableHead>
-                    <TableHead className="text-right">{t("billing.columns.amount")}</TableHead>
-                    <TableHead>{t("billing.columns.reference")}</TableHead>
-                    <TableHead>{t("billing.columns.when")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visible.slice(0, 50).map((tr) => (
-                    <TableRow key={tr.id}>
-                      <TableCell className="capitalize font-medium">{tr.kind}</TableCell>
-                      <TableCell
-                        className={`font-mono tabular-nums text-right ${tr.amount_usd >= 0 ? "text-success" : ""}`}
-                      >
-                        {tr.amount_usd >= 0 ? "+" : ""}
-                        {fmtUSD(tr.amount_usd)}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {tr.ref || "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {new Date(tr.created_at * 1000).toLocaleString()}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <>
+                {visible.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-muted-foreground">
+                    {tx.length === 0 ? t("billing.noWalletYet") : t("billing.chargesOnlyPage")}
+                  </div>
+                ) : (
+                  <div className={txBusy ? "pointer-events-none opacity-50" : undefined}>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{t("billing.columns.kind")}</TableHead>
+                          <TableHead className="text-right">
+                            {t("billing.columns.amount")}
+                          </TableHead>
+                          <TableHead>{t("billing.columns.reference")}</TableHead>
+                          <TableHead>{t("billing.columns.when")}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {visible.map((tr) => (
+                          <TableRow key={tr.id}>
+                            <TableCell className="capitalize font-medium">{tr.kind}</TableCell>
+                            <TableCell
+                              className={`font-mono tabular-nums text-right ${tr.amount_usd >= 0 ? "text-success" : ""}`}
+                            >
+                              {tr.amount_usd >= 0 ? "+" : ""}
+                              {fmtUSD(tr.amount_usd)}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-muted-foreground">
+                              {tr.ref || "—"}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {new Date(tr.created_at * 1000).toLocaleString()}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+                <Pager
+                  offset={txOffset}
+                  limit={PAGE}
+                  total={txTotal}
+                  count={tx.length}
+                  busy={txBusy}
+                  onChange={loadTx}
+                  className="border-t border-border px-4 py-3"
+                />
+              </>
             );
           })()}
         </GlassPanel>

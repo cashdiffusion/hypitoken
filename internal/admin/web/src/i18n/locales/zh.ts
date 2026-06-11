@@ -4,6 +4,10 @@
 export default {
   common: {
     loading: "加载中…",
+    pagerRange: "{{from}}–{{to}} · 共 {{total}} 条",
+    pagerEmpty: "共 0 条",
+    pagerPrev: "上一页",
+    pagerNext: "下一页",
     refresh: "刷新",
     cancel: "取消",
     save: "保存",
@@ -195,6 +199,7 @@ export default {
     topUpOrders: "充值订单",
     topUpOrdersSub: "展示待支付和最近完成的充值订单，已过期订单会自动隐藏。",
     noActiveOrders: "暂无活动订单。",
+    chargesOnlyPage: "本页流水均为请求计费（此处已隐藏），请翻页或前往调用日志查看。",
     walletHistory: "钱包流水",
     walletHistorySub:
       "仅展示充值、退款和管理员调整。逐笔请求扣费请查看 <logs>日志</logs>，精确到 token 级。",
@@ -284,10 +289,7 @@ export default {
       latency: "延迟",
     },
     none: "暂无计费记录。请向 /v1/messages 或 /v1/chat/completions 发起一次请求,扣款将在此处显示。",
-    showing: "显示 {{shown}} / 共 {{total}} 条记录",
-    scanned: " · 扫描 {{n}} 行日志",
-    newer: "← 较新",
-    older: "较旧 →",
+    scannedInfo: "已扫描 {{n}} 行日志",
     popup: {
       header: "本笔扣款的计算过程",
       input: "输入",
@@ -388,6 +390,7 @@ export default {
       heading: "用户",
       headingCount: "用户 ({{n}})",
       searchPlaceholder: "搜索邮箱…",
+      empty: "暂无用户。",
       cols: { email: "邮箱", role: "角色", group: "分组", balance: "余额" },
       adjust: "调整",
       adjustTitle: "调整余额",

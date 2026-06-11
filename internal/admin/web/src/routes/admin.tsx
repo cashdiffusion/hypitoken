@@ -30,6 +30,7 @@ import { RequestsExplorer } from "@/components/admin/requests-explorer";
 import { Sparkline as MiniSpark } from "@/components/admin/sparkline";
 import { UpstreamUsageDialog } from "@/components/admin/upstream-usage-dialog";
 import { GlassPanel, PageHeader } from "@/components/app/page-primitives";
+import { Pager } from "@/components/app/pager";
 import { Reveal } from "@/components/landing/reveal";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -147,34 +148,77 @@ function AdminTabBar() {
   );
 }
 
+const USERS_PAGE = 50;
+
 function UsersTab() {
   const { t } = useTranslation();
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<PricingGroup[]>([]);
+  // qInput is the live textbox; q is the debounced value that actually hits
+  // the API, so we don't fire one request per keystroke.
+  const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState<number | undefined>(undefined);
+  const [busy, setBusy] = useState(true);
+  // user id with an in-flight row mutation — disables that row's controls.
+  const [rowBusy, setRowBusy] = useState<number | null>(null);
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setQ(qInput);
+      setOffset(0); // a new search always starts from page 1
+    }, 300);
+    return () => clearTimeout(id);
+  }, [qInput]);
 
   const reload = async () => {
-    const [u, g] = await Promise.all([
-      apiGet<{ users: User[] }>(`/admin/users?q=${encodeURIComponent(q)}`),
-      apiGet<{ groups: PricingGroup[] }>("/admin/groups"),
-    ]);
-    setUsers(u.users || []);
-    setGroups(g.groups || []);
+    setBusy(true);
+    try {
+      const [u, g] = await Promise.all([
+        apiGet<{ users: User[]; total?: number }>(
+          `/admin/users?q=${encodeURIComponent(q)}&limit=${USERS_PAGE}&offset=${offset}`,
+        ),
+        apiGet<{ groups: PricingGroup[] }>("/admin/groups"),
+      ]);
+      setUsers(u.users || []);
+      setTotal(u.total);
+      setGroups(g.groups || []);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
   };
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reload closes over q; re-run only when the search query changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reload closes over q/offset; re-run only when the search query or page changes.
   useEffect(() => {
     reload();
-  }, [q]);
+  }, [q, offset]);
+
+  // Shared row mutation: optimistic disable via rowBusy, then refresh the
+  // current page so the controlled select/badges reflect server truth.
+  const patchUser = async (id: number, body: Record<string, unknown>, okMsg: string) => {
+    setRowBusy(id);
+    try {
+      await apiPatch(`/admin/users/${id}`, body);
+      toast.success(okMsg);
+      await reload();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setRowBusy(null);
+    }
+  };
 
   return (
     <Reveal>
       <GlassPanel
-        title={t("admin.users.headingCount", { n: users.length })}
+        title={t("admin.users.headingCount", { n: total ?? users.length })}
         action={
           <Input
             placeholder={t("admin.users.searchPlaceholder")}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
+            value={qInput}
+            onChange={(e) => setQInput(e.target.value)}
             className="w-full sm:w-64"
           />
         }
@@ -192,6 +236,13 @@ function UsersTab() {
             </TableRow>
           </TableHeader>
           <TableBody>
+            {users.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
+                  {busy ? t("common.loading") : t("admin.users.empty")}
+                </TableCell>
+              </TableRow>
+            )}
             {users.map((u) => (
               <TableRow key={u.id} className={u.disabled ? "opacity-50" : ""}>
                 <TableCell className="font-medium">{u.email}</TableCell>
@@ -212,15 +263,16 @@ function UsersTab() {
                 <TableCell>
                   <div className="flex items-center gap-1">
                     <select
-                      className="rounded border border-border bg-card px-2 py-1 text-xs"
+                      className="rounded border border-border bg-card px-2 py-1 text-xs disabled:opacity-50"
                       value={u.group_id}
-                      onChange={async (e) => {
-                        await apiPatch(`/admin/users/${u.id}`, {
-                          group_id: parseInt(e.target.value, 10),
-                        });
-                        toast.success(t("admin.users.groupUpdated"));
-                        reload();
-                      }}
+                      disabled={rowBusy === u.id}
+                      onChange={(e) =>
+                        patchUser(
+                          u.id,
+                          { group_id: parseInt(e.target.value, 10) },
+                          t("admin.users.groupUpdated"),
+                        )
+                      }
                     >
                       {groups.map((g) => (
                         <option key={g.ID} value={g.ID}>
@@ -231,13 +283,14 @@ function UsersTab() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={async () => {
-                        await apiPatch(`/admin/users/${u.id}`, {
-                          role: u.role === "admin" ? "user" : "admin",
-                        });
-                        toast.success(t("admin.users.roleUpdated"));
-                        reload();
-                      }}
+                      disabled={rowBusy === u.id}
+                      onClick={() =>
+                        patchUser(
+                          u.id,
+                          { role: u.role === "admin" ? "user" : "admin" },
+                          t("admin.users.roleUpdated"),
+                        )
+                      }
                     >
                       {u.role === "admin" ? t("admin.users.makeUser") : t("admin.users.makeAdmin")}
                     </Button>
@@ -245,13 +298,14 @@ function UsersTab() {
                       size="sm"
                       variant="ghost"
                       className="text-destructive"
-                      onClick={async () => {
-                        await apiPatch(`/admin/users/${u.id}`, { disabled: !u.disabled });
-                        toast.success(
+                      disabled={rowBusy === u.id}
+                      onClick={() =>
+                        patchUser(
+                          u.id,
+                          { disabled: !u.disabled },
                           u.disabled ? t("admin.users.enabled") : t("admin.users.disabled"),
-                        );
-                        reload();
-                      }}
+                        )
+                      }
                     >
                       {u.disabled ? t("admin.users.enable") : t("admin.users.disable")}
                     </Button>
@@ -261,6 +315,15 @@ function UsersTab() {
             ))}
           </TableBody>
         </Table>
+        <Pager
+          offset={offset}
+          limit={USERS_PAGE}
+          total={total}
+          count={users.length}
+          busy={busy}
+          onChange={setOffset}
+          className="border-t border-border px-4 py-3"
+        />
       </GlassPanel>
     </Reveal>
   );
@@ -2238,15 +2301,43 @@ function KiroAddDialog({
   );
 }
 
+const ORDERS_PAGE = 50;
+
 function PaymentsTab() {
   const { t } = useTranslation();
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [offset, setOffset] = useState(0);
+  // total is optional until the backend ships it — the title and Pager both
+  // degrade gracefully when it's undefined.
+  const [total, setTotal] = useState<number | undefined>(undefined);
+  const [busy, setBusy] = useState(true);
   useEffect(() => {
-    apiGet<{ orders: AdminOrder[] }>("/admin/orders").then((r) => setOrders(r.orders || []));
-  }, []);
+    let cancelled = false;
+    setBusy(true);
+    apiGet<{ orders: AdminOrder[]; total?: number }>(
+      `/admin/orders?limit=${ORDERS_PAGE}&offset=${offset}`,
+    )
+      .then((r) => {
+        if (cancelled) return;
+        setOrders(r.orders || []);
+        setTotal(r.total);
+      })
+      .catch((e) => {
+        if (!cancelled) toast.error(errMsg(e));
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [offset]);
   return (
     <Reveal>
-      <GlassPanel title={t("admin.payments.heading", { n: orders.length })} bodyClassName="p-0">
+      <GlassPanel
+        title={t("admin.payments.heading", { n: total ?? orders.length })}
+        bodyClassName="p-0"
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -2258,6 +2349,13 @@ function PaymentsTab() {
             </TableRow>
           </TableHeader>
           <TableBody>
+            {orders.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
+                  {busy ? t("common.loading") : t("admin.payments.empty")}
+                </TableCell>
+              </TableRow>
+            )}
             {orders.map((o) => (
               <TableRow key={o.OutTradeNo}>
                 <TableCell className="font-mono text-xs">{o.OutTradeNo}</TableCell>
@@ -2285,6 +2383,15 @@ function PaymentsTab() {
             ))}
           </TableBody>
         </Table>
+        <Pager
+          offset={offset}
+          limit={ORDERS_PAGE}
+          total={total}
+          count={orders.length}
+          busy={busy}
+          onChange={setOffset}
+          className="border-t border-border px-4 py-3"
+        />
       </GlassPanel>
     </Reveal>
   );

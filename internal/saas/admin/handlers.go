@@ -216,13 +216,31 @@ func (h *Handler) adjustBalance(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"new_balance_usd": bal})
 }
 
+// pageParams parses limit/offset query params for list endpoints, clamping
+// limit to [1, 200] (default 50) and offset to >= 0.
+func pageParams(c *gin.Context) (limit, offset int) {
+	limit, _ = strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset, _ = strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
 func (h *Handler) userTx(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad id"})
 		return
 	}
-	txs, err := h.DB.ListWalletTx(c.Request.Context(), id, 200)
+	limit, offset := pageParams(c)
+	txs, total, err := h.DB.ListWalletTx(c.Request.Context(), id, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -234,7 +252,7 @@ func (h *Handler) userTx(c *gin.Context) {
 			"ref": t.Ref, "note": t.Note, "created_at": t.CreatedAt.Unix(),
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"transactions": out})
+	c.JSON(http.StatusOK, gin.H{"transactions": out, "total": total})
 }
 
 func (h *Handler) listGroups(c *gin.Context) {
@@ -337,13 +355,13 @@ func (h *Handler) reconcileOrder(c *gin.Context) {
 }
 
 func (h *Handler) listOrders(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
-	os, err := h.DB.ListAllOrders(c.Request.Context(), limit)
+	limit, offset := pageParams(c)
+	os, total, err := h.DB.ListAllOrders(c.Request.Context(), limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"orders": os})
+	c.JSON(http.StatusOK, gin.H{"orders": os, "total": total})
 }
 
 func (h *Handler) listHealth(c *gin.Context) {

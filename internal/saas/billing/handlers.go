@@ -175,9 +175,27 @@ func (h *Handler) exchangeRate(c *gin.Context) {
 	})
 }
 
+// pageParams parses limit/offset query params for list endpoints, clamping
+// limit to [1, 200] (default 50) and offset to >= 0.
+func pageParams(c *gin.Context) (limit, offset int) {
+	limit, _ = strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset, _ = strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
 func (h *Handler) transactions(c *gin.Context) {
 	u := saasauth.CurrentUser(c)
-	txs, err := h.DB.ListWalletTx(c.Request.Context(), u.ID, 200)
+	limit, offset := pageParams(c)
+	txs, total, err := h.DB.ListWalletTx(c.Request.Context(), u.ID, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -193,12 +211,13 @@ func (h *Handler) transactions(c *gin.Context) {
 			"created_at": t.CreatedAt.Unix(),
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"transactions": out})
+	c.JSON(http.StatusOK, gin.H{"transactions": out, "total": total})
 }
 
 func (h *Handler) orders(c *gin.Context) {
 	u := saasauth.CurrentUser(c)
-	os, err := h.DB.ListOrders(c.Request.Context(), u.ID, 100)
+	limit, offset := pageParams(c)
+	os, total, err := h.DB.ListOrders(c.Request.Context(), u.ID, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -207,7 +226,7 @@ func (h *Handler) orders(c *gin.Context) {
 	for _, o := range os {
 		out = append(out, orderView(o))
 	}
-	c.JSON(http.StatusOK, gin.H{"orders": out})
+	c.JSON(http.StatusOK, gin.H{"orders": out, "total": total})
 }
 
 type topupReq struct {
