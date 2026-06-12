@@ -21,7 +21,10 @@ import (
 // so the auth package keeps no dependency on growth — wiring is one-way, set by
 // main.go. Its error is logged, never blocks registration.
 type ReferralGranter interface {
-	GrantSignupBonus(ctx context.Context, userID int64, ref, vid string) (bonusUSD float64, channel string, err error)
+	// matched reports whether ref resolved to a real marketing channel (even a
+	// disabled or zero-bonus one). When true the caller must NOT add the default
+	// trial credit — the channel owns this signup's bonus.
+	GrantSignupBonus(ctx context.Context, userID int64, ref, vid string) (bonusUSD float64, channel string, matched bool, err error)
 }
 
 type Handler struct {
@@ -35,6 +38,11 @@ type Handler struct {
 	// Referral is optional; when set, signups carrying a ?ref= channel get the
 	// channel's bonus. Left nil disables attribution entirely.
 	Referral ReferralGranter
+
+	// TrialBonusUSD is the welcome credit granted to every new user who did NOT
+	// arrive through a marketing channel. Channel signups are credited by the
+	// growth module instead. Zero disables the default trial credit.
+	TrialBonusUSD float64
 
 	codeLimiter *codeRateLimiter
 }
@@ -122,17 +130,37 @@ func (h *Handler) register(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Marketing attribution: credit the channel signup bonus (best-effort —
-	// a growth-module failure must never fail an otherwise-valid signup). On
-	// success re-read the user so the response reflects the credited balance.
+	// Signup bonus. A user who arrived through a marketing channel (?ref=) is
+	// credited by the growth module with that channel's configured bonus;
+	// everyone else gets the default trial credit. All of this is best-effort —
+	// a bonus failure must never fail an otherwise-valid signup. The granted
+	// amount is returned so the dashboard can play its welcome animation.
+	var bonusUSD float64
+	channelMatched := false
 	if h.Referral != nil && strings.TrimSpace(req.Ref) != "" {
-		if bonus, channel, gerr := h.Referral.GrantSignupBonus(c.Request.Context(), u.ID, req.Ref, req.Vid); gerr != nil {
+		if bonus, channel, matched, gerr := h.Referral.GrantSignupBonus(c.Request.Context(), u.ID, req.Ref, req.Vid); gerr != nil {
 			log.Warnf("register: signup bonus for user %d (ref=%q) failed: %v", u.ID, req.Ref, gerr)
-		} else if bonus > 0 {
-			if fresh, ferr := h.DB.GetUser(c.Request.Context(), u.ID); ferr == nil {
-				u = fresh
+		} else if matched {
+			channelMatched = true
+			bonusUSD = bonus
+			if bonus > 0 {
+				log.Infof("register: user %d granted $%.2f signup bonus via channel %q", u.ID, bonus, channel)
 			}
-			log.Infof("register: user %d granted $%.2f signup bonus via channel %q", u.ID, bonus, channel)
+		}
+	}
+	// Default trial credit for organic signups (no valid channel).
+	if !channelMatched && h.TrialBonusUSD > 0 {
+		if _, berr := h.DB.AddBalance(c.Request.Context(), u.ID, db.TxKindAdjust, h.TrialBonusUSD, "signup_bonus:trial", "新用户试用赠额", true); berr != nil {
+			log.Warnf("register: trial bonus for user %d failed: %v", u.ID, berr)
+		} else {
+			bonusUSD = h.TrialBonusUSD
+			log.Infof("register: user %d granted $%.2f trial signup bonus", u.ID, h.TrialBonusUSD)
+		}
+	}
+	// Re-read so the response reflects the credited balance.
+	if bonusUSD > 0 {
+		if fresh, ferr := h.DB.GetUser(c.Request.Context(), u.ID); ferr == nil {
+			u = fresh
 		}
 	}
 	tok, exp, err := h.Issuer.Issue(u.ID, u.Role)
@@ -141,9 +169,10 @@ func (h *Handler) register(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"token":   tok,
-		"expires": exp.Unix(),
-		"user":    userView(u),
+		"token":        tok,
+		"expires":      exp.Unix(),
+		"user":         userView(u),
+		"signup_bonus": bonusUSD,
 	})
 }
 

@@ -1,8 +1,9 @@
 import { Activity, ArrowUpRight, Gauge, KeyRound, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { CountUp, GlassPanel, PageHeader, StatTile } from "@/components/app/page-primitives";
+import { WelcomeBonus } from "@/components/app/welcome-bonus";
 import { SpotlightCard } from "@/components/landing/interactions";
 import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { useAuth } from "@/hooks/use-auth";
@@ -13,8 +14,22 @@ import { fmtUSD } from "@/lib/utils";
 export default function DashboardPage() {
   const { user, group } = useAuth();
   const { t } = useTranslation();
+  const location = useLocation();
   const [tx, setTx] = useState<WalletTx[]>([]);
   const [tokens, setTokens] = useState<UserToken[]>([]);
+
+  // Welcome bonus: register.tsx routes here with `state.welcomeBonus` (the
+  // credited USD) right after a brand-new signup. Capture it once, then strip
+  // the history state so a refresh or back-nav never replays the celebration.
+  const [welcomeBonus, setWelcomeBonus] = useState<number>(() => {
+    const b = (location.state as { welcomeBonus?: number } | null)?.welcomeBonus;
+    return typeof b === "number" && b > 0 ? b : 0;
+  });
+  useEffect(() => {
+    if ((location.state as { welcomeBonus?: number } | null)?.welcomeBonus) {
+      window.history.replaceState({}, "");
+    }
+  }, [location.state]);
 
   useEffect(() => {
     apiGet<{ transactions: WalletTx[] }>("/billing/transactions").then((r) =>
@@ -31,6 +46,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
+      {welcomeBonus > 0 && (
+        <WelcomeBonus amount={welcomeBonus} onDismiss={() => setWelcomeBonus(0)} />
+      )}
       <PageHeader eyebrow={t("nav.dashboard")} title={t("dashboard.welcome")} sub={user?.email} />
 
       <RevealStagger className="grid gap-4 md:grid-cols-3">

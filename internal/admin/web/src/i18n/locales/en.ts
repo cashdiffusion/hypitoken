@@ -158,6 +158,12 @@ export default {
     noTxYet: "No transactions yet.",
     topUpYourWallet: "Top up your wallet",
     toGetStarted: " to get started.",
+    welcomeBonus: {
+      eyebrow: "Welcome aboard",
+      title: "Your trial credit is in",
+      sub: "We've added free credit to your wallet — start building right away.",
+      cta: "Start building",
+    },
   },
 
   tokens: {

@@ -45,6 +45,12 @@ type Config struct {
 	// users). Default true.
 	FreeRegister *bool `yaml:"free_register"`
 
+	// SignupBonusUSD is the trial credit granted to every new user who did NOT
+	// arrive through a marketing channel (?ref=). Channel signups get the
+	// channel's own bonus instead (see internal/saas/growth). Default 1.0; set
+	// to 0 to disable the default trial credit.
+	SignupBonusUSD *float64 `yaml:"signup_bonus_usd"`
+
 	// SMTP outbound mail. If Host is empty, mailer logs to stderr and
 	// (in dev) prints verification codes inline.
 	SMTP SMTPConfig `yaml:"smtp"`
@@ -161,6 +167,10 @@ func (c *Config) ApplyDefaults(configDir string) {
 	if c.FreeRegister == nil {
 		t := true
 		c.FreeRegister = &t
+	}
+	if c.SignupBonusUSD == nil {
+		v := 1.0
+		c.SignupBonusUSD = &v
 	}
 	if c.FallbackCNYPerUSD <= 0 {
 		c.FallbackCNYPerUSD = 7.2

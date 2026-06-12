@@ -53,20 +53,25 @@ export default function RegisterPage() {
       // Attach marketing attribution (?ref=) if this visitor arrived through a
       // channel link, so the backend can grant the channel's signup bonus.
       const referral = getReferral();
-      const r = await apiPost<{ token: string; user: User }>("/auth/register", {
-        email,
-        password,
-        code: c,
-        ref: referral?.ref,
-        vid: referral?.vid,
-      });
+      const r = await apiPost<{ token: string; user: User; signup_bonus?: number }>(
+        "/auth/register",
+        {
+          email,
+          password,
+          code: c,
+          ref: referral?.ref,
+          vid: referral?.vid,
+        },
+      );
       clearReferral();
       setOtpState("success");
       toast.success(t("auth.register.created"));
-      // hold on the celebration (confetti + green cells) before navigating
+      // hold on the celebration (confetti + green cells) before navigating, then
+      // carry the granted bonus to the dashboard so it can play the welcome
+      // animation. Only a fresh signup ever passes through here.
       window.setTimeout(() => {
         signIn(r.token, r.user);
-        nav("/app");
+        nav("/app", { state: { welcomeBonus: r.signup_bonus ?? 0 } });
       }, 1200);
     } catch (e) {
       setOtpState("error");

@@ -156,6 +156,12 @@ export default {
     noTxYet: "暂无流水。",
     topUpYourWallet: "充值钱包",
     toGetStarted: " 即可开始使用。",
+    welcomeBonus: {
+      eyebrow: "欢迎加入",
+      title: "试用额度已到账",
+      sub: "我们已向你的钱包充入免费额度，现在就可以开始使用。",
+      cta: "开始使用",
+    },
   },
 
   tokens: {

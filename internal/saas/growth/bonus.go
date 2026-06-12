@@ -15,17 +15,20 @@ import (
 //	ref  — the ?ref= slug the browser captured at first touch (may be empty)
 //	vid  — the anonymous visitor id, used to mark the originating visit converted
 //
-// Returns the bonus actually granted and the channel's display name. A nil
-// Service, an empty/unknown/disabled ref, or a zero bonus are all non-errors —
-// they simply grant nothing, so registration never fails because of growth.
-// Errors are returned for the caller to log but should NOT block signup.
-func (s *Service) GrantSignupBonus(ctx context.Context, userID int64, ref, vid string) (bonusUSD float64, channel string, err error) {
+// Returns the bonus actually granted, the channel's display name, and whether
+// ref resolved to a real channel (matched) — when matched is true the caller
+// must skip the default trial credit because this channel owns the signup's
+// bonus, even a disabled or zero-bonus one. A nil Service or an empty/unknown
+// ref are non-matches: they grant nothing and let the caller fall back to the
+// trial credit. Errors are returned for the caller to log but should NOT block
+// signup.
+func (s *Service) GrantSignupBonus(ctx context.Context, userID int64, ref, vid string) (bonusUSD float64, channel string, matched bool, err error) {
 	if s == nil {
-		return 0, "", nil
+		return 0, "", false, nil
 	}
 	slug := NormalizeSlug(ref)
 	if slug == "" {
-		return 0, "", nil
+		return 0, "", false, nil
 	}
 	vid = sanitizeVisitorID(vid)
 
@@ -33,12 +36,12 @@ func (s *Service) GrantSignupBonus(ctx context.Context, userID int64, ref, vid s
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			// Unknown ref — nothing to credit, not an error worth surfacing.
-			return 0, "", nil
+			return 0, "", false, nil
 		}
-		return 0, "", err
+		return 0, "", false, err
 	}
 	if !ch.Enabled {
-		return 0, ch.Name, nil
+		return 0, ch.Name, true, nil
 	}
 
 	// Record the conversion regardless of bonus size so a $0 channel still
@@ -46,18 +49,18 @@ func (s *Service) GrantSignupBonus(ctx context.Context, userID int64, ref, vid s
 	// bonus twice if this ever runs more than once for a user.
 	firstTime, rerr := s.RecordConversion(ctx, userID, slug, vid, ch.BonusUSD)
 	if rerr != nil {
-		return 0, ch.Name, fmt.Errorf("record conversion: %w", rerr)
+		return 0, ch.Name, true, fmt.Errorf("record conversion: %w", rerr)
 	}
 
 	if !firstTime || ch.BonusUSD <= 0 {
-		return 0, ch.Name, nil
+		return 0, ch.Name, true, nil
 	}
 	note := fmt.Sprintf("渠道注册赠额: %s", channelLabel(ch))
 	if _, werr := s.wallet.AddBalance(ctx, userID, txKindBonus, ch.BonusUSD, "signup_bonus:"+slug, note, true); werr != nil {
-		return 0, ch.Name, fmt.Errorf("credit bonus: %w", werr)
+		return 0, ch.Name, true, fmt.Errorf("credit bonus: %w", werr)
 	}
 	log.Infof("growth: granted $%.2f signup bonus to user %d via channel %q", ch.BonusUSD, userID, slug)
-	return ch.BonusUSD, ch.Name, nil
+	return ch.BonusUSD, ch.Name, true, nil
 }
 
 // channelLabel prefers the human name, falling back to the slug.

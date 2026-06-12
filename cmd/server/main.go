@@ -188,6 +188,9 @@ func main() {
 			freeReg = *cfg.SaaS.FreeRegister
 		}
 		authH := saasauth.NewHandler(saasDB, issuer, mailer, cfg.SaaS.SiteName, freeReg)
+		if cfg.SaaS.SignupBonusUSD != nil {
+			authH.TrialBonusUSD = *cfg.SaaS.SignupBonusUSD
+		}
 		tokensH := tokens.New(saasDB)
 		rate := billing.NewRate(cfg.SaaS.ExchangeRateURL, cfg.SaaS.FallbackCNYPerUSD)
 		go rate.RunRefresher(refresherCtx, time.Hour)

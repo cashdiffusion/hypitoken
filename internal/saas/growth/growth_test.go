@@ -121,12 +121,12 @@ func TestGrantSignupBonusAndROI(t *testing.T) {
 	}
 	uid := mkUser(t, store, "a@b.com")
 
-	bonus, channel, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9")
+	bonus, channel, matched, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9")
 	if err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if bonus != 3 || channel != "X" {
-		t.Fatalf("want bonus 3 / channel X, got %v / %q", bonus, channel)
+	if bonus != 3 || channel != "X" || !matched {
+		t.Fatalf("want bonus 3 / channel X / matched, got %v / %q / %v", bonus, channel, matched)
 	}
 
 	// Wallet credited through the audited ledger.
@@ -169,7 +169,7 @@ func TestGrantSignupBonusAndROI(t *testing.T) {
 
 	// Second grant for the same user is a no-op: one channel credited per user,
 	// and crucially the bonus is NOT paid out again.
-	bonus2, _, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9")
+	bonus2, _, _, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9")
 	if err != nil {
 		t.Fatalf("second grant: %v", err)
 	}
@@ -190,16 +190,17 @@ func TestGrantUnknownOrDisabledChannel(t *testing.T) {
 	store, svc := openTestDB(t)
 	uid := mkUser(t, store, "u@b.com")
 
-	// Unknown ref: no error, no bonus.
-	if bonus, _, err := svc.GrantSignupBonus(ctx, uid, "nope", ""); err != nil || bonus != 0 {
-		t.Fatalf("unknown ref: bonus=%v err=%v", bonus, err)
+	// Unknown ref: no error, no bonus, no match (caller falls back to trial).
+	if bonus, _, matched, err := svc.GrantSignupBonus(ctx, uid, "nope", ""); err != nil || bonus != 0 || matched {
+		t.Fatalf("unknown ref: bonus=%v matched=%v err=%v", bonus, matched, err)
 	}
 	// Disabled channel: conversion recorded but no bonus.
 	if _, err := svc.CreateChannel(ctx, growth.ChannelParams{Slug: "off", BonusUSD: 5, Enabled: false}); err != nil {
 		t.Fatal(err)
 	}
-	if bonus, _, err := svc.GrantSignupBonus(ctx, uid, "off", ""); err != nil || bonus != 0 {
-		t.Fatalf("disabled channel: bonus=%v err=%v", bonus, err)
+	// Disabled channel: matched (so caller skips trial) but no bonus paid.
+	if bonus, _, matched, err := svc.GrantSignupBonus(ctx, uid, "off", ""); err != nil || bonus != 0 || !matched {
+		t.Fatalf("disabled channel: bonus=%v matched=%v err=%v", bonus, matched, err)
 	}
 	if bal, _ := store.GetBalance(ctx, uid); bal != 0 {
 		t.Fatalf("want balance 0 for disabled channel, got %v", bal)
