@@ -163,6 +163,12 @@ export default {
       title: "Your trial credit is in",
       sub: "We've added free credit to your wallet — start building right away.",
       cta: "Start building",
+      fraud: {
+        eyebrow: "Bonus withheld",
+        title: "Trial credit not granted",
+        sub: "This device or network looks like it already registered an account, so the trial credit wasn't granted this time. Top up anytime — or contact support if you think this is a mistake.",
+        cta: "Got it",
+      },
     },
   },
 

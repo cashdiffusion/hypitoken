@@ -31,6 +31,7 @@
     "@react-three/fiber": "^8.18.0",
     "@stripe/react-stripe-js": "^6.5.0",
     "@stripe/stripe-js": "^9.7.0",
+    "@thumbmarkjs/thumbmarkjs": "^1.9.1",
     "canvas-confetti": "^1.9.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

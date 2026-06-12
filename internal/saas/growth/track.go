@@ -26,6 +26,7 @@ func (s *Service) PublicRoutes(g *gin.RouterGroup) {
 type visitReq struct {
 	Ref string `json:"ref"`
 	Vid string `json:"vid"`
+	Fp  string `json:"fp"` // browser-fingerprint hash, for cross-session device attribution
 }
 
 // trackVisit records a first-touch visit for (channel, visitor). Always returns
@@ -49,7 +50,7 @@ func (s *Service) trackVisit(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": false})
 		return
 	}
-	if err := s.RecordVisit(c.Request.Context(), slug, vid); err != nil {
+	if err := s.RecordVisit(c.Request.Context(), slug, vid, req.Fp); err != nil {
 		c.JSON(http.StatusOK, gin.H{"ok": false})
 		return
 	}

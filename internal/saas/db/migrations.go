@@ -201,6 +201,31 @@ CREATE TABLE channel_referrals (
 );
 CREATE INDEX idx_channel_referrals_slug ON channel_referrals(slug);
 `,
+
+	// v6 — signup anti-abuse. Records one device per signup (browser
+	// fingerprint hash + IP / subnet) so a fresh signup can be matched against
+	// prior users and have its welcome bonus withheld when it looks like the
+	// same person farming the trial credit. Self-contained in internal/saas/
+	// growth (fraud.go); does NOT touch the users table. channel_visits also
+	// gains a fingerprint column so anonymous visits carry a cross-session
+	// stable device id for behavioural attribution (the random visitor_id is
+	// lost whenever localStorage is cleared).
+	`
+CREATE TABLE signup_devices (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    fingerprint TEXT    NOT NULL DEFAULT '',             -- ThumbmarkJS hash (may be empty if it failed)
+    ip          TEXT    NOT NULL DEFAULT '',
+    ip_prefix   TEXT    NOT NULL DEFAULT '',             -- v4 /24 or v6 /48, for shared-network detection
+    fraud       INTEGER NOT NULL DEFAULT 0,              -- 1 = this signup was flagged suspicious
+    reason      TEXT    NOT NULL DEFAULT '',             -- 'fingerprint' | 'ip_subnet' | ''
+    created_at  INTEGER NOT NULL
+);
+CREATE INDEX idx_signup_devices_fp     ON signup_devices(fingerprint);
+CREATE INDEX idx_signup_devices_prefix ON signup_devices(ip_prefix, created_at);
+
+ALTER TABLE channel_visits ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';
+`,
 }
 
 func (db *DB) migrate() error {

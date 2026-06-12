@@ -229,6 +229,17 @@ func main() {
 		// ledger (saasDB satisfies growth.Wallet), and registers the conversion
 		// hook on the auth handler so ?ref= signups are attributed.
 		growthSvc := growth.New(saasDB.DB, saasDB)
+		// Signup anti-abuse: withhold the welcome bonus from a device/network
+		// that already registered (fingerprint match or shared-subnet burst).
+		fraudEnabled := true
+		if cfg.SaaS.SignupFraud.Enabled != nil {
+			fraudEnabled = *cfg.SaaS.SignupFraud.Enabled
+		}
+		growthSvc.ConfigureFraud(growth.FraudConfig{
+			Enabled:         fraudEnabled,
+			SubnetThreshold: cfg.SaaS.SignupFraud.IPSubnetThreshold,
+			Window:          time.Duration(cfg.SaaS.SignupFraud.WindowHours) * time.Hour,
+		})
 		authH.Referral = growthSvc
 
 		// Catalog used for pricing computation (same instance as the proxy's

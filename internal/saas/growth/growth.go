@@ -43,11 +43,31 @@ const txKindBonus = "adjust"
 type Service struct {
 	db     *sql.DB
 	wallet Wallet
+	fraud  FraudConfig
 }
 
 // New builds the growth service over an open SQLite handle and a wallet sink.
+// Anti-abuse runs with safe defaults (see defaultFraudConfig); call
+// ConfigureFraud to override from operator config.
 func New(db *sql.DB, wallet Wallet) *Service {
-	return &Service{db: db, wallet: wallet}
+	return &Service{db: db, wallet: wallet, fraud: defaultFraudConfig()}
+}
+
+// ConfigureFraud overrides the signup anti-abuse policy. A zero-value field
+// falls back to its default so a partially-specified config still behaves.
+func (s *Service) ConfigureFraud(cfg FraudConfig) {
+	def := defaultFraudConfig()
+	s.fraud.Enabled = cfg.Enabled
+	if cfg.SubnetThreshold > 0 {
+		s.fraud.SubnetThreshold = cfg.SubnetThreshold
+	} else {
+		s.fraud.SubnetThreshold = def.SubnetThreshold
+	}
+	if cfg.Window > 0 {
+		s.fraud.Window = cfg.Window
+	} else {
+		s.fraud.Window = def.Window
+	}
 }
 
 // slugRe constrains channel slugs to URL-safe, lowercase tokens so a ?ref=

@@ -18,15 +18,19 @@ export default function DashboardPage() {
   const [tx, setTx] = useState<WalletTx[]>([]);
   const [tokens, setTokens] = useState<UserToken[]>([]);
 
-  // Welcome bonus: register.tsx routes here with `state.welcomeBonus` (the
-  // credited USD) right after a brand-new signup. Capture it once, then strip
-  // the history state so a refresh or back-nav never replays the celebration.
-  const [welcomeBonus, setWelcomeBonus] = useState<number>(() => {
-    const b = (location.state as { welcomeBonus?: number } | null)?.welcomeBonus;
-    return typeof b === "number" && b > 0 ? b : 0;
+  // Welcome overlay: register.tsx routes here right after a brand-new signup
+  // with either `state.welcomeBonus` (credited USD → celebration) or
+  // `state.fraud` (suspected repeat device → "bonus withheld" notice). Capture
+  // once, then strip the history state so a refresh/back-nav never replays it.
+  const [welcome, setWelcome] = useState<{ bonus: number; fraud: boolean } | null>(() => {
+    const st = location.state as { welcomeBonus?: number; fraud?: boolean } | null;
+    const bonus = typeof st?.welcomeBonus === "number" && st.welcomeBonus > 0 ? st.welcomeBonus : 0;
+    const fraud = st?.fraud === true;
+    return bonus > 0 || fraud ? { bonus, fraud } : null;
   });
   useEffect(() => {
-    if ((location.state as { welcomeBonus?: number } | null)?.welcomeBonus) {
+    const st = location.state as { welcomeBonus?: number; fraud?: boolean } | null;
+    if (st?.welcomeBonus || st?.fraud) {
       window.history.replaceState({}, "");
     }
   }, [location.state]);
@@ -46,8 +50,12 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      {welcomeBonus > 0 && (
-        <WelcomeBonus amount={welcomeBonus} onDismiss={() => setWelcomeBonus(0)} />
+      {welcome && (
+        <WelcomeBonus
+          amount={welcome.bonus}
+          fraud={welcome.fraud}
+          onDismiss={() => setWelcome(null)}
+        />
       )}
       <PageHeader eyebrow={t("nav.dashboard")} title={t("dashboard.welcome")} sub={user?.email} />
 

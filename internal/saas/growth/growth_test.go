@@ -83,11 +83,11 @@ func TestVisitFirstTouchIdempotent(t *testing.T) {
 
 	// Two visits from the same visitor collapse to one first-touch row.
 	for range 3 {
-		if err := svc.RecordVisit(ctx, "ins", "vid-1"); err != nil {
+		if err := svc.RecordVisit(ctx, "ins", "vid-1", ""); err != nil {
 			t.Fatalf("record visit: %v", err)
 		}
 	}
-	if err := svc.RecordVisit(ctx, "ins", "vid-2"); err != nil {
+	if err := svc.RecordVisit(ctx, "ins", "vid-2", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.AccumulateDwell(ctx, "ins", "vid-1", 30_000); err != nil {
@@ -116,17 +116,17 @@ func TestGrantSignupBonusAndROI(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A visit precedes the signup so conversion can be linked by visitor id.
-	if err := svc.RecordVisit(ctx, "x", "vid-9"); err != nil {
+	if err := svc.RecordVisit(ctx, "x", "vid-9", ""); err != nil {
 		t.Fatal(err)
 	}
 	uid := mkUser(t, store, "a@b.com")
 
-	bonus, channel, matched, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9")
+	bonus, channel, matched, fraud, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9", "", "")
 	if err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if bonus != 3 || channel != "X" || !matched {
-		t.Fatalf("want bonus 3 / channel X / matched, got %v / %q / %v", bonus, channel, matched)
+	if bonus != 3 || channel != "X" || !matched || fraud {
+		t.Fatalf("want bonus 3 / channel X / matched / !fraud, got %v / %q / %v / %v", bonus, channel, matched, fraud)
 	}
 
 	// Wallet credited through the audited ledger.
@@ -169,7 +169,7 @@ func TestGrantSignupBonusAndROI(t *testing.T) {
 
 	// Second grant for the same user is a no-op: one channel credited per user,
 	// and crucially the bonus is NOT paid out again.
-	bonus2, _, _, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9")
+	bonus2, _, _, _, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9", "", "")
 	if err != nil {
 		t.Fatalf("second grant: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestGrantUnknownOrDisabledChannel(t *testing.T) {
 	uid := mkUser(t, store, "u@b.com")
 
 	// Unknown ref: no error, no bonus, no match (caller falls back to trial).
-	if bonus, _, matched, err := svc.GrantSignupBonus(ctx, uid, "nope", ""); err != nil || bonus != 0 || matched {
+	if bonus, _, matched, _, err := svc.GrantSignupBonus(ctx, uid, "nope", "", "", ""); err != nil || bonus != 0 || matched {
 		t.Fatalf("unknown ref: bonus=%v matched=%v err=%v", bonus, matched, err)
 	}
 	// Disabled channel: conversion recorded but no bonus.
@@ -199,10 +199,72 @@ func TestGrantUnknownOrDisabledChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Disabled channel: matched (so caller skips trial) but no bonus paid.
-	if bonus, _, matched, err := svc.GrantSignupBonus(ctx, uid, "off", ""); err != nil || bonus != 0 || !matched {
+	if bonus, _, matched, _, err := svc.GrantSignupBonus(ctx, uid, "off", "", "", ""); err != nil || bonus != 0 || !matched {
 		t.Fatalf("disabled channel: bonus=%v matched=%v err=%v", bonus, matched, err)
 	}
 	if bal, _ := store.GetBalance(ctx, uid); bal != 0 {
 		t.Fatalf("want balance 0 for disabled channel, got %v", bal)
+	}
+}
+
+// TestSignupFraudFingerprint verifies the anti-abuse path: a second signup from
+// the same browser fingerprint is flagged and the channel bonus is withheld,
+// while a different fingerprint on the same channel still pays out.
+func TestSignupFraudFingerprint(t *testing.T) {
+	ctx := context.Background()
+	store, svc := openTestDB(t)
+	if _, err := svc.CreateChannel(ctx, growth.ChannelParams{Slug: "x", Name: "X", BonusUSD: 3, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// First user on fingerprint "fp-A": clean, bonus paid.
+	u1 := mkUser(t, store, "a@b.com")
+	bonus, _, matched, fraud, err := svc.GrantSignupBonus(ctx, u1, "x", "v1", "fp-A", "203.0.113.7")
+	if err != nil || bonus != 3 || !matched || fraud {
+		t.Fatalf("first signup: bonus=%v matched=%v fraud=%v err=%v", bonus, matched, fraud, err)
+	}
+	if bal, _ := store.GetBalance(ctx, u1); bal != 3 {
+		t.Fatalf("first user balance: want 3, got %v", bal)
+	}
+
+	// Second user, SAME fingerprint: flagged, no bonus, balance stays 0.
+	u2 := mkUser(t, store, "b@b.com")
+	bonus, _, matched, fraud, err = svc.GrantSignupBonus(ctx, u2, "x", "v2", "fp-A", "198.51.100.9")
+	if err != nil || !fraud || bonus != 0 || !matched {
+		t.Fatalf("repeat fingerprint: bonus=%v matched=%v fraud=%v err=%v", bonus, matched, fraud, err)
+	}
+	if bal, _ := store.GetBalance(ctx, u2); bal != 0 {
+		t.Fatalf("flagged user balance: want 0, got %v", bal)
+	}
+
+	// Third user, DIFFERENT fingerprint and subnet: clean again, bonus paid.
+	u3 := mkUser(t, store, "c@b.com")
+	bonus, _, _, fraud, err = svc.GrantSignupBonus(ctx, u3, "x", "v3", "fp-B", "192.0.2.5")
+	if err != nil || fraud || bonus != 3 {
+		t.Fatalf("third signup: bonus=%v fraud=%v err=%v", bonus, fraud, err)
+	}
+}
+
+// TestSignupFraudSubnet verifies the soft IP-subnet rule: once the configured
+// number of distinct signups share a /24, the next one from that subnet is
+// flagged even with a brand-new fingerprint.
+func TestSignupFraudSubnet(t *testing.T) {
+	ctx := context.Background()
+	store, svc := openTestDB(t)
+	svc.ConfigureFraud(growth.FraudConfig{Enabled: true, SubnetThreshold: 2})
+
+	// Two clean signups from 203.0.113.0/24 (distinct fingerprints).
+	for i, ip := range []string{"203.0.113.1", "203.0.113.2"} {
+		uid := mkUser(t, store, string(rune('a'+i))+"@sub.com")
+		_, _, _, fraud, err := svc.GrantSignupBonus(ctx, uid, "", "", "fp-"+ip, ip)
+		if err != nil || fraud {
+			t.Fatalf("subnet signup %d: fraud=%v err=%v", i, fraud, err)
+		}
+	}
+	// Third from the same /24 trips the threshold (2 prior distinct users).
+	uid := mkUser(t, store, "z@sub.com")
+	_, _, _, fraud, err := svc.GrantSignupBonus(ctx, uid, "", "", "fp-new", "203.0.113.250")
+	if err != nil || !fraud {
+		t.Fatalf("subnet threshold: want fraud, got fraud=%v err=%v", fraud, err)
 	}
 }

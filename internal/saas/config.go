@@ -51,6 +51,10 @@ type Config struct {
 	// to 0 to disable the default trial credit.
 	SignupBonusUSD *float64 `yaml:"signup_bonus_usd"`
 
+	// SignupFraud tunes the signup anti-abuse check that withholds the welcome
+	// bonus from a device/network that already registered.
+	SignupFraud SignupFraudConfig `yaml:"signup_fraud"`
+
 	// SMTP outbound mail. If Host is empty, mailer logs to stderr and
 	// (in dev) prints verification codes inline.
 	SMTP SMTPConfig `yaml:"smtp"`
@@ -90,6 +94,17 @@ type SMTPConfig struct {
 	Password string `yaml:"password"`
 	From     string `yaml:"from"`
 	UseTLS   bool   `yaml:"use_tls"`
+}
+
+// SignupFraudConfig tunes the welcome-bonus anti-abuse check (internal/saas/
+// growth/fraud.go). A new signup is flagged — and its bonus withheld — when its
+// browser fingerprint matches a prior user, or when its /24 (IPv6 /48) subnet
+// produced at least IPSubnetThreshold distinct signups within WindowHours.
+// Enabled defaults to true; a zero threshold/window falls back to 3 / 720h.
+type SignupFraudConfig struct {
+	Enabled           *bool `yaml:"enabled"`             // default true
+	IPSubnetThreshold int   `yaml:"ip_subnet_threshold"` // default 3
+	WindowHours       int   `yaml:"window_hours"`        // default 720 (30 days)
 }
 
 // ZPayConfig configures the Z-Pay aggregator gateway. Key is sensitive

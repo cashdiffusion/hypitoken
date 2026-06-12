@@ -119,13 +119,19 @@ func (s *Service) DeleteChannel(ctx context.Context, id int64) error {
 // inserts; later hits only push last_seen forward — first_seen is preserved so
 // "when did this visitor first arrive" stays accurate. Returns silently if the
 // row already exists (ON CONFLICT no-ops the immutable columns).
-func (s *Service) RecordVisit(ctx context.Context, slug, visitorID string) error {
+func (s *Service) RecordVisit(ctx context.Context, slug, visitorID, fingerprint string) error {
 	now := time.Now().Unix()
+	fp := sanitizeVisitorID(fingerprint)
+	// fingerprint is refreshed on repeat hits (a non-empty value wins over a
+	// previously-stored empty one) so a visitor whose first hit failed to
+	// fingerprint can still gain a stable device id later in the session.
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO channel_visits (slug, visitor_id, first_seen, last_seen, duration_ms, converted_user_id, created_at)
-		 VALUES (?, ?, ?, ?, 0, 0, ?)
-		 ON CONFLICT(slug, visitor_id) DO UPDATE SET last_seen = excluded.last_seen`,
-		slug, visitorID, now, now, now)
+		`INSERT INTO channel_visits (slug, visitor_id, first_seen, last_seen, duration_ms, converted_user_id, fingerprint, created_at)
+		 VALUES (?, ?, ?, ?, 0, 0, ?, ?)
+		 ON CONFLICT(slug, visitor_id) DO UPDATE SET
+		     last_seen = excluded.last_seen,
+		     fingerprint = CASE WHEN excluded.fingerprint <> '' THEN excluded.fingerprint ELSE channel_visits.fingerprint END`,
+		slug, visitorID, now, now, fp, now)
 	return err
 }
 

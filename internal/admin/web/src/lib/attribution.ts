@@ -6,6 +6,8 @@
 // Pairs with the backend internal/saas/growth module. Everything here is
 // best-effort and wrapped so a tracking failure can never break the page.
 
+import { getFingerprint } from "./fingerprint";
+
 const REF_KEY = "hypi.ref"; // channel slug (first-touch)
 const VID_KEY = "hypi.ref_vid"; // anonymous visitor id
 const TS_KEY = "hypi.ref_ts"; // first-touch epoch ms
@@ -94,7 +96,9 @@ export function initAttribution(): void {
   }
   const r = getReferral();
   if (!r) return;
-  post(TRACK_VISIT, { ref: r.ref, vid: r.vid });
+  // Attach the device fingerprint (best-effort, async) so the visit carries a
+  // cross-session stable id; resolves to "" on failure without blocking.
+  void getFingerprint().then((fp) => post(TRACK_VISIT, { ref: r.ref, vid: r.vid, fp }));
   startDwellTracking(r);
 }
 

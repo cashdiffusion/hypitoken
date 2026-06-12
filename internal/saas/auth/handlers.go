@@ -23,8 +23,12 @@ import (
 type ReferralGranter interface {
 	// matched reports whether ref resolved to a real marketing channel (even a
 	// disabled or zero-bonus one). When true the caller must NOT add the default
-	// trial credit — the channel owns this signup's bonus.
-	GrantSignupBonus(ctx context.Context, userID int64, ref, vid string) (bonusUSD float64, channel string, matched bool, err error)
+	// trial credit — the channel owns this signup's bonus. fraud reports that the
+	// signup looks like welcome-bonus abuse (same browser fingerprint / shared
+	// subnet as a prior user); when true NO bonus is paid and the caller skips
+	// the trial credit too. fp is the client browser-fingerprint hash and ip the
+	// client IP, used for the anti-abuse check; both may be empty.
+	GrantSignupBonus(ctx context.Context, userID int64, ref, vid, fp, ip string) (bonusUSD float64, channel string, matched, fraud bool, err error)
 }
 
 type Handler struct {
@@ -72,6 +76,11 @@ type registerReq struct {
 	// channel's signup bonus and mark the originating visit converted.
 	Ref string `json:"ref"`
 	Vid string `json:"vid"`
+	// Fp is the browser-fingerprint hash (ThumbmarkJS) used for signup
+	// anti-abuse — withholding the welcome bonus from a device that already
+	// registered. May be empty if fingerprinting failed; the check degrades to
+	// IP-only.
+	Fp string `json:"fp"`
 }
 
 func (h *Handler) register(c *gin.Context) {
@@ -130,17 +139,29 @@ func (h *Handler) register(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Signup bonus. A user who arrived through a marketing channel (?ref=) is
-	// credited by the growth module with that channel's configured bonus;
-	// everyone else gets the default trial credit. All of this is best-effort —
-	// a bonus failure must never fail an otherwise-valid signup. The granted
-	// amount is returned so the dashboard can play its welcome animation.
+	// Signup bonus + anti-abuse. The growth module records the device
+	// fingerprint/IP for EVERY signup and decides (a) whether it matched a
+	// marketing channel and (b) whether it looks like welcome-bonus farming. A
+	// channel signup is credited with the channel's bonus; everyone else gets
+	// the default trial credit — but a fraud-flagged signup gets nothing. All of
+	// this is best-effort: a growth failure must never fail an otherwise-valid
+	// signup. The granted amount and the fraud flag are returned so the
+	// dashboard can play either the welcome animation or the "bonus withheld"
+	// notice.
 	var bonusUSD float64
 	channelMatched := false
-	if h.Referral != nil && strings.TrimSpace(req.Ref) != "" {
-		if bonus, channel, matched, gerr := h.Referral.GrantSignupBonus(c.Request.Context(), u.ID, req.Ref, req.Vid); gerr != nil {
+	fraud := false
+	if h.Referral != nil {
+		bonus, channel, matched, isFraud, gerr := h.Referral.GrantSignupBonus(
+			c.Request.Context(), u.ID, req.Ref, req.Vid, req.Fp, c.ClientIP())
+		fraud = isFraud
+		if gerr != nil {
 			log.Warnf("register: signup bonus for user %d (ref=%q) failed: %v", u.ID, req.Ref, gerr)
-		} else if matched {
+		}
+		if isFraud {
+			log.Warnf("register: user %d signup flagged as suspected bonus abuse — withholding bonus", u.ID)
+		}
+		if matched {
 			channelMatched = true
 			bonusUSD = bonus
 			if bonus > 0 {
@@ -148,8 +169,8 @@ func (h *Handler) register(c *gin.Context) {
 			}
 		}
 	}
-	// Default trial credit for organic signups (no valid channel).
-	if !channelMatched && h.TrialBonusUSD > 0 {
+	// Default trial credit for organic signups (no channel), unless flagged.
+	if !channelMatched && !fraud && h.TrialBonusUSD > 0 {
 		if _, berr := h.DB.AddBalance(c.Request.Context(), u.ID, db.TxKindAdjust, h.TrialBonusUSD, "signup_bonus:trial", "新用户试用赠额", true); berr != nil {
 			log.Warnf("register: trial bonus for user %d failed: %v", u.ID, berr)
 		} else {
@@ -173,6 +194,7 @@ func (h *Handler) register(c *gin.Context) {
 		"expires":      exp.Unix(),
 		"user":         userView(u),
 		"signup_bonus": bonusUSD,
+		"fraud":        fraud,
 	})
 }
 
