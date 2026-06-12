@@ -21,6 +21,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas"
 	saasadapter "github.com/wjsoj/CPA-Claude/internal/saas/adapter"
 	saasadmin "github.com/wjsoj/CPA-Claude/internal/saas/admin"
+	"github.com/wjsoj/CPA-Claude/internal/saas/analytics"
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	saasdb "github.com/wjsoj/CPA-Claude/internal/saas/db"
@@ -242,6 +243,12 @@ func main() {
 		})
 		authH.Referral = growthSvc
 
+		// Analytics (site-wide visitor behaviour). Self-contained module: owns
+		// its own two tables (web_sessions, web_events from migration v7) and
+		// only needs a *sql.DB. Captures EVERY landing-page visitor's first
+		// action / dwell / flow / source, surfaced in the admin Growth tab.
+		analyticsSvc := analytics.New(saasDB.DB)
+
 		// Catalog used for pricing computation (same instance as the proxy's
 		// internal billing — the SaaS layer only adds the multiplier on top).
 		catalog := pricing.NewCatalog(cfg.Pricing)
@@ -273,7 +280,7 @@ func main() {
 			return true, claims.Role == "admin"
 		}
 		for _, h := range s.GinEngines() {
-			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc)
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc)
 			if spaFS != nil {
 				saasadapter.MountSPA(h, spaFS)
 			}

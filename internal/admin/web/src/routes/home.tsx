@@ -391,7 +391,7 @@ function Hero({ t }: { t: (k: string) => string }) {
           className="mt-10 flex flex-wrap items-center justify-center gap-3"
         >
           <Magnetic strength={0.4}>
-            <HeroPrimary to="/register">
+            <HeroPrimary to="/register" track="start">
               {t("home.ctaPrimary")} <ArrowRight className="h-4 w-4" />
             </HeroPrimary>
           </Magnetic>
@@ -498,15 +498,20 @@ function HeroPrimary({
   to,
   children,
   compact,
+  track,
 }: {
   to: string;
   children: ReactNode;
   compact?: boolean;
+  // Optional analytics label — surfaces this click as an explicit first action
+  // (e.g. "start") rather than a generic nav:* in the visitor-behaviour stats.
+  track?: string;
 }) {
   return (
     <Link
       to={to}
       viewTransition
+      data-track={track}
       className={`group inline-flex items-center justify-center gap-2 rounded-full bg-emerald-400 font-medium text-emerald-950 shadow-[0_8px_30px_-8px_rgba(52,211,153,0.6)] transition-all hover:bg-emerald-300 hover:shadow-[0_10px_40px_-8px_rgba(52,211,153,0.8)] ${
         compact ? "px-4 py-1.5 text-sm" : "px-5 py-2.5 text-base"
       }`}

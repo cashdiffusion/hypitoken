@@ -226,6 +226,51 @@ CREATE INDEX idx_signup_devices_prefix ON signup_devices(ip_prefix, created_at);
 
 ALTER TABLE channel_visits ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';
 `,
+
+	// v7 — site-wide visitor behaviour analytics (the internal/saas/analytics
+	// module). Unlike growth (which only tracks ?ref= channel visitors), this
+	// captures EVERY landing-page visitor: first action (bounce / start / login
+	// / nav-away), dwell time, page flow, and coarse acquisition source. Two
+	// self-contained tables owned entirely by internal/saas/analytics; the rest
+	// of the SaaS layer never reads them. Kept here only because the migrator is
+	// centralized (append-only + pre-migrate backup).
+	//
+	//   web_sessions — one row per (anonymous visitor, tab session). Holds the
+	//                  landing page, first_action ('' until set → '' == bounce),
+	//                  acquisition source/referrer, page/action counters, and
+	//                  accumulated dwell time.
+	//   web_events   — append-only event stream (pageview | action) carrying a
+	//                  per-session sequence number so the visit flow can be
+	//                  reconstructed (home → pricing → register).
+	`
+CREATE TABLE web_sessions (
+    session_id      TEXT PRIMARY KEY,                     -- client sessionStorage id, one per tab session
+    visitor_id      TEXT NOT NULL,                        -- anonymous, localStorage-persisted (shared with growth)
+    landing_path    TEXT NOT NULL DEFAULT '',             -- first page seen
+    first_action    TEXT NOT NULL DEFAULT '',             -- '' = none yet (== bounce); else 'start' | 'login' | 'nav:pricing' | …
+    source          TEXT NOT NULL DEFAULT 'direct',       -- direct | search | social | referral | internal
+    referrer_domain TEXT NOT NULL DEFAULT '',             -- external referrer host (empty for direct)
+    pageviews       INTEGER NOT NULL DEFAULT 0,
+    actions         INTEGER NOT NULL DEFAULT 0,           -- explicit interactions; actions=0 AND pageviews<=1 => bounce
+    duration_ms     INTEGER NOT NULL DEFAULT 0,           -- accumulated dwell time (max of heartbeats)
+    started_at      INTEGER NOT NULL,
+    last_seen       INTEGER NOT NULL
+);
+CREATE INDEX idx_web_sessions_started ON web_sessions(started_at);
+CREATE INDEX idx_web_sessions_visitor ON web_sessions(visitor_id);
+
+CREATE TABLE web_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    visitor_id TEXT NOT NULL,
+    kind       TEXT NOT NULL,                             -- 'pageview' | 'action'
+    name       TEXT NOT NULL,                             -- pageview: page label; action: CTA id
+    seq        INTEGER NOT NULL,                          -- ordinal within the session, for flow reconstruction
+    ts         INTEGER NOT NULL
+);
+CREATE INDEX idx_web_events_session ON web_events(session_id, seq);
+CREATE INDEX idx_web_events_ts ON web_events(ts);
+`,
 }
 
 func (db *DB) migrate() error {

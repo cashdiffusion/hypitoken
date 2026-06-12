@@ -8,6 +8,7 @@ import { Copy, Megaphone, Pencil, Plus, Trash2, TrendingUp, UserPlus, Wallet } f
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { VisitorBehaviorSection } from "@/components/admin/visitor-behavior-section";
 import { GlassPanel } from "@/components/app/page-primitives";
 import { Reveal } from "@/components/landing/reveal";
 import { Badge } from "@/components/ui/badge";
@@ -283,6 +284,9 @@ export function AttributionTab() {
             </div>
           )}
         </GlassPanel>
+
+        {/* site-wide visitor behaviour — all homepage visitors, not just ?ref= */}
+        <VisitorBehaviorSection />
       </div>
 
       {creating && (

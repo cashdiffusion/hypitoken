@@ -1,11 +1,12 @@
-import { useEffect } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AppShell, PublicLayout } from "@/components/layout/shell";
 import { RequireAdmin, RequireAuth } from "@/components/require-auth";
 import { TitleWatcher } from "@/components/title-watcher";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { AuthProvider } from "@/hooks/use-auth";
+import { initWebAnalytics, pathToPage, trackPageview } from "@/lib/analytics";
 import { initAttribution } from "@/lib/attribution";
 import AdminPage from "@/routes/admin";
 import BillingPage from "@/routes/billing";
@@ -22,10 +23,12 @@ import StatusPage from "@/routes/status";
 import TokensPage from "@/routes/tokens";
 
 export default function App() {
-  // Capture marketing attribution (?ref=) on first load and start dwell
-  // tracking. Best-effort and self-contained — see lib/attribution.
+  // Capture marketing attribution (?ref=) and start site-wide visitor-behaviour
+  // tracking on first load. Both best-effort and self-contained — see
+  // lib/attribution and lib/analytics.
   useEffect(() => {
     initAttribution();
+    initWebAnalytics();
   }, []);
 
   return (
@@ -33,6 +36,7 @@ export default function App() {
       <ConfirmProvider>
         <BrowserRouter>
           <TitleWatcher />
+          <RouteTracker />
           <Routes>
             {/* standalone public pages — each owns its own full-screen layout
                 (home = cinematic video hero; auth = split-screen) */}
@@ -81,4 +85,20 @@ export default function App() {
       <Toaster position="top-right" richColors closeButton />
     </AuthProvider>
   );
+}
+
+// RouteTracker reports a pageview on every SPA route change. The landing
+// pageview is already sent by initWebAnalytics, so the first render is skipped
+// to avoid double-counting it. Best-effort — see lib/analytics.
+function RouteTracker() {
+  const { pathname } = useLocation();
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    trackPageview(pathToPage(pathname));
+  }, [pathname]);
+  return null;
 }
