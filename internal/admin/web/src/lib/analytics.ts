@@ -113,6 +113,10 @@ function post(url: string, body: Record<string, unknown>): void {
 // them). Call on every SPA route change.
 export function trackPageview(page: string): void {
   if (!sessionID) return; // init not run yet
+  // Skip the authenticated /app/* area: this is the acquisition funnel, so a
+  // logged-in user (or operator) clicking around the console shouldn't register
+  // as a homepage visitor / first action. pathToPage maps /app/* → "app[:…]".
+  if (page === "app" || page.startsWith("app:")) return;
   post(TRACK_EVENT, {
     sid: sessionID,
     vid: visitorID,
