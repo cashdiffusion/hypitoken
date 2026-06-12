@@ -69,7 +69,11 @@ func curSymbol(currency string) string {
 }
 
 var tplFuncs = template.FuncMap{
-	"add": func(a, b int) int { return a + b },
+	"add":   func(a, b int) int { return a + b },
+	"upper": strings.ToUpper,
+	// dict returns an empty string-keyed int map — a safe default so KPI
+	// tiles can `index` it even when OrderStats failed to load (nil .Stats).
+	"dict": func() map[string]int { return map[string]int{} },
 	"seq": func(n int) []int {
 		out := make([]int, n)
 		for i := range out {

@@ -680,6 +680,64 @@ func (db *DB) ListOrders(ctx context.Context, statusFilter string, limit int) ([
 	return out, rows.Err()
 }
 
+// CurrencyAmount is a money total tied to its currency. Amounts in different
+// currencies must never be added together — the dashboard keeps one entry per
+// currency instead of collapsing them into a meaningless cross-currency sum.
+type CurrencyAmount struct {
+	Currency string  `json:"currency"`
+	Amount   float64 `json:"amount"`
+}
+
+// OrderStats is the admin-home aggregation: true per-status counts over ALL
+// orders (not just the recent page that admin_home renders) plus paid revenue
+// split by currency. The old KPI tiles counted statuses within the latest 20
+// loaded orders, so they silently undercounted once the table grew.
+type OrderStats struct {
+	StatusCounts map[string]int   `json:"status_counts"`
+	PaidRevenue  []CurrencyAmount `json:"paid_revenue"`
+}
+
+func (db *DB) OrderStats(ctx context.Context) (*OrderStats, error) {
+	st := &OrderStats{StatusCounts: map[string]int{}}
+
+	crows, err := db.QueryContext(ctx, `SELECT status, COUNT(*) FROM shop_orders GROUP BY status`)
+	if err != nil {
+		return nil, err
+	}
+	for crows.Next() {
+		var s string
+		var n int
+		if err := crows.Scan(&s, &n); err != nil {
+			_ = crows.Close()
+			return nil, err
+		}
+		st.StatusCounts[s] = n
+	}
+	if err := crows.Err(); err != nil {
+		_ = crows.Close()
+		return nil, err
+	}
+	_ = crows.Close()
+
+	// Paid revenue grouped by currency — never summed across currencies.
+	rrows, err := db.QueryContext(ctx,
+		`SELECT currency, COALESCE(SUM(amount_cny), 0) FROM shop_orders WHERE status = ? GROUP BY currency ORDER BY currency`,
+		OrderPaid)
+	if err != nil {
+		return nil, err
+	}
+	defer rrows.Close()
+	for rrows.Next() {
+		var ca CurrencyAmount
+		if err := rrows.Scan(&ca.Currency, &ca.Amount); err != nil {
+			return nil, err
+		}
+		ca.Currency = NormalizeCurrency(ca.Currency)
+		st.PaidRevenue = append(st.PaidRevenue, ca)
+	}
+	return st, rrows.Err()
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1

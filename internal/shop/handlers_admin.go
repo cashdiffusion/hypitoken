@@ -48,9 +48,11 @@ func (s *Shop) pageAdminHome(c *gin.Context) {
 	defer cancel()
 	products, _ := s.db.ListProducts(ctx, false)
 	orders, _ := s.db.ListOrders(ctx, "", 20)
+	stats, _ := s.db.OrderStats(ctx)
 	s.render(c, "admin_home.html", gin.H{
 		"Products":     products,
 		"RecentOrders": orders,
+		"Stats":        stats,
 	})
 }
 

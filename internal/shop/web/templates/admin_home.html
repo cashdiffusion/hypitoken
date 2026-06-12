@@ -12,7 +12,9 @@
     <a href="/admin/logout" class="eyebrow hover:text-destructive transition-colors">退出登录 →</a>
   </div>
 
-  <!-- KPI tiles -->
+  <!-- KPI tiles — counts come from OrderStats (all orders), not the recent page -->
+  {{$counts := dict}}{{$total := 0}}
+  {{with .Stats}}{{$counts = .StatusCounts}}{{range .StatusCounts}}{{$total = add $total .}}{{end}}{{end}}
   <div class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-border rounded-lg overflow-hidden hairline">
     <a href="/admin/products" class="group bg-card p-6 hover:bg-secondary transition-colors">
       <div class="eyebrow mb-3">在售商品</div>
@@ -20,25 +22,33 @@
       <div class="mt-4 eyebrow text-primary group-hover:underline underline-offset-4">管理 →</div>
     </a>
     <a href="/admin/orders" class="group bg-card p-6 hover:bg-secondary transition-colors">
-      <div class="eyebrow mb-3">近期订单</div>
-      <div class="font-display text-[42px] leading-none text-foreground num tracking-tight">{{len .RecentOrders}}</div>
+      <div class="eyebrow mb-3">订单总数</div>
+      <div class="font-display text-[42px] leading-none text-foreground num tracking-tight">{{$total}}</div>
       <div class="mt-4 eyebrow text-primary group-hover:underline underline-offset-4">查阅 →</div>
     </a>
     <a href="/admin/orders?status=pending" class="group bg-card p-6 hover:bg-secondary transition-colors">
       <div class="eyebrow mb-3 text-warning">待支付</div>
-      <div class="font-display text-[42px] leading-none text-foreground num tracking-tight">
-        {{$pending := 0}}{{range .RecentOrders}}{{if eq .Status "pending"}}{{$pending = add $pending 1}}{{end}}{{end}}{{$pending}}
-      </div>
+      <div class="font-display text-[42px] leading-none text-foreground num tracking-tight">{{index $counts "pending"}}</div>
       <div class="mt-4 eyebrow text-warning group-hover:underline underline-offset-4">筛选 →</div>
     </a>
     <a href="/admin/orders?status=await_manual" class="group bg-card p-6 hover:bg-secondary transition-colors">
       <div class="eyebrow mb-3 text-destructive">人工处理</div>
-      <div class="font-display text-[42px] leading-none text-foreground num tracking-tight">
-        {{$manual := 0}}{{range .RecentOrders}}{{if eq .Status "await_manual"}}{{$manual = add $manual 1}}{{end}}{{end}}{{$manual}}
-      </div>
+      <div class="font-display text-[42px] leading-none text-foreground num tracking-tight">{{index $counts "await_manual"}}</div>
       <div class="mt-4 eyebrow text-destructive group-hover:underline underline-offset-4">处理 →</div>
     </a>
   </div>
+
+  <!-- Paid revenue — one figure per currency; cross-currency totals are never summed -->
+  {{with .Stats}}{{if .PaidRevenue}}
+  <div class="mt-px grid grid-cols-2 lg:grid-cols-4 gap-px bg-border rounded-b-lg overflow-hidden hairline border-t-0">
+    {{range .PaidRevenue}}
+    <div class="bg-card p-6">
+      <div class="eyebrow mb-3 text-primary">已收款 · {{.Currency | upper}}</div>
+      <div class="font-display text-[34px] leading-none text-foreground num tracking-tight">{{money .Amount .Currency}}</div>
+    </div>
+    {{end}}
+  </div>
+  {{end}}{{end}}
 
   {{if .RecentOrders}}
   <section class="mt-14">
