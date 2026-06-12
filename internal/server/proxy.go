@@ -650,7 +650,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 			a.MarkHardFailure(fmt.Sprintf("account banned (upstream %d)", resp.StatusCode))
 			log.Warnf("auth: %s hard-disabled — account ban detected (status %d)", a.ID, resp.StatusCode)
 			retryable = true
-		case resp.StatusCode == 429 && bytes.Contains(errBody, []byte("Extra usage is required")):
+		case resp.StatusCode == 429 && isLongContextRejection(errBody):
 			// Request-level rejection (long context), not a credential
 			// problem — no cooldown, no retry (every credential rejects it).
 		case resp.StatusCode == 429:
@@ -1650,6 +1650,33 @@ func parseClaudeUsageLimitBody(b []byte) (time.Time, bool) {
 		return time.Now().Add(1 * time.Hour), true
 	}
 	return t, true
+}
+
+// isLongContextRejection reports whether a 429 body is the per-request
+// "this prompt is too long for your subscription's context window" rejection
+// rather than a credential-level quota/rate problem. These fire when a request
+// exceeds the standard 200K context and would need usage-based billing
+// ("extra usage"/credits) that subscription accounts don't have — so EVERY
+// credential rejects the identical request. It must not cool down the
+// credential or trigger a cross-pool retry (which would flag the whole pool
+// unavailable for one oversized request). Anthropic has shipped the message
+// under at least two wordings, hence the multi-marker match. Case-insensitive.
+func isLongContextRejection(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	lower := bytes.ToLower(b)
+	markers := [][]byte{
+		[]byte("extra usage is required"),                     // older wording
+		[]byte("usage credits are required for long context"), // current wording
+		[]byte("long context request"),                        // defensive: copy tweaks
+	}
+	for _, m := range markers {
+		if bytes.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // isAccountBanBody reports whether the upstream error body looks like a
