@@ -406,7 +406,7 @@ function GroupsTab() {
     <Reveal>
       <GlassPanel
         title={t("admin.groups.heading")}
-        action={<CreateGroupButton onDone={reload} />}
+        action={<GroupDialog onDone={reload} />}
         bodyClassName="p-0"
       >
         <Table>
@@ -434,29 +434,32 @@ function GroupsTab() {
                 </TableCell>
                 <TableCell className="font-mono text-xs">{g.CredentialGroup || "—"}</TableCell>
                 <TableCell className="text-right">
-                  {!g.IsDefault && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive"
-                      onClick={async () => {
-                        if (
-                          !(await confirm({
-                            title: t("common.delete"),
-                            description: t("admin.groups.confirmDelete", { name: g.Name }),
-                            confirmLabel: t("common.delete"),
-                            destructive: true,
-                          }))
-                        )
-                          return;
-                        await apiDelete(`/admin/groups/${g.ID}`);
-                        toast.success(t("admin.groups.deleted"));
-                        reload();
-                      }}
-                    >
-                      {t("common.delete")}
-                    </Button>
-                  )}
+                  <div className="flex items-center justify-end gap-1">
+                    <GroupDialog group={g} onDone={reload} />
+                    {!g.IsDefault && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive"
+                        onClick={async () => {
+                          if (
+                            !(await confirm({
+                              title: t("common.delete"),
+                              description: t("admin.groups.confirmDelete", { name: g.Name }),
+                              confirmLabel: t("common.delete"),
+                              destructive: true,
+                            }))
+                          )
+                            return;
+                          await apiDelete(`/admin/groups/${g.ID}`);
+                          toast.success(t("admin.groups.deleted"));
+                          reload();
+                        }}
+                      >
+                        {t("common.delete")}
+                      </Button>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -467,21 +470,45 @@ function GroupsTab() {
   );
 }
 
-function CreateGroupButton({ onDone }: { onDone: () => void }) {
+// GroupDialog drives both create (no `group`) and edit (`group` provided)
+// of a pricing tier. Edit posts to PATCH /admin/groups/:id (full-field
+// update). The user-facing dashboard reads each user's multipliers live
+// from /me, so a multiplier change here surfaces on the user's next page
+// load with no extra wiring.
+function GroupDialog({ group, onDone }: { group?: PricingGroup; onDone: () => void }) {
   const { t } = useTranslation();
+  const editing = !!group;
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [claudeMult, setClaudeMult] = useState("0.3");
   const [codexMult, setCodexMult] = useState("0.05");
   const [credGroup, setCredGroup] = useState("");
+  // Seed the form from the latest group values every time the dialog opens,
+  // so a reload between edits is reflected (useState initialisers don't re-run).
+  const openDialog = () => {
+    setName(group?.Name ?? "");
+    setDesc(group?.Description ?? "");
+    setClaudeMult(group ? String(group.ClaudeMultiplier) : "0.3");
+    setCodexMult(group ? String(group.CodexMultiplier) : "0.05");
+    setCredGroup(group?.CredentialGroup ?? "");
+    setOpen(true);
+  };
   return (
     <>
-      <Button onClick={() => setOpen(true)}>{t("admin.groups.newBtn")}</Button>
+      {editing ? (
+        <Button size="sm" variant="ghost" onClick={openDialog}>
+          {t("common.edit")}
+        </Button>
+      ) : (
+        <Button onClick={openDialog}>{t("admin.groups.newBtn")}</Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t("admin.groups.newTitle")}</DialogTitle>
+            <DialogTitle>
+              {editing ? t("admin.groups.editTitle") : t("admin.groups.newTitle")}
+            </DialogTitle>
           </DialogHeader>
           <p className="text-xs text-muted-foreground">{t("admin.groups.newSub")}</p>
           <div className="grid gap-3 py-2">
@@ -514,21 +541,25 @@ function CreateGroupButton({ onDone }: { onDone: () => void }) {
             </Button>
             <Button
               onClick={async () => {
-                await apiPost("/admin/groups", {
+                const body = {
                   name,
                   description: desc,
                   claude_multiplier: parseFloat(claudeMult),
                   codex_multiplier: parseFloat(codexMult),
                   credential_group: credGroup,
-                });
-                toast.success(t("admin.groups.created"));
+                };
+                if (editing && group) {
+                  await apiPatch(`/admin/groups/${group.ID}`, body);
+                  toast.success(t("admin.groups.updated"));
+                } else {
+                  await apiPost("/admin/groups", body);
+                  toast.success(t("admin.groups.created"));
+                }
                 onDone();
                 setOpen(false);
-                setName("");
-                setDesc("");
               }}
             >
-              {t("common.create")}
+              {editing ? t("common.save") : t("common.create")}
             </Button>
           </DialogFooter>
         </DialogContent>

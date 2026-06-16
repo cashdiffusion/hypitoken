@@ -483,6 +483,8 @@ export default {
         credGroup: "凭证分组",
       },
       created: "分组已创建",
+      updated: "分组已更新",
+      editTitle: "编辑价格分组",
       deleted: "已删除",
       confirmDelete: '删除分组 "{{name}}"？该分组下的用户会迁移到 default 分组。',
     },

@@ -490,6 +490,8 @@ export default {
         credGroup: "Cred. group",
       },
       created: "Group created",
+      updated: "Group updated",
+      editTitle: "Edit pricing group",
       deleted: "Deleted",
       confirmDelete: 'Delete group "{{name}}"? Users in this group will be moved to default.',
     },

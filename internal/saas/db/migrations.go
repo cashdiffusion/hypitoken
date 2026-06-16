@@ -271,6 +271,20 @@ CREATE TABLE web_events (
 CREATE INDEX idx_web_events_session ON web_events(session_id, seq);
 CREATE INDEX idx_web_events_ts ON web_events(ts);
 `,
+
+	// v8 — seed the "企业VIP" pricing group (claude 0.2 / codex 0.04), a tier
+	// below the default (0.3 / 0.05) for enterprise customers. Admins assign
+	// users to it from the panel (Users tab → group selector) and may tune its
+	// multipliers later via PATCH /admin/groups/:id. INSERT OR IGNORE so the
+	// migration is a no-op if an operator already created a group of this name
+	// by hand (name is UNIQUE). The user-facing dashboard reads each user's
+	// group multipliers live from /me, so no frontend change is needed.
+	`
+INSERT OR IGNORE INTO pricing_groups
+    (name, description, claude_multiplier, codex_multiplier, is_default, created_at, updated_at)
+VALUES
+    ('企业VIP', '企业 VIP 专属定价', 0.2, 0.04, 0, strftime('%s','now'), strftime('%s','now'));
+`,
 }
 
 func (db *DB) migrate() error {
