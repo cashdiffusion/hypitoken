@@ -1,4 +1,4 @@
-import { Activity, Info, RefreshCw } from "lucide-react";
+import { Activity, Globe, Info, RefreshCw, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, Navigate } from "react-router-dom";
@@ -9,8 +9,45 @@ import { useAuth } from "@/hooks/use-auth";
 import { OverviewPanel } from "@/legacy/components/overview-panel";
 import { ApiError, api } from "@/legacy/lib/api";
 import type { Summary } from "@/legacy/lib/types";
-import { cn, fmtDate, fmtInt } from "@/legacy/lib/utils";
-import { errMsg } from "@/lib/utils";
+import { cn, fmtDate } from "@/legacy/lib/utils";
+import { apiGet } from "@/lib/api";
+import { errMsg, fmtCompact, fmtUSD } from "@/lib/utils";
+
+// PersonalAgg mirrors cc-core requestlog.Aggregate (snake_case JSON). All
+// counters are this user's own — never fleet-wide.
+interface PersonalAgg {
+  count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_create_tokens: number;
+  cost_usd: number;
+  errors: number;
+  total_duration_ms: number;
+}
+// PersonalConsole is the /api/v2/me/console payload: account-level aggregates
+// for the "个人" tab. `total` is all-time, `today` is the current UTC day.
+interface PersonalConsole {
+  total: PersonalAgg;
+  today: PersonalAgg;
+  today_key: string;
+  by_model: Record<string, PersonalAgg>;
+  balance_usd: number;
+}
+
+const ZERO_AGG: PersonalAgg = {
+  count: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_read_tokens: 0,
+  cache_create_tokens: 0,
+  cost_usd: 0,
+  errors: 0,
+  total_duration_ms: 0,
+};
+
+const aggTotalTokens = (a: PersonalAgg | undefined): number =>
+  a ? a.input_tokens + a.output_tokens + a.cache_read_tokens + a.cache_create_tokens : 0;
 
 // /app/console exposes only the original CPA-Claude OVERVIEW panel —
 // charts and fleet KPIs — wrapped in the SaaS shell. Visible to any
@@ -105,7 +142,11 @@ function HealthCell({ health }: { health?: "operational" | "down" }) {
 export default function ConsolePage() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  // view selects the statistics scope: platform-wide aggregate (default) vs
+  // this account's own usage. The two pull from different endpoints.
+  const [view, setView] = useState<"platform" | "personal">("platform");
   const [data, setData] = useState<Summary | null>(null);
+  const [personal, setPersonal] = useState<PersonalConsole | null>(null);
   const [err, setErr] = useState("");
   const [lastTick, setLastTick] = useState(Date.now());
   const [refreshTick, setRefreshTick] = useState(0);
@@ -113,8 +154,13 @@ export default function ConsolePage() {
 
   const refresh = useCallback(async () => {
     try {
-      const d = await api<Summary>("/admin/api/summary");
-      setData(d);
+      if (view === "personal") {
+        const p = await apiGet<PersonalConsole>("/me/console");
+        setPersonal(p);
+      } else {
+        const d = await api<Summary>("/admin/api/summary");
+        setData(d);
+      }
       setErr("");
       setLastTick(Date.now());
     } catch (x) {
@@ -125,7 +171,7 @@ export default function ConsolePage() {
       }
       setErr(errMsg(x, "fetch failed"));
     }
-  }, []);
+  }, [view]);
 
   const manualRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -187,33 +233,48 @@ export default function ConsolePage() {
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5">
           <div className="space-y-2.5 max-w-3xl">
             <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl leading-[0.95] tracking-tight">
-              <Activity className="inline-block h-7 w-7 align-[-3px] text-primary" />{" "}
-              {t("console.title")}
+              {view === "personal" ? (
+                <User className="inline-block h-7 w-7 align-[-3px] text-primary" />
+              ) : (
+                <Activity className="inline-block h-7 w-7 align-[-3px] text-primary" />
+              )}{" "}
+              {view === "personal" ? t("console.titlePersonal") : t("console.titlePlatform")}
             </h1>
             <p className="text-sm lg:text-base text-muted-foreground max-w-2xl">
-              {t("console.activeWindow", { min: data ? data.active_window_minutes : "···" })}
+              {view === "personal"
+                ? t("console.subPersonal")
+                : t("console.activeWindow", { min: data ? data.active_window_minutes : "···" })}
             </p>
+            <ConsoleTabs view={view} onChange={setView} />
             <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/[0.05] px-3 py-2 max-w-2xl">
               <Info className="h-4 w-4 shrink-0 text-primary mt-0.5" />
               <p className="text-xs text-muted-foreground leading-relaxed">
-                <span className="text-foreground font-medium">{t("console.bannerStrong")}</span>{" "}
-                <Trans
-                  i18nKey="console.banner"
-                  components={{
-                    billing: (
-                      <Link
-                        to="/app/billing"
-                        className="underline underline-offset-2 text-foreground hover:text-primary"
-                      />
-                    ),
-                    logs: (
-                      <Link
-                        to="/app/logs"
-                        className="underline underline-offset-2 text-foreground hover:text-primary"
-                      />
-                    ),
-                  }}
-                />
+                <span className="text-foreground font-medium">
+                  {view === "personal"
+                    ? t("console.bannerStrongPersonal")
+                    : t("console.bannerStrong")}
+                </span>{" "}
+                {view === "personal" ? (
+                  t("console.bannerPersonal")
+                ) : (
+                  <Trans
+                    i18nKey="console.banner"
+                    components={{
+                      billing: (
+                        <Link
+                          to="/app/billing"
+                          className="underline underline-offset-2 text-foreground hover:text-primary"
+                        />
+                      ),
+                      logs: (
+                        <Link
+                          to="/app/logs"
+                          className="underline underline-offset-2 text-foreground hover:text-primary"
+                        />
+                      ),
+                    }}
+                  />
+                )}
               </p>
             </div>
           </div>
@@ -243,43 +304,199 @@ export default function ConsolePage() {
         )}
       </header>
 
-      {/* KPI strip — a single coarse service-health badge plus usage
-          metrics. Deliberately no credential / OAuth / API-key counts:
-          fleet pool size is operator-internal and not exposed here. */}
+      {view === "platform" ? (
+        <>
+          {/* Platform KPI strip — a single coarse service-health badge plus
+              usage metrics. Deliberately no credential / OAuth / API-key
+              counts: fleet pool size is operator-internal and not exposed.
+              fmtCompact keeps 9–10-digit token totals inside the tile. */}
+          <RevealStagger className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+            <RevealItem className="flex">
+              <HealthCell health={health} />
+            </RevealItem>
+            <RevealItem className="flex">
+              <MetricCell label={t("console.metrics.requests24h")} value={fmtCompact(req24)} />
+            </RevealItem>
+            <RevealItem className="flex">
+              <MetricCell
+                label={t("console.metrics.tokensIn24h")}
+                value={fmtCompact(in24)}
+                unit={t("console.metrics.tok")}
+              />
+            </RevealItem>
+            <RevealItem className="flex">
+              <MetricCell
+                label={t("console.metrics.tokensOut24h")}
+                value={fmtCompact(out24)}
+                unit={t("console.metrics.tok")}
+              />
+            </RevealItem>
+            <RevealItem className="flex">
+              <MetricCell
+                label={t("console.metrics.tokensTotal")}
+                value={fmtCompact(totalTokens)}
+                unit={t("console.metrics.tok")}
+              />
+            </RevealItem>
+          </RevealStagger>
+
+          {/* The original Overview panel — charts + fleet health. */}
+          <Reveal>
+            <OverviewPanel summary={data} pricing={data?.pricing} refreshTick={refreshTick} />
+          </Reveal>
+        </>
+      ) : (
+        <PersonalView personal={personal} />
+      )}
+    </div>
+  );
+}
+
+// ConsoleTabs — pill switch between the platform-wide and personal scopes.
+function ConsoleTabs({
+  view,
+  onChange,
+}: {
+  view: "platform" | "personal";
+  onChange: (v: "platform" | "personal") => void;
+}) {
+  const { t } = useTranslation();
+  const tabs = [
+    { id: "platform" as const, label: t("console.tabs.platform"), icon: Globe },
+    { id: "personal" as const, label: t("console.tabs.personal"), icon: User },
+  ];
+  return (
+    <div className="inline-flex items-center gap-1 rounded-full border border-border bg-card/50 p-1">
+      {tabs.map((tab) => {
+        const Icon = tab.icon;
+        const active = view === tab.id;
+        return (
+          <button
+            type="button"
+            key={tab.id}
+            onClick={() => onChange(tab.id)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
+              active
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// PersonalView renders account-scoped statistics: the same KPI-tile layout as
+// the platform view but driven by this user's own request log, plus a
+// cumulative summary row and a per-model usage breakdown. All numbers are this
+// account's — never fleet-wide.
+function PersonalView({ personal }: { personal: PersonalConsole | null }) {
+  const { t } = useTranslation();
+  const today = personal?.today ?? ZERO_AGG;
+  const total = personal?.total ?? ZERO_AGG;
+  const cacheDenom = total.input_tokens + total.cache_read_tokens + total.cache_create_tokens;
+  const cacheHit = cacheDenom > 0 ? (total.cache_read_tokens / cacheDenom) * 100 : 0;
+  const models = personal
+    ? Object.entries(personal.by_model).sort((a, b) => aggTotalTokens(b[1]) - aggTotalTokens(a[1]))
+    : [];
+  return (
+    <>
+      {/* KPI strip — wallet balance + today's traffic + all-time tokens. */}
       <RevealStagger className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         <RevealItem className="flex">
-          <HealthCell health={health} />
+          <MetricCell
+            label={t("console.metrics.balance")}
+            value={fmtUSD(personal?.balance_usd)}
+            accent
+          />
         </RevealItem>
         <RevealItem className="flex">
-          <MetricCell label={t("console.metrics.requests24h")} value={fmtInt(req24)} />
+          <MetricCell label={t("console.metrics.requestsToday")} value={fmtCompact(today.count)} />
         </RevealItem>
         <RevealItem className="flex">
           <MetricCell
-            label={t("console.metrics.tokensIn24h")}
-            value={fmtInt(in24)}
+            label={t("console.metrics.tokensInToday")}
+            value={fmtCompact(today.input_tokens)}
             unit={t("console.metrics.tok")}
           />
         </RevealItem>
         <RevealItem className="flex">
           <MetricCell
-            label={t("console.metrics.tokensOut24h")}
-            value={fmtInt(out24)}
+            label={t("console.metrics.tokensOutToday")}
+            value={fmtCompact(today.output_tokens)}
             unit={t("console.metrics.tok")}
           />
         </RevealItem>
         <RevealItem className="flex">
           <MetricCell
             label={t("console.metrics.tokensTotal")}
-            value={fmtInt(totalTokens)}
+            value={fmtCompact(aggTotalTokens(total))}
             unit={t("console.metrics.tok")}
           />
         </RevealItem>
       </RevealStagger>
 
-      {/* The original Overview panel — charts + fleet health visualisation. */}
+      {/* Cumulative all-time summary. */}
       <Reveal>
-        <OverviewPanel summary={data} pricing={data?.pricing} refreshTick={refreshTick} />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <MetricCell label={t("console.personal.totalRequests")} value={fmtCompact(total.count)} />
+          <MetricCell
+            label={t("console.personal.totalSpent")}
+            value={fmtUSD(total.cost_usd)}
+            accent
+          />
+          <MetricCell label={t("console.personal.cacheHit")} value={cacheHit.toFixed(1)} unit="%" />
+          <MetricCell label={t("console.personal.errors")} value={fmtCompact(total.errors)} />
+        </div>
       </Reveal>
-    </div>
+
+      {/* Per-model usage breakdown. */}
+      <Reveal>
+        <SpotlightCard tiltDeg={0} className="rounded-xl p-5">
+          <h3 className="text-sm font-semibold tracking-tight">{t("console.personal.byModel")}</h3>
+          {models.length === 0 ? (
+            <p className="mt-4 text-sm text-muted-foreground">{t("console.personal.noData")}</p>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <th className="pb-2 pr-4 font-medium">{t("console.personal.colModel")}</th>
+                    <th className="pb-2 pr-4 text-right font-medium">
+                      {t("console.personal.colRequests")}
+                    </th>
+                    <th className="pb-2 pr-4 text-right font-medium">
+                      {t("console.personal.colTokens")}
+                    </th>
+                    <th className="pb-2 text-right font-medium">{t("console.personal.colCost")}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {models.map(([model, agg]) => (
+                    <tr key={model}>
+                      <td className="py-2 pr-4 font-mono text-xs">{model}</td>
+                      <td className="py-2 pr-4 text-right font-mono tabular-nums">
+                        {fmtCompact(agg.count)}
+                      </td>
+                      <td className="py-2 pr-4 text-right font-mono tabular-nums">
+                        {fmtCompact(aggTotalTokens(agg))}
+                      </td>
+                      <td className="py-2 text-right font-mono tabular-nums">
+                        {fmtUSD(agg.cost_usd)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SpotlightCard>
+      </Reveal>
+    </>
   );
 }

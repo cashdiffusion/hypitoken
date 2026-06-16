@@ -26,6 +26,33 @@ export const fmtInt = (n: number | null | undefined): string => {
   return v.toLocaleString();
 };
 
+// fmtCompact: abbreviate large integers (942K / 14.9M / 6.64B / 1.30T) so big
+// token counts never overflow a fixed-width KPI tile. Under 10,000 it falls
+// back to the exact grouped form so small, meaningful numbers stay precise.
+// 3 significant figures. Null/NaN → "—".
+export const fmtCompact = (n: number | null | undefined): string => {
+  if (n == null) return "—";
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs < 10_000) return v.toLocaleString();
+  const units = [
+    { d: 1e12, s: "T" },
+    { d: 1e9, s: "B" },
+    { d: 1e6, s: "M" },
+    { d: 1e3, s: "K" },
+  ];
+  for (const u of units) {
+    if (abs >= u.d) {
+      const x = v / u.d;
+      const scaled = abs / u.d;
+      const str = scaled >= 100 ? x.toFixed(0) : scaled >= 10 ? x.toFixed(1) : x.toFixed(2);
+      return str + u.s;
+    }
+  }
+  return v.toLocaleString();
+};
+
 // fmtUSD: 2 decimals once the figure is "real money" ($0.01+), otherwise
 // 4 decimals so per-request micro-costs stay visible. Zero/missing → "—".
 export const fmtUSD = (n: number | null | undefined): string => {

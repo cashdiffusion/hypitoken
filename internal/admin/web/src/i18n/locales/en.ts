@@ -482,10 +482,20 @@ export default {
   console: {
     eyebrow: "Operator console · Overview",
     title: "Fleet overview",
+    titlePlatform: "Fleet overview",
+    titlePersonal: "My usage",
+    subPersonal: "Account-level requests, tokens, and spend — visible only to you.",
     activeWindow: "Active credential window {{min}} min · live charts refresh every 10 seconds.",
+    tabs: {
+      platform: "Platform",
+      personal: "Personal",
+    },
     bannerStrong: "Platform-wide stats.",
     banner:
       "Every metric here is aggregated across the whole platform: models, requests, and spend. It is not your personal usage. For your own billing detail, see <billing>Billing</billing> or <logs>Logs</logs>.",
+    bannerStrongPersonal: "Your account only.",
+    bannerPersonal:
+      "These figures come solely from your own request log — no other users and no platform-wide data.",
     last: "last · {{when}}",
     metrics: {
       serviceHealth: "Service",
@@ -496,6 +506,22 @@ export default {
       tokensOut24h: "Σ out (24h)",
       tokensTotal: "Σ total",
       tok: "tok",
+      balance: "Wallet balance",
+      requestsToday: "Requests today",
+      tokensInToday: "Tokens in today",
+      tokensOutToday: "Tokens out today",
+    },
+    personal: {
+      totalRequests: "Total requests",
+      totalSpent: "Total spent",
+      cacheHit: "Cache hit rate",
+      errors: "Errors",
+      byModel: "Usage by model",
+      noData: "No usage yet — your stats will appear here once you make requests.",
+      colModel: "Model",
+      colRequests: "Requests",
+      colTokens: "Tokens",
+      colCost: "Cost",
     },
   },
 

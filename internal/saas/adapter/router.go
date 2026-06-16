@@ -213,6 +213,38 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 		})
 	})
 
+	// Per-user console summary — account-level aggregates powering the
+	// /app/console "个人" tab. Mirrors the platform KPI shape (requests /
+	// tokens-in / tokens-out / total) but scoped to this user's own request
+	// log via the UserID filter. `total` is all-time; `today` is the current
+	// UTC day's bucket from ByDay (zero Aggregate when the user has no traffic
+	// today). Same redaction posture as /me/requests — a user only ever sees
+	// their own rows, never anyone else's or any fleet/credential detail.
+	authed.GET("/me/console", func(c *gin.Context) {
+		u := saasauth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+			return
+		}
+		// Limit: 1 — we only need the aggregates (Summary/ByDay/ByModel), not
+		// the entry page; the maps are computed over every matched record
+		// regardless of Limit.
+		res, err := requestlog.Query(requestlog.Filter{Dir: logDir, UserID: u.ID, Limit: 1})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		today := time.Now().UTC().Format("2006-01-02")
+		c.JSON(http.StatusOK, gin.H{
+			"total":       res.Summary,
+			"today":       res.ByDay[today],
+			"today_key":   today,
+			"by_model":    res.ByModel,
+			"by_day":      res.ByDay,
+			"balance_usd": u.BalanceUSD,
+		})
+	})
+
 	// Public groups (read-only, used on landing/pricing pages).
 	v2.GET("/groups", func(c *gin.Context) {
 		gs, err := store.ListGroups(c.Request.Context())

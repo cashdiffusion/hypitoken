@@ -465,10 +465,19 @@ export default {
   console: {
     eyebrow: "运维控制台 · 概览",
     title: "全局总览",
+    titlePlatform: "全局总览",
+    titlePersonal: "我的用量",
+    subPersonal: "你账户级别的请求、Token 与消费统计，仅你自己可见。",
     activeWindow: "凭证活跃窗口 {{min}} 分钟，实时图表每 10 秒刷新。",
+    tabs: {
+      platform: "全平台",
+      personal: "个人",
+    },
     bannerStrong: "全平台聚合数据。",
     banner:
       "本页展示全平台聚合指标，涵盖模型、请求和消费，不代表你的个人用量。个人账单请查看 <billing>账单</billing> 或 <logs>日志</logs>。",
+    bannerStrongPersonal: "仅你的账户。",
+    bannerPersonal: "以下统计仅来自你自己的请求记录，不含其他用户或全平台数据。",
     last: "最近 · {{when}}",
     metrics: {
       serviceHealth: "服务状态",
@@ -479,6 +488,22 @@ export default {
       tokensOut24h: "Σ 输出 (24h)",
       tokensTotal: "Σ 总量",
       tok: "token",
+      balance: "钱包余额",
+      requestsToday: "今日请求",
+      tokensInToday: "今日输入",
+      tokensOutToday: "今日输出",
+    },
+    personal: {
+      totalRequests: "累计请求",
+      totalSpent: "累计消费",
+      cacheHit: "缓存命中率",
+      errors: "错误数",
+      byModel: "按模型用量",
+      noData: "暂无用量记录，发起请求后这里会显示你的统计。",
+      colModel: "模型",
+      colRequests: "请求数",
+      colTokens: "Token",
+      colCost: "消费",
     },
   },
 
