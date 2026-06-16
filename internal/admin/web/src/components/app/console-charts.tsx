@@ -162,7 +162,7 @@ export function TokenDonut({
   }
   let offset = 0;
   return (
-    <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-5">
+    <div className="flex flex-col items-center gap-5">
       <div className="relative h-32 w-32 shrink-0">
         <svg
           viewBox="0 0 100 100"
@@ -199,18 +199,18 @@ export function TokenDonut({
           </span>
         </div>
       </div>
-      <div className="w-full space-y-1.5">
+      <div className="grid w-full grid-cols-2 gap-x-4 gap-y-2.5">
         {segments.map((s) => (
-          <div key={s.key} className="flex items-center justify-between gap-2 text-xs">
-            <span className="inline-flex items-center gap-1.5 text-foreground/90">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-sm"
-                style={{ background: s.color }}
-              />
-              {s.label}
-            </span>
-            <span className="font-mono tabular-nums text-muted-foreground">
-              {fmtCompact(s.value)} · {((s.value / total) * 100).toFixed(0)}%
+          <div key={s.key} className="flex items-start gap-2 text-xs">
+            <span
+              className="mt-1 inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+              style={{ background: s.color }}
+            />
+            <span className="min-w-0">
+              <span className="block truncate text-foreground/90">{s.label}</span>
+              <span className="block font-mono tabular-nums text-muted-foreground">
+                {fmtCompact(s.value)} · {((s.value / total) * 100).toFixed(0)}%
+              </span>
             </span>
           </div>
         ))}

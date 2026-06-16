@@ -43,6 +43,10 @@ interface PersonalConsole {
   by_model: Record<string, PersonalAgg>;
   by_day: Record<string, PersonalAgg>;
   balance_usd: number;
+  // Actual paid amounts from the wallet ledger (official × group multiplier).
+  // Distinct from total.cost_usd, which is the pre-discount official price.
+  spent_total: number;
+  spent_today: number;
 }
 
 // TREND_DAYS — how many trailing UTC days the usage trend + daily table cover.
@@ -489,7 +493,7 @@ function PersonalView({ personal }: { personal: PersonalConsole | null }) {
           <MetricCell label={t("console.personal.totalRequests")} value={fmtCompact(total.count)} />
           <MetricCell
             label={t("console.personal.totalSpent")}
-            value={fmtUSD(total.cost_usd)}
+            value={fmtUSD(personal?.spent_total)}
             accent
           />
           <MetricCell label={t("console.personal.cacheHit")} value={cacheHit.toFixed(1)} unit="%" />

@@ -234,7 +234,16 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		today := time.Now().UTC().Format("2006-01-02")
+		nowUTC := time.Now().UTC()
+		today := nowUTC.Format("2006-01-02")
+		// Actual spend comes from the wallet ledger (charge rows = official ×
+		// pricing-group multiplier), NOT requestlog.CostUSD, which records the
+		// *official* price before the discount. spent_total/spent_today are the
+		// figures the user truly paid, so the dashboard "累计消费" and this tab
+		// agree.
+		spentTotal, _ := store.SumChargeSince(c.Request.Context(), u.ID, time.Time{})
+		dayStart := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+		spentToday, _ := store.SumChargeSince(c.Request.Context(), u.ID, dayStart)
 		c.JSON(http.StatusOK, gin.H{
 			"total":       res.Summary,
 			"today":       res.ByDay[today],
@@ -242,6 +251,8 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			"by_model":    res.ByModel,
 			"by_day":      res.ByDay,
 			"balance_usd": u.BalanceUSD,
+			"spent_total": spentTotal,
+			"spent_today": spentToday,
 		})
 	})
 

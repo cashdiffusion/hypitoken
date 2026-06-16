@@ -18,6 +18,13 @@ export default function DashboardPage() {
   const location = useLocation();
   const [tx, setTx] = useState<WalletTx[]>([]);
   const [tokens, setTokens] = useState<UserToken[]>([]);
+  // Account usage summary — the source of truth for lifetime spend. We pull it
+  // from /me/console (wallet-ledger charge total) rather than tallying the
+  // transactions list, which by default hides charge rows (so a naive sum was
+  // always 0). total.count is the billed-request count.
+  const [usage, setUsage] = useState<{ spent_total: number; total: { count: number } } | null>(
+    null,
+  );
 
   // Welcome overlay: register.tsx routes here right after a brand-new signup
   // with either `state.welcomeBonus` (credited USD → celebration) or
@@ -41,12 +48,13 @@ export default function DashboardPage() {
       setTx(r.transactions || []),
     );
     apiGet<{ tokens: UserToken[] }>("/tokens").then((r) => setTokens(r.tokens || []));
+    apiGet<{ spent_total: number; total: { count: number } }>("/me/console")
+      .then(setUsage)
+      .catch(() => setUsage(null));
   }, []);
 
-  const charged = tx
-    .filter((t) => t.kind === "charge")
-    .reduce((s, t) => s + Math.abs(t.amount_usd), 0);
-  const chargeCount = tx.filter((t) => t.kind === "charge").length;
+  const charged = usage?.spent_total ?? 0;
+  const chargeCount = usage?.total?.count ?? 0;
   const activeTokens = tokens.filter((t) => !t.disabled).length;
 
   return (
