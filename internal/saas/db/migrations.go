@@ -285,6 +285,19 @@ INSERT OR IGNORE INTO pricing_groups
 VALUES
     ('企业VIP', '企业 VIP 专属定价', 0.2, 0.04, 0, strftime('%s','now'), strftime('%s','now'));
 `,
+
+	// v9 — bump the 企业VIP Claude multiplier 0.2 → 0.25. Append-only delta
+	// (v8 already shipped on main, so it's immutable history; this mirrors v3,
+	// which UPDATEs a previously-seeded group rather than rewriting its seed).
+	// WHERE-guarded on the old value so an operator who already retuned it from
+	// the admin panel isn't clobbered. Codex stays at 0.04.
+	`
+UPDATE pricing_groups
+SET    claude_multiplier = 0.25,
+       updated_at        = strftime('%s','now')
+WHERE  name = '企业VIP'
+  AND  claude_multiplier = 0.2;
+`,
 }
 
 func (db *DB) migrate() error {
