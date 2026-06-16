@@ -99,6 +99,7 @@ export default {
       invalidCredentials: "邮箱或密码错误",
       submit: "登录",
     },
+    sessionExpired: "登录已过期，请重新登录。",
     register: {
       title: "创建账号",
       sub: "免费注册，最低充值 $1 即可开始使用。",

@@ -7,9 +7,32 @@ const USER_KEY = "hypi.user";
 
 export const getJWT = (): string => localStorage.getItem(TOKEN_KEY) || "";
 export const setJWT = (t: string): void => {
-  if (t) localStorage.setItem(TOKEN_KEY, t);
-  else localStorage.removeItem(TOKEN_KEY);
+  if (t) {
+    localStorage.setItem(TOKEN_KEY, t);
+    // A fresh token means a new session — re-arm the expiry guard so a future
+    // 401 fires the "session expired" flow again.
+    sessionExpiredFired = false;
+  } else localStorage.removeItem(TOKEN_KEY);
 };
+
+// SESSION_EXPIRED_EVENT is dispatched on window when an authenticated request
+// comes back 401 (JWT expired/invalid). AuthProvider listens for it to clear
+// the user (→ RequireAuth bounces to /login) and toast a notice. JWTs are
+// fixed-lifetime with no refresh flow, so this is how an already-open tab
+// learns its session died instead of surfacing a raw "invalid token".
+export const SESSION_EXPIRED_EVENT = "hypi:session-expired";
+
+// One-shot guard: a burst of parallel requests can each 401 at once, but we
+// only want a single logout + toast. Reset whenever a new JWT is stored.
+let sessionExpiredFired = false;
+
+function handleSessionExpired() {
+  if (sessionExpiredFired) return;
+  sessionExpiredFired = true;
+  setJWT("");
+  setCachedUser(null);
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+}
 
 export const getCachedUser = (): User | null => {
   const raw = localStorage.getItem(USER_KEY);
@@ -56,6 +79,12 @@ export async function api<T = unknown>(path: string, opts: RequestInit = {}): Pr
     data = { raw: text };
   }
   if (!res.ok) {
+    // A 401 on a request we sent a token with means the session expired/was
+    // revoked server-side. Centralise the bounce-to-login here so no caller
+    // has to special-case it (and users stop seeing the raw "invalid token").
+    if (res.status === 401 && token) {
+      handleSessionExpired();
+    }
     const msg =
       (data && typeof data === "object" && "error" in data && typeof data.error === "string"
         ? data.error

@@ -100,6 +100,7 @@ export default {
       invalidCredentials: "Invalid credentials",
       submit: "Sign in",
     },
+    sessionExpired: "Your session has expired. Please sign in again.",
     register: {
       title: "Create account",
       sub: "Create an account for free. A $1 minimum top-up gets you started.",

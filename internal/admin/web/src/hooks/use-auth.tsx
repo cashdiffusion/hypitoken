@@ -1,5 +1,15 @@
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
-import { apiGet, getCachedUser, getJWT, logout, setCachedUser, setJWT } from "@/lib/api";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import {
+  apiGet,
+  getCachedUser,
+  getJWT,
+  logout,
+  SESSION_EXPIRED_EVENT,
+  setCachedUser,
+  setJWT,
+} from "@/lib/api";
 import type { PricingGroup, User } from "@/lib/types";
 import { errStatus } from "@/lib/utils";
 
@@ -15,6 +25,7 @@ interface AuthState {
 const Ctx = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(getCachedUser());
   const [group, setGroup] = useState<PricingGroup | null>(null);
   const [loading, setLoading] = useState<boolean>(!!getJWT());
@@ -46,6 +57,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refresh();
   }, []);
+
+  // Session-expiry bridge: api.ts dispatches SESSION_EXPIRED_EVENT when an
+  // authed request 401s (JWT expired/revoked). It has already cleared the
+  // stored token, so here we just drop the in-memory user — RequireAuth then
+  // redirects to /login — and surface a clear notice instead of "invalid token".
+  useEffect(() => {
+    const onExpired = () => {
+      setUser(null);
+      setGroup(null);
+      toast.error(t("auth.sessionExpired"));
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, [t]);
 
   const signIn = (token: string, u: User) => {
     setJWT(token);
