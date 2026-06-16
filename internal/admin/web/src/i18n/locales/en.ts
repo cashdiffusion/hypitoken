@@ -84,6 +84,8 @@ export default {
     admin: "Admin",
     product: "Product",
     account: "Account",
+    terms: "Terms",
+    privacy: "Privacy",
   },
 
   // Auth pages
@@ -115,6 +117,9 @@ export default {
       codeSendFailed: "Could not send code",
       created: "Account created.",
       registerFailed: "Registration failed",
+      agree: "I have read and agree to the <1>Terms of Service</1> and <3>Privacy Policy</3>.",
+      agreeAria: "Agree to the Terms of Service and Privacy Policy",
+      mustAgree: "Please read and accept the Terms of Service and Privacy Policy first.",
     },
     forgot: {
       title: "Reset password",
@@ -142,6 +147,160 @@ export default {
   },
 
   // Authed pages
+  legal: {
+    eyebrow: "Legal",
+    lastUpdated: "Last updated: {{date}}",
+    notice: {
+      title: "Service availability & terms",
+      availability: "Service availability and billing are subject to our Terms of Service.",
+      restricted:
+        "This service is not offered to users located in restricted regions, including but not limited to mainland China.",
+      compliance:
+        "You are responsible for complying with applicable local laws and platform rules, and you use this service entirely at your own risk.",
+      links: "For full details, see our <1>Terms of Service</1> and <3>Privacy Policy</3>.",
+      dontShow: "Don't show this again",
+      acknowledge: "I understand",
+    },
+    terms: {
+      title: "Terms of Service",
+      intro:
+        "Please read these terms carefully before using HypiToken. By accessing or using the service you agree to be bound by them.",
+      sections: [
+        {
+          h: "1. Acceptance of Terms",
+          b: [
+            "By accessing or using HypiToken (the “Service”) you confirm that you have read, understood, and agree to be bound by these Terms of Service. If you do not agree, do not use the Service.",
+            "The Service is a developer-facing API proxy and billing platform that forwards your requests to upstream AI providers such as Anthropic and OpenAI.",
+          ],
+        },
+        {
+          h: "2. Eligibility & Restricted Regions",
+          b: [
+            "The Service is not offered to users located in restricted regions, including but not limited to mainland China.",
+            "You represent and warrant that you are not located in a restricted region and that your use of the Service does not violate any export control, sanctions, or local laws applicable to you.",
+            "We reserve the right to refuse or terminate service to any user at any time, for any reason.",
+          ],
+        },
+        {
+          h: "3. Acceptable Use",
+          b: [
+            "You agree not to use the Service for any unlawful or infringing purpose, or in any way that violates an upstream provider's usage policies.",
+            "You must comply with the terms and acceptable-use policies of the upstream AI providers (Anthropic, OpenAI, and others). Violating upstream policies may result in suspension or termination of your access.",
+            "Abusing, reverse-engineering, circumventing rate limits or anti-fraud mechanisms, or programmatically farming promotional credit is prohibited.",
+          ],
+        },
+        {
+          h: "4. Accounts & Tokens",
+          b: [
+            "You are responsible for keeping your account credentials and API tokens confidential, and for all activity that occurs under your account or tokens.",
+            "Revoke and rotate any token promptly if you believe it has been compromised.",
+          ],
+        },
+        {
+          h: "5. Billing & Top-ups",
+          b: [
+            "The Service operates on a prepaid wallet model, billed in USD based on actual usage; the applicable billing rules and price multipliers are those shown in the platform.",
+            "All top-ups and charges are subject to these Terms. Charges are deemed consumed once incurred and are non-refundable except as stated in the published Refund Policy.",
+          ],
+        },
+        {
+          h: "6. Disclaimer & Assumption of Risk",
+          b: [
+            "The Service is provided on an “as is” and “as available” basis, without warranties of any kind, express or implied.",
+            "The availability, stability, and output of upstream services are outside our control; we are not liable for any loss arising from upstream outages, throttling, bans, or generated content.",
+            "You understand and agree that you use the Service entirely at your own risk.",
+          ],
+        },
+        {
+          h: "7. Limitation of Liability",
+          b: [
+            "To the maximum extent permitted by law, we are not liable for any indirect, incidental, special, or consequential damages; our aggregate liability shall not exceed the amount you paid to the Service in the 30 days preceding the event giving rise to the claim.",
+          ],
+        },
+        {
+          h: "8. Changes & Termination",
+          b: [
+            "We may update these Terms from time to time; your continued use after an update constitutes acceptance of the revised Terms.",
+            "We may suspend or terminate your access if you violate these Terms.",
+          ],
+        },
+        {
+          h: "9. Contact",
+          b: [
+            "If you have any questions about these Terms, contact us through the in-app support channel or community.",
+          ],
+        },
+      ],
+    },
+    privacy: {
+      title: "Privacy Policy",
+      intro:
+        "This policy explains what information we collect when you use HypiToken, how we use it, and the rights you have.",
+      sections: [
+        {
+          h: "1. Information We Collect",
+          b: [
+            "Account information: your email address and a password stored in hashed form.",
+            "Billing & transactions: wallet balance, top-up and charge records, and payment order numbers.",
+            "Usage data: request metadata (timestamp, model, token usage, cost) used for billing and reconciliation.",
+            "Visitor & anti-fraud data: anonymous behavioural analytics, browser fingerprint, and IP subnet, used solely for signup abuse prevention and security.",
+          ],
+        },
+        {
+          h: "2. How We Use Information",
+          b: [
+            "To provide and maintain the Service, perform billing and reconciliation, prevent fraud and abuse, and improve the product.",
+            "We do not sell your personal data.",
+          ],
+        },
+        {
+          h: "3. Cookies & Local Storage",
+          b: [
+            "We use browser local storage to keep you signed in and to remember UI preferences and settings such as “don't show again”. We do not use third-party advertising trackers.",
+          ],
+        },
+        {
+          h: "4. Third Parties",
+          b: [
+            "Payments: processed by payment providers such as Stripe and Alipay.",
+            "Email: verification codes and notifications are sent via Resend.",
+            "Upstream AI: your request content is forwarded to upstream providers such as Anthropic and OpenAI to fulfil the call, subject to their respective privacy policies.",
+          ],
+        },
+        {
+          h: "5. Data Retention",
+          b: [
+            "We retain data for as long as needed to provide the Service and as required by law; after account closure we delete or anonymise non-essential data within a reasonable period.",
+          ],
+        },
+        {
+          h: "6. Data Security",
+          b: [
+            "We apply reasonable technical and organisational measures to protect your data, but no system can guarantee absolute security.",
+          ],
+        },
+        {
+          h: "7. Your Rights",
+          b: [
+            "You may request access to, correction of, or deletion of your personal data; some data may be retained to meet legal or billing obligations.",
+          ],
+        },
+        {
+          h: "8. Changes to This Policy",
+          b: [
+            "We may update this policy from time to time; material changes will be announced in-app or reflected on this page.",
+          ],
+        },
+        {
+          h: "9. Contact",
+          b: [
+            "To exercise these rights or for any privacy questions, contact us through the in-app support channel.",
+          ],
+        },
+      ],
+    },
+  },
+
   dashboard: {
     welcome: "Welcome back",
     walletBalance: "Wallet balance",

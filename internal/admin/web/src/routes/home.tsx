@@ -1026,8 +1026,14 @@ function SiteFooter({ t }: { t: (k: string) => string }) {
         <div className="border-t border-white/10 backdrop-blur-[2px]">
           <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-5 text-xs text-white/55 md:px-6">
             <span>© {new Date().getFullYear()} HypiToken</span>
-            <div className="flex items-center gap-4 font-mono">
-              <span>v2 · saas</span>
+            <div className="flex items-center gap-4">
+              <Link to="/terms" className="transition-colors hover:text-emerald-400">
+                {t("nav.terms")}
+              </Link>
+              <Link to="/privacy" className="transition-colors hover:text-emerald-400">
+                {t("nav.privacy")}
+              </Link>
+              <span className="font-mono">v2 · saas</span>
             </div>
           </div>
         </div>

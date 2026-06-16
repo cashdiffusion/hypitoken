@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { CountUp, GlassPanel, PageHeader, StatTile } from "@/components/app/page-primitives";
+import { TermsNotice } from "@/components/app/terms-notice";
 import { WelcomeBonus } from "@/components/app/welcome-bonus";
 import { SpotlightCard } from "@/components/landing/interactions";
 import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
@@ -50,6 +51,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
+      <TermsNotice />
       {welcome && (
         <WelcomeBonus
           amount={welcome.bonus}

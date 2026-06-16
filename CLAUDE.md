@@ -106,7 +106,9 @@ OpenAI-format requests on the Codex endpoint. **API-key credentials** forward to
 
 ### Shop (发卡网) + legal pages
 
-`internal/shop` — an independent card-vending storefront on `:8319` with its own SQLite (`shop.db`), Stripe Hosted Checkout (card + Alipay, CNY/USD), products/orders/card-secrets, server-rendered Go `html/template` (not the SPA). `internal/legal` — static payment-DDQ pages (`/legal/{pricing,subscribe,support,refund-policy}`) for payment-provider review. Both are zero-dependency on the SaaS DB and independently toggleable.
+`internal/shop` — an independent card-vending storefront on `:8319` with its own SQLite (`shop.db`), Stripe Hosted Checkout (card + Alipay, CNY/USD), products/orders/card-secrets, server-rendered Go `html/template` (not the SPA). Zero-dependency on the SaaS DB and independently toggleable.
+
+Legal pages (Terms of Service, Privacy Policy) are **SPA routes**, not server-rendered: `/terms` + `/privacy` under `PublicLayout` in `App.tsx`, copy lives in i18n under `legal.*` (`zh.ts`/`en.ts`) and renders via `components/legal/legal-doc.tsx`. Linked from the home-page footer legal bar and the register-page consent checkbox (signup is gated on agreement). The dashboard shows a `TermsNotice` modal (`components/app/terms-notice.tsx`) on every visit until the user ticks "don't show again" (localStorage `hypitoken.tos-notice.dismissed`); it emphasises the service is **not offered in restricted regions (mainland China)** and is used at the user's own risk. The old server-rendered `internal/legal` package (`/legal/*` payment-DDQ screenshot pages) was **removed** — don't reintroduce it.
 
 ### Capture archive — lives in `cc-core/crack/`
 

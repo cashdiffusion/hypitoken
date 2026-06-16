@@ -14,7 +14,6 @@ import (
 
 	"github.com/wjsoj/CPA-Claude/internal/admin"
 	"github.com/wjsoj/CPA-Claude/internal/config"
-	"github.com/wjsoj/CPA-Claude/internal/legal"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/clienttoken"
 	"github.com/wjsoj/cc-core/pricing"
@@ -279,7 +278,6 @@ func (s *Server) buildClaudeEngine(adminH *admin.Handler, primary bool) *gin.Eng
 			adminH.RegisterStatus(engine)
 		}
 		adminH.Register(engine)
-		legal.Register(engine)
 	}
 	return engine
 }

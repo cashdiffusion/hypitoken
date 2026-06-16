@@ -18,8 +18,10 @@ import HomePage from "@/routes/home";
 import LoginPage from "@/routes/login";
 import LogsPage from "@/routes/logs";
 import PricingPage from "@/routes/pricing";
+import PrivacyPage from "@/routes/privacy";
 import RegisterPage from "@/routes/register";
 import StatusPage from "@/routes/status";
+import TermsPage from "@/routes/terms";
 import TokensPage from "@/routes/tokens";
 
 export default function App() {
@@ -52,6 +54,8 @@ export default function App() {
               <Route path="/status" element={<StatusPage />} />
               <Route path="/docs" element={<DocsIndex />} />
               <Route path="/docs/:slug" element={<DocsLayout />} />
+              <Route path="/terms" element={<TermsPage />} />
+              <Route path="/privacy" element={<PrivacyPage />} />
             </Route>
 
             {/* authed */}

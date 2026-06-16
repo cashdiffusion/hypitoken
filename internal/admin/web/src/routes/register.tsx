@@ -1,9 +1,10 @@
 import { type FormEvent, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { OtpField } from "@/components/auth/otp-field";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { OtpState } from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
@@ -25,11 +26,16 @@ export default function RegisterPage() {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [otpState, setOtpState] = useState<OtpState>("idle");
+  const [agreed, setAgreed] = useState(false);
 
   if (user) return <Navigate to="/app" replace />;
 
   const sendCode = async (e: FormEvent) => {
     e.preventDefault();
+    if (!agreed) {
+      toast.error(t("auth.register.mustAgree"));
+      return;
+    }
     setBusy(true);
     try {
       await apiPost("/auth/send-code", { email, purpose: "verify" });
@@ -170,7 +176,42 @@ export default function RegisterPage() {
           <p className="text-xs text-muted-foreground">{t("auth.register.passwordHint")}</p>
         </AuthRow>
         <AuthRow>
-          <Button type="submit" className={cn("w-full", authBtn)} disabled={busy}>
+          <label
+            htmlFor="agree-tos"
+            className="flex cursor-pointer items-start gap-2.5 text-xs leading-relaxed text-muted-foreground"
+          >
+            <Checkbox
+              id="agree-tos"
+              checked={agreed}
+              onCheckedChange={(v) => setAgreed(v === true)}
+              className="mt-0.5"
+              aria-label={t("auth.register.agreeAria")}
+            />
+            <span>
+              <Trans i18nKey="auth.register.agree">
+                I have read and agree to the
+                <Link
+                  to="/terms"
+                  className="text-primary underline-offset-4 hover:underline"
+                  target="_blank"
+                >
+                  Terms of Service
+                </Link>
+                and
+                <Link
+                  to="/privacy"
+                  className="text-primary underline-offset-4 hover:underline"
+                  target="_blank"
+                >
+                  Privacy Policy
+                </Link>
+                .
+              </Trans>
+            </span>
+          </label>
+        </AuthRow>
+        <AuthRow>
+          <Button type="submit" className={cn("w-full", authBtn)} disabled={busy || !agreed}>
             {busy ? t("auth.register.sending") : t("auth.register.sendCode")}
           </Button>
         </AuthRow>
