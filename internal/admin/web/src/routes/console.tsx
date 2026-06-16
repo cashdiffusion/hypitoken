@@ -2,6 +2,15 @@ import { Activity, Globe, Info, RefreshCw, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, Navigate } from "react-router-dom";
+import {
+  CacheGauge,
+  DailyTable,
+  type DayPoint,
+  ModelBars,
+  type ModelPoint,
+  TokenDonut,
+  UsageTrend,
+} from "@/components/app/console-charts";
 import { SpotlightCard } from "@/components/landing/interactions";
 import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { Button } from "@/components/ui/button";
@@ -32,7 +41,31 @@ interface PersonalConsole {
   today: PersonalAgg;
   today_key: string;
   by_model: Record<string, PersonalAgg>;
+  by_day: Record<string, PersonalAgg>;
   balance_usd: number;
+}
+
+// TREND_DAYS — how many trailing UTC days the usage trend + daily table cover.
+const TREND_DAYS = 14;
+
+// buildDays turns the sparse by_day map into a continuous, oldest→newest
+// series of TREND_DAYS points (missing days zero-filled) so the trend chart
+// renders without gaps and the daily table has a stable window.
+function buildDays(byDay: Record<string, PersonalAgg> | undefined): DayPoint[] {
+  const out: DayPoint[] = [];
+  const now = new Date();
+  for (let i = TREND_DAYS - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
+    const key = d.toISOString().slice(0, 10);
+    const agg = byDay?.[key];
+    out.push({
+      day: key,
+      requests: agg?.count ?? 0,
+      tokens: agg ? aggTotalTokens(agg) : 0,
+      cost: agg?.cost_usd ?? 0,
+    });
+  }
+  return out;
 }
 
 const ZERO_AGG: PersonalAgg = {
@@ -142,9 +175,10 @@ function HealthCell({ health }: { health?: "operational" | "down" }) {
 export default function ConsolePage() {
   const { t } = useTranslation();
   const { user } = useAuth();
-  // view selects the statistics scope: platform-wide aggregate (default) vs
-  // this account's own usage. The two pull from different endpoints.
-  const [view, setView] = useState<"platform" | "personal">("platform");
+  // view selects the statistics scope. Defaults to the personal (account-level)
+  // view — most signed-in users care about their own usage first; the
+  // platform-wide aggregate is one tap away.
+  const [view, setView] = useState<"platform" | "personal">("personal");
   const [data, setData] = useState<Summary | null>(null);
   const [personal, setPersonal] = useState<PersonalConsole | null>(null);
   const [err, setErr] = useState("");
@@ -401,8 +435,16 @@ function PersonalView({ personal }: { personal: PersonalConsole | null }) {
   const total = personal?.total ?? ZERO_AGG;
   const cacheDenom = total.input_tokens + total.cache_read_tokens + total.cache_create_tokens;
   const cacheHit = cacheDenom > 0 ? (total.cache_read_tokens / cacheDenom) * 100 : 0;
-  const models = personal
-    ? Object.entries(personal.by_model).sort((a, b) => aggTotalTokens(b[1]) - aggTotalTokens(a[1]))
+  const days = buildDays(personal?.by_day);
+  const modelPoints: ModelPoint[] = personal
+    ? Object.entries(personal.by_model)
+        .map(([model, a]) => ({
+          model,
+          requests: a.count,
+          tokens: aggTotalTokens(a),
+          cost: a.cost_usd,
+        }))
+        .sort((x, y) => y.tokens - x.tokens)
     : [];
   return (
     <>
@@ -455,46 +497,53 @@ function PersonalView({ personal }: { personal: PersonalConsole | null }) {
         </div>
       </Reveal>
 
-      {/* Per-model usage breakdown. */}
+      {/* Charts row — usage trend (wide) + token composition + cache gauge. */}
+      <Reveal>
+        <div className="grid gap-3 lg:grid-cols-4">
+          <SpotlightCard tiltDeg={0} className="rounded-xl p-5 lg:col-span-2">
+            <h3 className="text-sm font-semibold tracking-tight">{t("console.personal.trend")}</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t("console.personal.trendSub", { n: TREND_DAYS })}
+            </p>
+            <div className="mt-4">
+              <UsageTrend days={days} />
+            </div>
+          </SpotlightCard>
+          <SpotlightCard tiltDeg={0} className="rounded-xl p-5">
+            <h3 className="text-sm font-semibold tracking-tight">
+              {t("console.personal.tokenComposition")}
+            </h3>
+            <div className="mt-5">
+              <TokenDonut
+                input={total.input_tokens}
+                output={total.output_tokens}
+                cacheRead={total.cache_read_tokens}
+                cacheWrite={total.cache_create_tokens}
+              />
+            </div>
+          </SpotlightCard>
+          <SpotlightCard tiltDeg={0} className="rounded-xl p-5">
+            <h3 className="text-sm font-semibold tracking-tight">
+              {t("console.personal.cacheHit")}
+            </h3>
+            <CacheGauge pct={cacheHit} />
+          </SpotlightCard>
+        </div>
+      </Reveal>
+
+      {/* Per-model usage — horizontal bars scaled by token total. */}
       <Reveal>
         <SpotlightCard tiltDeg={0} className="rounded-xl p-5">
           <h3 className="text-sm font-semibold tracking-tight">{t("console.personal.byModel")}</h3>
-          {models.length === 0 ? (
-            <p className="mt-4 text-sm text-muted-foreground">{t("console.personal.noData")}</p>
-          ) : (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="pb-2 pr-4 font-medium">{t("console.personal.colModel")}</th>
-                    <th className="pb-2 pr-4 text-right font-medium">
-                      {t("console.personal.colRequests")}
-                    </th>
-                    <th className="pb-2 pr-4 text-right font-medium">
-                      {t("console.personal.colTokens")}
-                    </th>
-                    <th className="pb-2 text-right font-medium">{t("console.personal.colCost")}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {models.map(([model, agg]) => (
-                    <tr key={model}>
-                      <td className="py-2 pr-4 font-mono text-xs">{model}</td>
-                      <td className="py-2 pr-4 text-right font-mono tabular-nums">
-                        {fmtCompact(agg.count)}
-                      </td>
-                      <td className="py-2 pr-4 text-right font-mono tabular-nums">
-                        {fmtCompact(aggTotalTokens(agg))}
-                      </td>
-                      <td className="py-2 text-right font-mono tabular-nums">
-                        {fmtUSD(agg.cost_usd)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <ModelBars items={modelPoints} />
+        </SpotlightCard>
+      </Reveal>
+
+      {/* Daily breakdown table. */}
+      <Reveal>
+        <SpotlightCard tiltDeg={0} className="rounded-xl p-5">
+          <h3 className="text-sm font-semibold tracking-tight">{t("console.personal.daily")}</h3>
+          <DailyTable rows={days} />
         </SpotlightCard>
       </Reveal>
     </>
