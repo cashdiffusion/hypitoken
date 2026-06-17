@@ -111,7 +111,6 @@ model_provider = "hypitoken"
 name = "HypiToken"
 base_url = "https://api.novadiffusion.com/v1"
 wire_api = "responses"
-requires_openai_auth = true
 ```
 
 Then write `auth.json`:
@@ -144,7 +143,6 @@ model_provider = "hypitoken"
 name = "HypiToken"
 base_url = "https://api.novadiffusion.com/v1"
 wire_api = "responses"
-requires_openai_auth = true
 ```
 
 Then `auth.json`:
@@ -174,7 +172,6 @@ model_provider = "hypitoken"
 name = "HypiToken"
 base_url = "https://api.novadiffusion.com/v1"
 wire_api = "responses"
-requires_openai_auth = true
 ```
 
 Then write `auth.json`:

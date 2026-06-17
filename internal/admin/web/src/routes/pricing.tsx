@@ -736,7 +736,10 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
   const [groups, setGroups] = useState<PricingGroup[]>([]);
 
   useEffect(() => {
-    api<{ groups: PricingGroup[] }>("/groups").then((r) => setGroups(r.groups || []));
+    api<{ groups: PricingGroup[] }>("/groups").then((r) =>
+      // 企业 VIP 分组不对外展示在价格页。
+      setGroups((r.groups || []).filter((g) => g.Name !== "企业VIP")),
+    );
   }, []);
 
   // The default group's multipliers drive the "official vs ours" framing on the
