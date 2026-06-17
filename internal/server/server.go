@@ -77,6 +77,11 @@ type Server struct {
 	// nil when no token_groups declare upstream=kiro — that's the OSS path.
 	// Initialized via Server.InitKiro after construction.
 	kiro *KiroState
+
+	// codexRespAccount binds a Codex response id to the credential that produced
+	// it, namespaced by credential group. Backs the cross-group previous_response_id
+	// safety boundary on the WS path. Always initialized (cheap; janitor goroutine).
+	codexRespAccount *codexRespAccountStore
 }
 
 // LegacyAdmin returns the legacy admin handler so main.go can wire its
@@ -94,6 +99,7 @@ func New(cfg *config.Config, pool *auth.Pool, store *usage.Store, reqLog *reques
 	gin.SetMode(gin.ReleaseMode)
 	cat := pricing.NewCatalog(cfg.Pricing)
 	s := &Server{cfg: cfg, pool: pool, usage: store, pricing: cat, tokens: tokens, reqLog: reqLog}
+	s.codexRespAccount = newCodexRespAccountStore(codexRespAccountTTL)
 	s.sidecar = ccsidecar.New(ccsidecar.Config{
 		Enabled: true,
 		UseUTLS: cfg.UseUTLS,
@@ -299,6 +305,11 @@ func (s *Server) buildCodexEngine(adminH *admin.Handler, primary bool) *gin.Engi
 		v1.POST("/responses", s.handleCodexResponses)
 		v1.POST("/responses/compact", s.handleCodexResponsesCompact)
 		v1.GET("/models", s.handleCodexModels)
+		// WebSocket ingress for /v1/responses (real codex-tui transport). Opt-in;
+		// a GET with Upgrade: websocket. The POST path above is unaffected.
+		if s.cfg.CodexWS.Enabled {
+			v1.GET("/responses", s.handleCodexResponsesWS)
+		}
 	}
 
 	if primary {

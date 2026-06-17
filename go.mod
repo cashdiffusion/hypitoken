@@ -6,10 +6,11 @@ require (
 	github.com/andybalholm/brotli v1.2.1
 	github.com/gin-gonic/gin v1.10.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/gorilla/websocket v1.5.3
 	github.com/sirupsen/logrus v1.9.4
 	github.com/smartwalle/alipay/v3 v3.2.29
 	github.com/stripe/stripe-go/v82 v82.5.1
-	github.com/wjsoj/cc-core v0.8.20
+	github.com/wjsoj/cc-core v0.8.21
 	golang.org/x/crypto v0.51.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.0

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -452,6 +453,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	}
 
 	var counts usage.Counts
+	var streamErr string
 	switch {
 	case isCompactPath:
 		// /codex/responses/compact returns a single JSON object — no SSE.
@@ -486,9 +488,13 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		c.Writer.WriteHeader(resp.StatusCode)
 		_, _ = c.Writer.Write(payload)
 	case stream:
-		// Streaming client: passthrough SSE verbatim.
+		// Streaming client: passthrough SSE verbatim (with keepalive + terminal
+		// tracking). A truncated upstream (no terminal event) is surfaced in the
+		// request log instead of looking like a clean stream end.
 		writeResponseHeaders(c, resp)
-		streamSSECodexBackend(c, resp, &counts)
+		if !streamSSECodexBackend(c, resp, &counts) {
+			streamErr = "stream truncated before terminal event"
+		}
 	default:
 		// Non-streaming client: aggregate SSE into a single response object
 		// (mirrors CLIProxyAPI's CodexExecutor.Execute aggregation).
@@ -561,6 +567,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		Stream:      stream,
 		Path:        path,
 		Attempts:    attempts,
+		Error:       streamErr,
 	})
 	if resp.StatusCode < 400 {
 		a.MarkSuccess()
@@ -658,13 +665,85 @@ func patchResponseOutput(response json.RawMessage, byIndex []codexOutputSlot, fa
 	return json.Marshal(obj)
 }
 
+// codexTerminalEvent reports whether a Codex backend SSE data payload is a
+// stream-terminating event. The client (codex-core) waits for one of these; if
+// the upstream stream EOFs without it, the client raises
+// "stream disconnected before completion".
+func codexTerminalEvent(payload []byte) bool {
+	var ev struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(payload, &ev) != nil {
+		return false
+	}
+	switch ev.Type {
+	case "response.completed", "response.failed", "response.incomplete",
+		"response.cancelled", "response.canceled":
+		return true
+	}
+	return false
+}
+
 // streamSSECodexBackend is the Codex backend SSE passthrough. The format
 // differs from OpenAI's API-key response: events carry JSON payloads
 // structured as `response.completed` / `response.output_item.done` etc.
 // Usage arrives inside the `response.completed` event as
 // `response.usage.{input_tokens, output_tokens, input_tokens_details.cached_tokens}`.
-func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Counts) {
+//
+// Beyond verbatim passthrough it (a) emits an SSE keepalive comment line during
+// silent gaps so intermediaries (Caddy/Cloudflare/the client's own idle timeout)
+// don't cut the long-lived stream while the model is mid-think, and (b) tracks
+// whether the terminal event arrived, so a truncated upstream is logged instead
+// of being passed off to the client as a clean end-of-stream (the root cause of
+// the "stream disconnected before completion" reports). Returns whether a
+// terminal event was observed.
+//
+// gin's ResponseWriter is not goroutine-safe, so the keepalive goroutine and the
+// read loop share one mutex around every Write/Flush.
+func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Counts) (sawTerminal bool) {
 	flusher, _ := c.Writer.(http.Flusher)
+	var mu sync.Mutex
+	lastWrite := time.Now()
+
+	write := func(b []byte) {
+		mu.Lock()
+		_, _ = c.Writer.Write(b)
+		if flusher != nil {
+			flusher.Flush()
+		}
+		lastWrite = time.Now()
+		mu.Unlock()
+	}
+
+	// Keepalive: after >=10s of downstream silence, emit an SSE comment line
+	// (":\n\n", ignored by SSE clients) to keep the connection warm.
+	const keepaliveIdle = 10 * time.Second
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				mu.Lock()
+				idle := time.Since(lastWrite)
+				mu.Unlock()
+				if idle >= keepaliveIdle {
+					write([]byte(":\n\n"))
+				}
+			}
+		}
+	}()
+	// LIFO: close(done) first, then wait for the goroutine to exit before
+	// returning, so no keepalive write races the caller's resp.Body.Close().
+	defer wg.Wait()
+	defer close(done)
+
 	reader := newLineReader(resp.Body)
 	for {
 		line, err := reader.readLine()
@@ -674,15 +753,22 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 				payload := bytes.TrimSpace(trim[5:])
 				if len(payload) > 0 && payload[0] == '{' {
 					counts.Add(extractCodexBackendUsageFromJSON(payload))
+					if codexTerminalEvent(payload) {
+						sawTerminal = true
+					}
 				}
 			}
-			_, _ = c.Writer.Write(line)
-			if flusher != nil {
-				flusher.Flush()
-			}
+			write(line)
 		}
 		if err != nil {
-			break
+			if !sawTerminal {
+				if errors.Is(err, io.EOF) {
+					log.Warnf("codex oauth: SSE stream EOF before terminal event (truncated upstream)")
+				} else {
+					log.Warnf("codex oauth: SSE stream error before terminal event: %v", err)
+				}
+			}
+			return sawTerminal
 		}
 	}
 }

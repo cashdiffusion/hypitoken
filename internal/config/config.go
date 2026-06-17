@@ -99,6 +99,12 @@ type Config struct {
 	// If true, OAuth/API-key refresh+request uses utls Chrome fingerprint.
 	UseUTLS bool `yaml:"use_utls"`
 
+	// CodexWS controls the Codex /v1/responses WebSocket ingress (and the
+	// WebSocket upstream to chatgpt.com). Disabled by default — the proxy keeps
+	// serving Codex over the proven HTTP POST + SSE path until WS is enabled
+	// per-deployment. See CodexWSConfig.
+	CodexWS CodexWSConfig `yaml:"codex_ws"`
+
 	// Directory for per-request JSONL logs (one file per day:
 	// requests-YYYY-MM-DD.jsonl). Empty = disabled.
 	LogDir string `yaml:"log_dir,omitempty"`
@@ -140,6 +146,29 @@ type Config struct {
 	// Shop.Enabled is false and endpoints.shop is disabled, no shop code
 	// runs and no extra listener binds.
 	Shop shop.Config `yaml:"shop"`
+}
+
+// CodexWSConfig configures the Codex WebSocket transport. WebSocket carries
+// protocol-level ping/pong, so it survives the multi-second silent gaps that
+// truncate the legacy HTTP SSE path and surface to clients as "stream
+// disconnected before completion". Real codex-tui 0.135.0 uses this transport.
+type CodexWSConfig struct {
+	// Enabled turns on the WS upgrade route on /v1/responses. Default false:
+	// ship dark, enable per-deployment after smoke-testing against a real
+	// ChatGPT token. The HTTP POST path is unaffected either way.
+	Enabled bool `yaml:"enabled"`
+
+	// ForceHTTP, when true, accepts a client WS upgrade but bridges it over the
+	// proven HTTP upstream path instead of dialing an upstream WS. Emergency
+	// degrade valve if the WS upstream misbehaves. Default false.
+	ForceHTTP bool `yaml:"force_http,omitempty"`
+
+	// BetaVersion selects the responses_websockets beta marker sent upstream:
+	// "v2" (default, 2026-02-06) or "v1" (2026-02-04).
+	BetaVersion string `yaml:"beta_version,omitempty"`
+
+	// ReadLimitBytes caps a single inbound WS message. 0 => 16 MiB.
+	ReadLimitBytes int64 `yaml:"read_limit_bytes,omitempty"`
 }
 
 // TokenGroup defines one named credential group + its upstream channel +
@@ -247,6 +276,12 @@ func applyDefaults(c *Config, path string) {
 	}
 	if c.ChatGPTBackendBaseURL == "" {
 		c.ChatGPTBackendBaseURL = "https://chatgpt.com/backend-api"
+	}
+	if c.CodexWS.BetaVersion == "" {
+		c.CodexWS.BetaVersion = "v2"
+	}
+	if c.CodexWS.ReadLimitBytes == 0 {
+		c.CodexWS.ReadLimitBytes = 16 << 20
 	}
 	dir := filepath.Dir(path)
 	if c.AuthDir == "" {
