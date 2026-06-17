@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -564,19 +563,14 @@ func isClientDisconnect(ctx context.Context, err error) bool {
 
 // isTransientNetErr reports whether err looks like a transient wire-level
 // failure worth a short retry on the same credential. Targets the CF
-// new-connection rate-limit symptom on chatgpt.com (RST mid-TLS) and similar
-// proxy/h2 flaps. Distinct from isClientDisconnect (client went away) and
-// from HTTP-status errors (handled by the pool's ReportUpstreamError path).
+// new-connection rate-limit symptom on chatgpt.com (RST mid-TLS), h2 stream
+// rejections (PROTOCOL_ERROR / REFUSED_STREAM), and similar proxy/h2 flaps.
+// Distinct from isClientDisconnect (client went away) and from HTTP-status
+// errors (handled by the pool's ReportUpstreamError path).
+//
+// Delegates to the canonical classifier in cc-core (auth.IsTransientNetErr) so
+// the transport's backoff-retry layer and this caller-side "defer to another
+// credential without MarkFailure" decision stay in lockstep.
 func isTransientNetErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) || errors.Is(err, io.EOF) {
-		return true
-	}
-	s := err.Error()
-	return strings.Contains(s, "connection reset by peer") ||
-		strings.Contains(s, "broken pipe") ||
-		strings.Contains(s, "unexpected EOF") ||
-		strings.Contains(s, "http2: server sent GOAWAY")
+	return auth.IsTransientNetErr(err)
 }

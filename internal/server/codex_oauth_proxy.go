@@ -353,39 +353,15 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	// has HTTP/2 PING health checks (utls.go) so stale reused conns are
 	// detected and re-dialed transparently.
 	client := auth.ClientFor(snap.ProxyURL, s.cfg.UseUTLS)
+	// Transient wire-level flaps (CF edge RST mid-handshake, h2 PROTOCOL_ERROR /
+	// REFUSED_STREAM, `connection reset by peer`, stale pooled h2 conn) are
+	// replayed with exponential backoff + jitter inside ClientFor's transport
+	// (cc-core auth.retryRoundTripper) on this same credential — see
+	// auth.IsTransientNetErr. By the time Do returns an error, that backoff loop
+	// is already exhausted, so a transient error surviving to here means the
+	// flap is persistent; we defer to the outer loop (another credential)
+	// without MarkFailure rather than burning this one.
 	resp, err := client.Do(upReq)
-	// Network-error retry on the SAME credential. These errors
-	// (`connection reset by peer`, `broken pipe`, `EOF`, h2 GOAWAY) are
-	// almost always transient infra flaps (CF new-conn rate limit, proxy
-	// hiccup, stale h2 conn racing a server close) — not a problem with the
-	// credential. We retry several times with increasing backoff so the
-	// flap recovers without burning the cred via MarkFailure or surfacing as
-	// "degraded" in the admin panel. The client's request context bounds the
-	// loop — if the user gives up, we stop.
-	const transientRetryBackoffsMs = 400
-	transientBackoffs := []int{transientRetryBackoffsMs, 800, 1500, 2500}
-	for attempt := 0; err != nil && attempt < len(transientBackoffs); attempt++ {
-		if isClientDisconnect(ctx, err) || !isTransientNetErr(err) {
-			break
-		}
-		log.Infof("codex oauth: transient net error via %s (attempt %d, will retry): %v", a.ID, attempt+1, err)
-		select {
-		case <-ctx.Done():
-			err = ctx.Err()
-		case <-time.After(time.Duration(transientBackoffs[attempt]) * time.Millisecond):
-		}
-		if ctx.Err() != nil {
-			break
-		}
-		retryReq, rerr := http.NewRequestWithContext(ctx, http.MethodPost, upURL, bytes.NewReader(upstreamBody))
-		if rerr != nil {
-			err = rerr
-			break
-		}
-		retryReq.Header = upReq.Header.Clone()
-		resp2, err2 := client.Do(retryReq)
-		resp, err = resp2, err2
-	}
 	if err != nil {
 		if isClientDisconnect(ctx, err) {
 			a.MarkClientCancel(err.Error())
