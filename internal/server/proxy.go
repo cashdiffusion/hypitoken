@@ -170,7 +170,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	// share one cap. Checked before the concurrency gate so a burst of
 	// 429s doesn't briefly occupy slots.
 	rpmKey := auth.NormalizeProvider(provider) + "|" + clientToken
-	if limit := s.clientRPM(c, clientToken); limit > 0 {
+	if limit := s.clientRPM(c, provider, clientToken); limit > 0 {
 		if ok, retry := s.rpm.Allow(rpmKey, limit); !ok {
 			c.Header("Retry-After", strconv.Itoa(retry))
 			c.AbortWithStatusJSON(429, gin.H{
@@ -194,7 +194,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	}
 
 	// Concurrency limit per client token.
-	maxConc := s.clientMaxConcurrent(c, clientToken)
+	maxConc := s.clientMaxConcurrent(c, provider, clientToken)
 	if maxConc > 0 {
 		// Scope the counter per provider so Claude and Codex share a token
 		// but not a concurrency bucket — matches the per-provider session

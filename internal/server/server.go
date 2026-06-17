@@ -465,10 +465,36 @@ func (s *Server) handleStatus(c *gin.Context) {
 	})
 }
 
+// codexLimitMultiplier scales the per-client RPM and concurrency caps for the
+// Codex (OpenAI) provider relative to Claude. Codex traffic is cheaper and
+// chattier (tool loops, /v1/responses polling), so it gets a higher ceiling.
+// Applied on top of whatever effective cap is resolved (global default,
+// per-token override, or SaaS plan), so Codex is always Nx the equivalent
+// Claude limit regardless of source. 0/unlimited caps stay unlimited.
+const codexLimitMultiplier = 5
+
+// providerLimitScale returns the multiplier applied to RPM/concurrency caps for
+// the given provider. Claude is the baseline (1x); Codex is codexLimitMultiplier.
+func providerLimitScale(provider string) int {
+	if auth.NormalizeProvider(provider) == auth.ProviderOpenAI {
+		return codexLimitMultiplier
+	}
+	return 1
+}
+
 // clientMaxConcurrent returns the effective max concurrent requests for this
 // client. SaaS-token override wins, then per-token override, then the global
-// default.
-func (s *Server) clientMaxConcurrent(c *gin.Context, clientToken string) int {
+// default. The resolved cap is scaled per provider (Codex gets a higher
+// ceiling than Claude); a 0/unlimited cap is left untouched.
+func (s *Server) clientMaxConcurrent(c *gin.Context, provider, clientToken string) int {
+	base := s.clientMaxConcurrentBase(c, clientToken)
+	if base <= 0 {
+		return base
+	}
+	return base * providerLimitScale(provider)
+}
+
+func (s *Server) clientMaxConcurrentBase(c *gin.Context, clientToken string) int {
 	if info, ok := saasInfoFrom(c); ok && info.MaxConcurrent > 0 {
 		return info.MaxConcurrent
 	}
@@ -478,8 +504,18 @@ func (s *Server) clientMaxConcurrent(c *gin.Context, clientToken string) int {
 	return s.cfg.ClientMaxConcurrent
 }
 
-// clientRPM returns the effective requests-per-minute cap for this client.
-func (s *Server) clientRPM(c *gin.Context, clientToken string) int {
+// clientRPM returns the effective requests-per-minute cap for this client. The
+// resolved cap is scaled per provider (Codex gets a higher ceiling than
+// Claude); a 0/unlimited cap is left untouched.
+func (s *Server) clientRPM(c *gin.Context, provider, clientToken string) int {
+	base := s.clientRPMBase(c, clientToken)
+	if base <= 0 {
+		return base
+	}
+	return base * providerLimitScale(provider)
+}
+
+func (s *Server) clientRPMBase(c *gin.Context, clientToken string) int {
 	if info, ok := saasInfoFrom(c); ok && info.RPM > 0 {
 		return info.RPM
 	}

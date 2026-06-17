@@ -94,14 +94,14 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	}
 
 	rpmKey := auth.NormalizeProvider(provider) + "|" + clientToken
-	if limit := s.clientRPM(c, clientToken); limit > 0 {
+	if limit := s.clientRPM(c, provider, clientToken); limit > 0 {
 		if ok, retry := s.rpm.Allow(rpmKey, limit); !ok {
 			c.Header("Retry-After", strconv.Itoa(retry))
 			c.AbortWithStatusJSON(429, gin.H{"error": "rate limit exceeded", "retry_after": retry})
 			return
 		}
 	}
-	if maxConc := s.clientMaxConcurrent(c, clientToken); maxConc > 0 {
+	if maxConc := s.clientMaxConcurrent(c, provider, clientToken); maxConc > 0 {
 		inflightKey := auth.NormalizeProvider(provider) + "|" + clientToken
 		cur, releaseSlot := s.inflight.Begin(inflightKey)
 		defer releaseSlot()
