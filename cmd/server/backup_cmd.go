@@ -57,8 +57,11 @@ func runBackupCmd(args []string) {
 		fmt.Fprintf(os.Stderr, "backup: %v\n", err)
 		os.Exit(1)
 	}
-	tmpDir := filepath.Join(filepath.Dir(*configPath), "backup.tmp")
-	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+	// System temp (not the config dir — that may be root-owned while the
+	// backup runs as a less-privileged service user). PrivateTmp on the unit
+	// keeps it isolated.
+	tmpDir, err := os.MkdirTemp("", "hypitoken-backup-")
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "backup: tmp dir: %v\n", err)
 		os.Exit(1)
 	}
