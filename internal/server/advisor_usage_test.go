@@ -3,6 +3,7 @@ package server
 import (
 	"testing"
 
+	"github.com/wjsoj/cc-core/advisor"
 	"github.com/wjsoj/cc-core/usage"
 )
 
@@ -14,7 +15,7 @@ import (
 // `type:"message"` iterations only — never advisor.
 func TestAdvisorIterationsParsing(t *testing.T) {
 	var c usage.Counts
-	var sub subUsage
+	var sub advisor.SubUsage
 
 	// Real shape captured from /v1/messages: 3 iterations, middle one is
 	// the advisor opus call.
@@ -36,16 +37,17 @@ func TestAdvisorIterationsParsing(t *testing.T) {
 		c.CacheCreateTokens != 5566 || c.CacheReadTokens != 80200 {
 		t.Fatalf("top-level counts wrong: %+v", c)
 	}
-	advisor, ok := sub.byModel["claude-opus-4-7"]
+	snap := sub.Snapshot()
+	adv, ok := snap["claude-opus-4-7"]
 	if !ok {
-		t.Fatalf("advisor counts missing; got %+v", sub.byModel)
+		t.Fatalf("advisor counts missing; got %+v", snap)
 	}
-	if advisor.InputTokens != 58464 || advisor.OutputTokens != 3083 ||
-		advisor.CacheReadTokens != 0 || advisor.CacheCreateTokens != 0 {
-		t.Fatalf("advisor counts wrong: %+v", advisor)
+	if adv.InputTokens != 58464 || adv.OutputTokens != 3083 ||
+		adv.CacheReadTokens != 0 || adv.CacheCreateTokens != 0 {
+		t.Fatalf("advisor counts wrong: %+v", adv)
 	}
-	if len(sub.byModel) != 1 {
-		t.Fatalf("expected exactly 1 advisor model, got %d", len(sub.byModel))
+	if len(snap) != 1 {
+		t.Fatalf("expected exactly 1 advisor model, got %d", len(snap))
 	}
 }
 
@@ -55,7 +57,7 @@ func TestAdvisorIterationsParsing(t *testing.T) {
 // emits the full cumulative iterations slice on each event.
 func TestAdvisorIterationsCumulative(t *testing.T) {
 	var c usage.Counts
-	var sub subUsage
+	var sub advisor.SubUsage
 
 	mergeSSEUsage(&c, &sub, []byte(`{"type":"message_delta","usage":{
 		"iterations":[{"type":"advisor_message","input_tokens":100,"output_tokens":50,"model":"claude-opus-4-7"}]
@@ -64,7 +66,7 @@ func TestAdvisorIterationsCumulative(t *testing.T) {
 		"iterations":[{"type":"advisor_message","input_tokens":300,"output_tokens":150,"model":"claude-opus-4-7"}]
 	}}`))
 
-	got := sub.byModel["claude-opus-4-7"]
+	got := sub.Snapshot()["claude-opus-4-7"]
 	if got.InputTokens != 300 || got.OutputTokens != 150 {
 		t.Fatalf("expected last-write-wins (300/150), got %+v", got)
 	}
@@ -73,7 +75,7 @@ func TestAdvisorIterationsCumulative(t *testing.T) {
 // TestAdvisorIterationsNonStreaming covers extractUsageFromJSON for the
 // buffered (non-SSE) response path.
 func TestAdvisorIterationsNonStreaming(t *testing.T) {
-	var sub subUsage
+	var sub advisor.SubUsage
 	body := []byte(`{"id":"msg_x","model":"claude-sonnet-4-6","usage":{
 		"input_tokens":2,"output_tokens":503,
 		"iterations":[
@@ -86,7 +88,7 @@ func TestAdvisorIterationsNonStreaming(t *testing.T) {
 	if c.InputTokens != 2 || c.OutputTokens != 503 {
 		t.Fatalf("top-level: %+v", c)
 	}
-	got := sub.byModel["claude-opus-4-7"]
+	got := sub.Snapshot()["claude-opus-4-7"]
 	if got.InputTokens != 58464 || got.OutputTokens != 3083 {
 		t.Fatalf("advisor: %+v", got)
 	}
@@ -97,11 +99,11 @@ func TestAdvisorIterationsNonStreaming(t *testing.T) {
 // silently dropping the cost.
 func TestAdvisorMissingModel(t *testing.T) {
 	var c usage.Counts
-	var sub subUsage
+	var sub advisor.SubUsage
 	mergeSSEUsage(&c, &sub, []byte(`{"type":"message_delta","usage":{
 		"iterations":[{"type":"advisor_message","input_tokens":10,"output_tokens":5}]
 	}}`))
-	if _, ok := sub.byModel["advisor-unknown"]; !ok {
-		t.Fatalf("expected sentinel bucket; got %+v", sub.byModel)
+	if _, ok := sub.Snapshot()[advisor.FallbackModel]; !ok {
+		t.Fatalf("expected sentinel bucket; got %+v", sub.Snapshot())
 	}
 }

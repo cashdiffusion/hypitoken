@@ -1,9 +1,7 @@
 package server
 
 import (
-	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,14 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andybalholm/brotli"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wjsoj/cc-core/advisor"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/sidecar"
+	ccstream "github.com/wjsoj/cc-core/stream"
 	"github.com/wjsoj/cc-core/thinkingsig"
 	"github.com/wjsoj/cc-core/usage"
 )
@@ -572,7 +571,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	// (usage parsing, SSE streamer, model rewrite, body forwarding) wants
 	// plain bytes. The Content-Encoding header is also stripped so the
 	// client receives identity even though upstream sent compressed.
-	maybeDecompressResponse(resp)
+	ccstream.Decompress(resp)
 
 	// Upstream error — log, do lightweight credential bookkeeping, and
 	// faithfully forward the original response to the client as-is.
@@ -606,7 +605,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 					stripIngressHeaders(retryReq.Header)
 					applyAnthropicHeaders(retryReq, a, stream, isAnthropicBase, id, retryUpstream)
 					if retryResp, rderr := client.Do(retryReq); rderr == nil {
-						maybeDecompressResponse(retryResp)
+						ccstream.Decompress(retryResp)
 						if retryResp.StatusCode < 400 {
 							log.Infof("proxy: %s signature retry succeeded", a.ID)
 							resp = retryResp
@@ -773,7 +772,7 @@ recoveredFromSignature:
 	writeResponseHeaders(c, resp)
 
 	var counts usage.Counts
-	var sub subUsage
+	var sub advisor.SubUsage
 	counts.Requests = 1
 	a.MarkSuccess()
 
@@ -835,7 +834,7 @@ recoveredFromSignature:
 		// Counts.Requests stays at 1 — advisor is a sub-call, not a request.
 		var clientCounts usage.Counts
 		clientCounts.Add(counts)
-		for _, sc := range sub.byModel {
+		for _, sc := range sub.Snapshot() {
 			clientCounts.Add(sc)
 		}
 		s.usage.RecordClient(clientToken, clientName, clientCounts, costUSD+advisorCost)
@@ -943,7 +942,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	// Decompress upstream gzip/br before reading. Some relays emit gzipped
 	// 4xx error pages even when the request didn't advertise an
 	// Accept-Encoding; without this the captured snippet is binary.
-	maybeDecompressResponse(resp)
+	ccstream.Decompress(resp)
 
 	// Reactive thinking-signature recovery for API-key relays. Relays that pool
 	// and rotate backend accounts per request reject the echoed `thinking`
@@ -971,7 +970,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 					stripIngressHeaders(rreq.Header)
 					rreq.Header.Set("x-api-key", token)
 					if rresp, de := client.Do(rreq); de == nil {
-						maybeDecompressResponse(rresp)
+						ccstream.Decompress(rresp)
 						if rresp.StatusCode < 400 {
 							log.Infof("proxy(apikey): %s signature retry succeeded", a.ID)
 							resp = rresp
@@ -1035,7 +1034,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 
 	writeResponseHeaders(c, resp)
 	var counts usage.Counts
-	var sub subUsage
+	var sub advisor.SubUsage
 	var errSnippet string
 	if resp.StatusCode >= 400 {
 		errBody, _ := io.ReadAll(resp.Body)
@@ -1080,7 +1079,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		if counts.Requests > 0 && clientToken != "" {
 			var clientCounts usage.Counts
 			clientCounts.Add(counts)
-			for _, sc := range sub.byModel {
+			for _, sc := range sub.Snapshot() {
 				clientCounts.Add(sc)
 			}
 			s.usage.RecordClient(clientToken, clientName, clientCounts, costUSD+advisorCost)
@@ -1180,120 +1179,50 @@ func kindToMimicry(k auth.Kind) string {
 	return mimicry.KindOAuth
 }
 
-// maybeDecompressResponse swaps resp.Body for a transparent decoder when
-// upstream returned a gzip/br body, then strips Content-Encoding /
-// Content-Length so the response we forward to the client is plain text.
-// No-op when Content-Encoding is empty/identity (most SSE responses).
-func maybeDecompressResponse(resp *http.Response) {
-	enc := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
-	if enc == "" || enc == "identity" {
-		return
-	}
-	switch enc {
-	case "gzip":
-		gz, err := gzip.NewReader(resp.Body)
-		if err != nil {
-			log.Warnf("proxy: gzip decoder init failed: %v (forwarding compressed body)", err)
-			return
-		}
-		resp.Body = &decompressedBody{rc: gz, underlying: resp.Body}
-	case "br":
-		br := brotli.NewReader(resp.Body)
-		resp.Body = &decompressedBody{rc: io.NopCloser(br), underlying: resp.Body}
-	default:
-		// Unknown encoding (deflate, zstd, etc.) — pass through unchanged.
-		// Anthropic doesn't currently send these for /v1/messages.
-		return
-	}
-	resp.Header.Del("Content-Encoding")
-	resp.Header.Del("Content-Length")
-}
-
-// decompressedBody chains a decompressor's Close to the underlying body.
-type decompressedBody struct {
-	rc         io.ReadCloser
-	underlying io.ReadCloser
-}
-
-func (d *decompressedBody) Read(p []byte) (int, error) { return d.rc.Read(p) }
-func (d *decompressedBody) Close() error {
-	_ = d.rc.Close()
-	return d.underlying.Close()
-}
-
 // streamSSE copies SSE events to the client as they arrive and parses
 // message_delta events to accumulate usage. When rewriteClientModel is
 // non-empty, each data: JSON has its top-level "model" and nested
 // "message.model" fields rewritten to that value before being forwarded.
-func streamSSE(c *gin.Context, resp *http.Response, counts *usage.Counts, sub *subUsage, rewriteClientModel string) {
+//
+// Framing uses cc-core/stream.SSEScanner so the event/data parsing logic
+// is shared with other forks; this function is just the proxy-specific
+// glue (model rewrite + usage accumulation + flusher dispatch).
+func streamSSE(c *gin.Context, resp *http.Response, counts *usage.Counts, sub *advisor.SubUsage, rewriteClientModel string) {
 	flusher, _ := c.Writer.(http.Flusher)
-	reader := bufio.NewReaderSize(resp.Body, 64*1024)
-	var curEvent string
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			trim := bytes.TrimRight(line, "\r\n")
-			outLine := line
-			if bytes.HasPrefix(trim, []byte("event:")) {
-				curEvent = strings.TrimSpace(string(trim[6:]))
-			} else if bytes.HasPrefix(trim, []byte("data:")) {
-				payload := bytes.TrimSpace(trim[5:])
-				if rewriteClientModel != "" && len(payload) > 0 && payload[0] == '{' {
-					if rewritten := rewriteResponseModel(payload, rewriteClientModel); rewritten != nil {
-						// Preserve the original line's trailing newline style.
-						tail := line[len(trim):]
-						rebuilt := make([]byte, 0, len("data: ")+len(rewritten)+len(tail))
-						rebuilt = append(rebuilt, []byte("data: ")...)
-						rebuilt = append(rebuilt, rewritten...)
-						rebuilt = append(rebuilt, tail...)
-						outLine = rebuilt
-					}
-				}
-				if curEvent == "message_start" || curEvent == "message_delta" {
-					mergeSSEUsage(counts, sub, payload)
+	sc := ccstream.NewSSEScanner(resp.Body, 64*1024)
+	for sc.Scan() {
+		line := sc.Line()
+		outLine := line
+		if payload := sc.Data(); payload != nil {
+			if rewriteClientModel != "" && len(payload) > 0 && payload[0] == '{' {
+				if rewritten := rewriteResponseModel(payload, rewriteClientModel); rewritten != nil {
+					// Preserve the original line's trailing newline style.
+					trim := bytes.TrimRight(line, "\r\n")
+					tail := line[len(trim):]
+					rebuilt := make([]byte, 0, len("data: ")+len(rewritten)+len(tail))
+					rebuilt = append(rebuilt, []byte("data: ")...)
+					rebuilt = append(rebuilt, rewritten...)
+					rebuilt = append(rebuilt, tail...)
+					outLine = rebuilt
 				}
 			}
-			_, _ = c.Writer.Write(outLine)
-			if flusher != nil {
-				flusher.Flush()
+			if ev := sc.Event(); ev == "message_start" || ev == "message_delta" {
+				mergeSSEUsage(counts, sub, payload)
 			}
 		}
-		if err != nil {
-			break
+		_, _ = c.Writer.Write(outLine)
+		if flusher != nil {
+			flusher.Flush()
 		}
 	}
 }
 
 type usageJSON struct {
-	InputTokens              int64               `json:"input_tokens"`
-	OutputTokens             int64               `json:"output_tokens"`
-	CacheCreationInputTokens int64               `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int64               `json:"cache_read_input_tokens"`
-	Iterations               []iterationUsageRaw `json:"iterations,omitempty"`
-}
-
-// iterationUsageRaw is the shape of one entry inside `usage.iterations[]`,
-// added by the `advisor-tool-2026-03-01` beta. Each entry is one billable
-// sub-call inside a single /v1/messages request:
-//
-//	type:"message"          → orchestrator (the model the client asked for).
-//	                          Top-level usage is the SUM of these — already
-//	                          accounted for; we ignore them here.
-//	type:"advisor_message"  → server-side advisor call, billed under its own
-//	                          model (typically claude-opus-4-7), NOT rolled
-//	                          into top-level totals.
-//
-// We only care about the second kind. cache_read/cache_create are typically
-// 0 for advisor (each call re-reads the transcript fresh) but we keep all
-// four counters so the price formula stays correct if Anthropic enables
-// caching for advisor later.
-type iterationUsageRaw struct {
-	Type                     string `json:"type"`
-	Model                    string `json:"model"`
-	InputTokens              int64  `json:"input_tokens"`
-	OutputTokens             int64  `json:"output_tokens"`
-	CacheCreationInputTokens int64  `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int64  `json:"cache_read_input_tokens"`
+	InputTokens              int64                    `json:"input_tokens"`
+	OutputTokens             int64                    `json:"output_tokens"`
+	CacheCreationInputTokens int64                    `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64                    `json:"cache_read_input_tokens"`
+	Iterations               []advisor.IterationUsage `json:"iterations,omitempty"`
 }
 
 func (u usageJSON) toCounts() usage.Counts {
@@ -1302,51 +1231,6 @@ func (u usageJSON) toCounts() usage.Counts {
 		OutputTokens:      u.OutputTokens,
 		CacheCreateTokens: u.CacheCreationInputTokens,
 		CacheReadTokens:   u.CacheReadInputTokens,
-	}
-}
-
-// subUsage carries advisor (and any future server-side sub-model) counts
-// alongside a request, keyed by upstream model name. A request with no
-// advisor invocation leaves it nil/empty.
-type subUsage struct {
-	// byModel sums per-model counts across all iterations of that model.
-	// Most requests have at most one entry ("claude-opus-4-7").
-	byModel map[string]usage.Counts
-}
-
-func (s *subUsage) merge(it iterationUsageRaw) {
-	if it.Type != "advisor_message" {
-		return
-	}
-	model := strings.TrimSpace(it.Model)
-	if model == "" {
-		// Defensive: should never happen, but if Anthropic ever emits an
-		// advisor iteration without a model field, charge it to a sentinel
-		// so it's visible in the admin UI rather than silently dropped.
-		model = "advisor-unknown"
-	}
-	if s.byModel == nil {
-		s.byModel = make(map[string]usage.Counts, 1)
-	}
-	cur := s.byModel[model]
-	cur.InputTokens += it.InputTokens
-	cur.OutputTokens += it.OutputTokens
-	cur.CacheCreateTokens += it.CacheCreationInputTokens
-	cur.CacheReadTokens += it.CacheReadInputTokens
-	s.byModel[model] = cur
-}
-
-// replaceFrom resets the per-model totals from a full iterations slice. SSE
-// emits cumulative `message_delta.usage.iterations` (the slice grows as
-// sub-calls complete), so we overwrite rather than append to avoid double-
-// counting when both message_start and message_delta are observed.
-func (s *subUsage) replaceFrom(its []iterationUsageRaw) {
-	if len(its) == 0 {
-		return
-	}
-	s.byModel = nil
-	for _, it := range its {
-		s.merge(it)
 	}
 }
 
@@ -1363,8 +1247,8 @@ func (s *subUsage) replaceFrom(its []iterationUsageRaw) {
 // advisor iterations. Auth-side load tracking only applies to successful
 // sub-calls — a failed parent rarely has billable advisor activity, and
 // double-counting would distort WeightedTotal-driven load balancing.
-func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientToken, clientName, _ string, path string, status int, sub subUsage) float64 {
-	if status >= 400 || len(sub.byModel) == 0 {
+func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientToken, clientName, _ string, path string, status int, sub advisor.SubUsage) float64 {
+	if status >= 400 || sub.IsEmpty() {
 		return 0
 	}
 	provider := auth.NormalizeProvider(a.Provider)
@@ -1376,7 +1260,7 @@ func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientTo
 		subUserID = info.UserID
 		subMultiplier = s.saas.MultiplierFor(c.Request.Context(), info.GroupID, provider)
 	}
-	for subModel, sc := range sub.byModel {
+	for subModel, sc := range sub.Snapshot() {
 		// Sub-calls bump the auth's daily/hourly bucket and WeightedTotal so
 		// the credential bears the full opus load. Requests stays 0: the
 		// parent already counted +1.
@@ -1420,13 +1304,13 @@ func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientTo
 // extractUsageFromJSON pulls the top-level "usage" from a non-streaming
 // /v1/messages response. Advisor sub-billing iterations are folded into
 // `sub` if non-nil.
-func extractUsageFromJSON(body []byte, sub *subUsage) usage.Counts {
+func extractUsageFromJSON(body []byte, sub *advisor.SubUsage) usage.Counts {
 	var wrap struct {
 		Usage usageJSON `json:"usage"`
 	}
 	_ = json.Unmarshal(body, &wrap)
 	if sub != nil {
-		sub.replaceFrom(wrap.Usage.Iterations)
+		sub.ReplaceFrom(wrap.Usage.Iterations)
 	}
 	return wrap.Usage.toCounts()
 }
@@ -1446,7 +1330,7 @@ func extractUsageFromJSON(body []byte, sub *subUsage) usage.Counts {
 // Zero values from a later event don't clobber a prior non-zero value —
 // matches the protocol where message_delta sometimes omits the input
 // fields (e.g. emits input_tokens=0).
-func mergeSSEUsage(dst *usage.Counts, sub *subUsage, payload []byte) {
+func mergeSSEUsage(dst *usage.Counts, sub *advisor.SubUsage, payload []byte) {
 	if dst == nil {
 		return
 	}
@@ -1484,7 +1368,7 @@ func mergeSSEUsage(dst *usage.Counts, sub *subUsage, payload []byte) {
 	if sub != nil && len(u.Iterations) > 0 {
 		// message_delta.usage.iterations is cumulative — last non-empty
 		// observation wins, never append.
-		sub.replaceFrom(u.Iterations)
+		sub.ReplaceFrom(u.Iterations)
 	}
 }
 
