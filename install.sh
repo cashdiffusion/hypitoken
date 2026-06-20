@@ -360,8 +360,8 @@ if [ "$UNIT_EXISTS" = "1" ]; then
   run_privileged systemctl daemon-reload || true
   # Ensure the daily backup timer exists too, deriving cfg+user from the main
   # unit so it stays in lockstep with the service definition.
-  _bcfg="$(systemctl cat "$UNIT_NAME" 2>/dev/null | sed -n 's/^ExecStart=.*--config[= ]\([^ ]*\).*/\1/p' | head -1)"
-  _buser="$(systemctl cat "$UNIT_NAME" 2>/dev/null | sed -n 's/^User=//p' | head -1)"
+  _bcfg="$(systemctl cat "$UNIT_NAME" 2>/dev/null | sed -nE 's/^ExecStart=.* -{1,2}config[ =]([^ ]+).*/\1/p' | head -1)"
+  _buser="$(systemctl cat "$UNIT_NAME" 2>/dev/null | sed -nE 's/^User=(.+)/\1/p' | head -1)"
   ensure_backup_timer "$_bcfg" "$_buser"
   if [ "$UNIT_WAS_ACTIVE" = "1" ]; then
     msg "restarting $UNIT_NAME to pick up the new binary"

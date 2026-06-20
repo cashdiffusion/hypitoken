@@ -273,10 +273,10 @@ func externalSecretEntries(cfg *config.Config, configDir, tmpDir string) ([]back
 		if !fileExists(abs) || seen[abs] {
 			continue
 		}
-		// Skip if it already lives under the config dir (covered elsewhere).
-		if rel, err := filepath.Rel(configDir, abs); err == nil && !strings.HasPrefix(rel, "..") {
-			continue
-		}
+		// Always include @path secrets — they're loose files (often in the
+		// config dir root, e.g. /etc/hypitoken/stripe_secret_key) that no other
+		// glob captures. The external/ manifest records the original path so
+		// restore can place them back.
 		seen[abs] = true
 		name := "external/" + filepath.Base(abs)
 		for i := 1; manifest[name] != ""; i++ {
