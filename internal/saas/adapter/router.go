@@ -12,10 +12,12 @@ import (
 	legacyadmin "github.com/wjsoj/CPA-Claude/internal/admin"
 	"github.com/wjsoj/CPA-Claude/internal/saas/admin"
 	"github.com/wjsoj/CPA-Claude/internal/saas/analytics"
+	"github.com/wjsoj/CPA-Claude/internal/saas/arena"
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 	"github.com/wjsoj/CPA-Claude/internal/saas/growth"
+	"github.com/wjsoj/CPA-Claude/internal/saas/profile"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/pricing"
@@ -27,7 +29,7 @@ import (
 // /api/v2/admin/credentials/* is exposed. legacyH may be nil — when set, the
 // /api/v2/admin/* group also exposes request-log queries + Anthropic OAuth
 // quota probe (handlers reused from the legacy operator API).
-func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service) {
+func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service, arenaH *arena.Service, profileH *profile.Handler) {
 	v2 := engine.Group("/api/v2")
 
 	// Public.
@@ -50,6 +52,14 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 		analyticsH.PublicRoutes(v2)
 	}
 
+	// Arena SSE office stream — registered on the public group because it does
+	// its own JWT auth (EventSource can't send an Authorization header, so the
+	// token rides the ?access_token= query parameter). The leaderboard itself
+	// is a normal authed GET, registered below.
+	if arenaH != nil {
+		arenaH.PublicRoutes(v2)
+	}
+
 	// Authenticated.
 	authed := v2.Group("")
 	authed.Use(saasauth.RequireUser(iss, store))
@@ -60,17 +70,30 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			return
 		}
 		g, _ := store.GetGroup(c.Request.Context(), u.GroupID)
-		c.JSON(http.StatusOK, gin.H{
-			"user": gin.H{
-				"id": u.ID, "email": u.Email, "role": u.Role,
-				"balance_usd": u.BalanceUSD, "group_id": u.GroupID,
-				"email_verified": u.EmailVerified, "created_at": u.CreatedAt.Unix(),
-			},
-			"group": g,
-		})
+		user := gin.H{
+			"id": u.ID, "email": u.Email, "role": u.Role,
+			"balance_usd": u.BalanceUSD, "group_id": u.GroupID,
+			"email_verified": u.EmailVerified, "created_at": u.CreatedAt.Unix(),
+		}
+		// Attach the public-arena profile (nickname + opt-in) so the dashboard
+		// can greet the user by name without a second round-trip. Lazily created.
+		if p, perr := store.GetOrCreateProfile(c.Request.Context(), u.ID); perr == nil {
+			user["display_name"] = p.DisplayName
+			user["name_is_default"] = p.NameIsDefault
+			user["public_opt_in"] = p.PublicOptIn
+		}
+		c.JSON(http.StatusOK, gin.H{"user": user, "group": g})
 	})
 	tokensH.Routes(authed.Group("/tokens"))
 	billingH.UserRoutes(authed.Group("/billing"))
+	// Arena leaderboard + profile (nickname / public opt-in / IP greeting) —
+	// all authed user routes.
+	if arenaH != nil {
+		arenaH.AuthedRoutes(authed)
+	}
+	if profileH != nil {
+		profileH.Routes(authed)
+	}
 
 	// Available credential channels — the dropdown source for the per-token
 	// "渠道" selector. Deduplicated by group name; each entry reports which

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AppShell, PublicLayout } from "@/components/layout/shell";
@@ -17,6 +17,11 @@ import ForgotPasswordPage from "@/routes/forgot-password";
 import HomePage from "@/routes/home";
 import LoginPage from "@/routes/login";
 import LogsPage from "@/routes/logs";
+
+// Leaderboard pulls in a canvas pixel-office renderer + SSE — lazy-load it so
+// the dashboard bundle isn't burdened for users who never open the arena.
+const LeaderboardPage = lazy(() => import("@/routes/leaderboard"));
+
 import PricingPage from "@/routes/pricing";
 import PrivacyPage from "@/routes/privacy";
 import RegisterPage from "@/routes/register";
@@ -68,6 +73,14 @@ export default function App() {
               }
             >
               <Route index element={<DashboardPage />} />
+              <Route
+                path="leaderboard"
+                element={
+                  <Suspense fallback={null}>
+                    <LeaderboardPage />
+                  </Suspense>
+                }
+              />
               <Route path="tokens" element={<TokensPage />} />
               <Route path="billing" element={<BillingPage />} />
               <Route path="logs" element={<LogsPage />} />

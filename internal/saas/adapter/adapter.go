@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wjsoj/CPA-Claude/internal/saas/arena"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 	"github.com/wjsoj/CPA-Claude/internal/server"
@@ -32,6 +33,11 @@ type Adapter struct {
 	DB      *db.DB
 	Catalog *pricing.Catalog
 	Rate    *billing.Rate
+
+	// Arena, when set, receives a per-request pulse for the public leaderboard
+	// + real-time "Agent office". Optional / nil-safe — OnCharge is fire-and-
+	// forget so it never blocks the billing hot path.
+	Arena *arena.Service
 
 	// groupCache memoizes pricing groups for the request hot path. Groups
 	// change rarely (admin action) so a 30s TTL is plenty.
@@ -141,7 +147,12 @@ func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *serv
 //
 // Returns the billed amount so the caller can write it into the request log
 // (so the log row matches the wallet ledger byte-for-byte).
-func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provider, model string, _ usage.Counts, officialCostUSD float64) (float64, error) {
+func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provider, model string, counts usage.Counts, officialCostUSD float64) (float64, error) {
+	// Pulse the arena BEFORE the zero-cost early-return so cache-hit / free
+	// requests still drive office activity + the leaderboard. Fire-and-forget.
+	if a.Arena != nil {
+		a.Arena.OnCharge(info.UserID, provider, model, totalTokens(counts))
+	}
 	if officialCostUSD <= 0 {
 		return 0, nil
 	}
@@ -156,6 +167,12 @@ func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provide
 	}
 	a.DB.TouchUserToken(ctx, info.TokenID)
 	return billed, nil
+}
+
+// totalTokens sums all billable token axes for one request (input + output +
+// both cache axes) — the activity weight shown on the leaderboard / office.
+func totalTokens(c usage.Counts) int64 {
+	return c.InputTokens + c.OutputTokens + c.CacheCreateTokens + c.CacheReadTokens
 }
 
 // MultiplierFor resolves the multiplier for (group, provider). Falls back

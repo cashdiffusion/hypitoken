@@ -1,7 +1,8 @@
-import { Activity, ArrowUpRight, Gauge, KeyRound, Wallet } from "lucide-react";
+import { Activity, ArrowUpRight, Gauge, KeyRound, Pencil, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
+import { NicknameDialog } from "@/components/app/nickname-dialog";
 import { CountUp, GlassPanel, PageHeader, StatTile } from "@/components/app/page-primitives";
 import { TermsNotice } from "@/components/app/terms-notice";
 import { WelcomeBonus } from "@/components/app/welcome-bonus";
@@ -9,7 +10,7 @@ import { SpotlightCard } from "@/components/landing/interactions";
 import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { useAuth } from "@/hooks/use-auth";
 import { apiGet } from "@/lib/api";
-import type { UserToken, WalletTx } from "@/lib/types";
+import type { Greeting, UserToken, WalletTx } from "@/lib/types";
 import { fmtUSD } from "@/lib/utils";
 
 export default function DashboardPage() {
@@ -25,6 +26,8 @@ export default function DashboardPage() {
   const [usage, setUsage] = useState<{ spent_total: number; total: { count: number } } | null>(
     null,
   );
+  const [greet, setGreet] = useState<Greeting | null>(null);
+  const [nickOpen, setNickOpen] = useState(false);
 
   // Welcome overlay: register.tsx routes here right after a brand-new signup
   // with either `state.welcomeBonus` (credited USD → celebration) or
@@ -51,6 +54,9 @@ export default function DashboardPage() {
     apiGet<{ spent_total: number; total: { count: number } }>("/me/console")
       .then(setUsage)
       .catch(() => setUsage(null));
+    apiGet<Greeting>("/me/greeting")
+      .then(setGreet)
+      .catch(() => setGreet(null));
   }, []);
 
   const charged = usage?.spent_total ?? 0;
@@ -67,7 +73,40 @@ export default function DashboardPage() {
           onDismiss={() => setWelcome(null)}
         />
       )}
-      <PageHeader eyebrow={t("nav.dashboard")} title={t("dashboard.welcome")} sub={user?.email} />
+      <PageHeader
+        eyebrow={greetLine(t)}
+        title={
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {t(`dashboard.greeting.${periodKey()}`, {
+              name: user?.display_name || t("arena.you"),
+            })}
+            <button
+              type="button"
+              onClick={() => setNickOpen(true)}
+              title={t("dashboard.greeting.editNick")}
+              className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          </span>
+        }
+        sub={greetSub(greet, t)}
+      />
+
+      {user?.name_is_default && (
+        <Reveal>
+          <button
+            type="button"
+            onClick={() => setNickOpen(true)}
+            className="flex w-full items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-left text-sm text-amber-700 transition-colors hover:bg-amber-500/15 dark:text-amber-300"
+          >
+            <Pencil className="h-4 w-4 shrink-0" />
+            {t("dashboard.greeting.defaultNickNotice")}
+          </button>
+        </Reveal>
+      )}
+
+      <NicknameDialog open={nickOpen} onOpenChange={setNickOpen} />
 
       <RevealStagger className="grid gap-4 md:grid-cols-3">
         <RevealItem className="flex">
@@ -166,6 +205,48 @@ export default function DashboardPage() {
       </Reveal>
     </div>
   );
+}
+
+// periodKey maps the browser-local hour to a greeting bucket (all offline).
+function periodKey(): "morning" | "afternoon" | "evening" | "night" {
+  const h = new Date().getHours();
+  if (h < 5) return "night";
+  if (h < 12) return "morning";
+  if (h < 18) return "afternoon";
+  if (h < 23) return "evening";
+  return "night";
+}
+
+// greetLine is the small eyebrow above the greeting — just the localized
+// dashboard label (kept simple; the personality lives in the title + sub).
+function greetLine(t: (k: string) => string): string {
+  return t("nav.dashboard");
+}
+
+// greetSub builds the location-flavoured sub-line. Uses the browser-native,
+// fully-offline Intl.DisplayNames to localize the country code; degrades to a
+// generic line when no location signal is available.
+function greetSub(greet: { city: string; country_code: string } | null, t: TFn): string {
+  const place = placeName(greet);
+  if (place) return t("dashboard.greeting.inCity", { city: place });
+  return t("dashboard.greeting.generic");
+}
+
+type TFn = (k: string, o?: Record<string, unknown>) => string;
+
+function placeName(greet: { city: string; country_code: string } | null): string {
+  if (!greet) return "";
+  if (greet.city) return greet.city;
+  if (greet.country_code && greet.country_code.length === 2) {
+    try {
+      const lang = (typeof navigator !== "undefined" && navigator.language) || "en";
+      const dn = new Intl.DisplayNames([lang], { type: "region" });
+      return dn.of(greet.country_code) || "";
+    } catch {
+      return "";
+    }
+  }
+  return "";
 }
 
 function MultiplierCard({ label, value, hint }: { label: string; value?: number; hint: string }) {

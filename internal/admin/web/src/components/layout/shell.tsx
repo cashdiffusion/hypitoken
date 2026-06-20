@@ -5,6 +5,7 @@ import {
   Receipt,
   Shield,
   Terminal,
+  Trophy,
   User as UserIcon,
   Wallet,
 } from "lucide-react";
@@ -26,6 +27,7 @@ const DISCORD_BLURPLE = "#5865f2";
 // resolved at render time so language switching reflows the sidebar.
 const NAV_ITEMS = [
   { to: "/app", labelKey: "nav.dashboard", icon: LayoutDashboard, end: true },
+  { to: "/app/leaderboard", labelKey: "nav.arena", icon: Trophy },
   { to: "/app/tokens", labelKey: "nav.tokens", icon: KeyRound },
   { to: "/app/billing", labelKey: "nav.billing", icon: Wallet },
   { to: "/app/logs", labelKey: "nav.logs", icon: Receipt },

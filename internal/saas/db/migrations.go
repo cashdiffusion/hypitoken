@@ -298,6 +298,35 @@ SET    claude_multiplier = 0.25,
 WHERE  name = '企业VIP'
   AND  claude_multiplier = 0.2;
 `,
+
+	// v10 — public arena / leaderboard profile. One row per user holding a
+	// public-facing nickname, a "publish my usage to the leaderboard" opt-in,
+	// and three running activity counters bumped on every billed request
+	// (so the leaderboard is a single indexed query rather than a per-user
+	// requestlog scan). Self-contained: owned by internal/saas/{arena,profile};
+	// the row is created lazily on first profile read (GetOrCreateProfile), so
+	// existing users get one the first time they open the dashboard. The
+	// users table is untouched — nickname lives here, not on the account.
+	//
+	//   public_opt_in = 0 (default) → the user appears on the leaderboard /
+	//                   in the office only under an anonymous pseudonym.
+	//   public_opt_in = 1           → their real display_name is shown.
+	`
+CREATE TABLE user_profiles (
+    user_id           INTEGER PRIMARY KEY,
+    display_name      TEXT    NOT NULL DEFAULT '',
+    name_is_default   INTEGER NOT NULL DEFAULT 1,   -- 1 = system-generated nick, prompt user to change
+    public_opt_in     INTEGER NOT NULL DEFAULT 0,   -- 0 = anonymous pseudonym, 1 = show real nickname
+    lifetime_tokens   INTEGER NOT NULL DEFAULT 0,
+    lifetime_requests INTEGER NOT NULL DEFAULT 0,
+    last_active_at    INTEGER NOT NULL DEFAULT 0,
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_user_profiles_tokens   ON user_profiles(lifetime_tokens DESC);
+CREATE INDEX idx_user_profiles_requests ON user_profiles(lifetime_requests DESC);
+`,
 }
 
 func (db *DB) migrate() error {

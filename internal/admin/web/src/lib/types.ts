@@ -9,6 +9,53 @@ export interface User {
   email_verified: boolean;
   created_at: number;
   disabled?: boolean;
+  // Public-arena profile (leaderboard / Agent office). Attached by /me.
+  display_name?: string;
+  name_is_default?: boolean;
+  public_opt_in?: boolean;
+}
+
+// Leaderboard / arena shapes (GET /arena/leaderboard, SSE /arena/stream).
+export interface LeaderRow {
+  rank: number;
+  actor: string;
+  name: string;
+  public: boolean;
+  is_you: boolean;
+  tokens: number;
+  requests: number;
+  last_seen: number;
+}
+
+export interface LeaderboardResponse {
+  metric: "tokens" | "requests";
+  rows: LeaderRow[];
+  you: LeaderRow | null;
+}
+
+export interface ArenaEvent {
+  actor: string;
+  name: string;
+  public: boolean;
+  provider: string;
+  model: string;
+  tokens: number;
+  ts: number;
+  is_you: boolean;
+}
+
+export interface UserProfile {
+  display_name: string;
+  name_is_default: boolean;
+  public_opt_in: boolean;
+  lifetime_tokens: number;
+  lifetime_requests: number;
+  last_active_at: number;
+}
+
+export interface Greeting {
+  country_code: string;
+  city: string;
 }
 
 export interface PricingGroup {

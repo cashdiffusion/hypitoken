@@ -22,12 +22,14 @@ import (
 	saasadapter "github.com/wjsoj/CPA-Claude/internal/saas/adapter"
 	saasadmin "github.com/wjsoj/CPA-Claude/internal/saas/admin"
 	"github.com/wjsoj/CPA-Claude/internal/saas/analytics"
+	"github.com/wjsoj/CPA-Claude/internal/saas/arena"
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	saasdb "github.com/wjsoj/CPA-Claude/internal/saas/db"
 	"github.com/wjsoj/CPA-Claude/internal/saas/growth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/health"
 	"github.com/wjsoj/CPA-Claude/internal/saas/mail"
+	saasprofile "github.com/wjsoj/CPA-Claude/internal/saas/profile"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	"github.com/wjsoj/CPA-Claude/internal/server"
 	"github.com/wjsoj/CPA-Claude/internal/shop"
@@ -264,10 +266,17 @@ func main() {
 		// action / dwell / flow / source, surfaced in the admin Growth tab.
 		analyticsSvc := analytics.New(saasDB.DB)
 
+		// Arena (public leaderboard + real-time "Agent office"). Self-contained:
+		// owns user_profiles (migration v10) via the DB layer, fans billing
+		// pulses out over SSE. Injected into the adapter so Charge can publish.
+		arenaSvc := arena.New(saasDB, issuer)
+		profileH := saasprofile.New(saasDB)
+
 		// Catalog used for pricing computation (same instance as the proxy's
 		// internal billing — the SaaS layer only adds the multiplier on top).
 		catalog := pricing.NewCatalog(cfg.Pricing)
 		adapter := saasadapter.NewAdapter(saasDB, catalog, rate)
+		adapter.Arena = arenaSvc
 		s.SetSaaS(adapter)
 
 		// Mount /api/v2/* on every gin engine the server hosts. Both Claude
@@ -295,7 +304,7 @@ func main() {
 			return true, claims.Role == "admin"
 		}
 		for _, h := range s.GinEngines() {
-			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc)
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH)
 			if spaFS != nil {
 				saasadapter.MountSPA(h, spaFS)
 			}
