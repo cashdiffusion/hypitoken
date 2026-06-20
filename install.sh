@@ -133,6 +133,58 @@ UNIT
   rm -f "$tmp_unit"
 }
 
+# write_backup_units installs the daily off-host backup timer + oneshot service.
+# Mirrors write_unit; the oneshot runs `<bin> backup --config <cfg>` (a clean
+# no-op until backup.enabled is set in the config).
+BACKUP_SERVICE="hypitoken-backup.service"
+BACKUP_TIMER="hypitoken-backup.timer"
+write_backup_units() {
+  local cfg="$1" user="$2" workdir tmp_s tmp_t
+  workdir="$(getent passwd "$user" | cut -d: -f6)"
+  [ -z "$workdir" ] && workdir="/"
+  tmp_s="$(mktemp)"; tmp_t="$(mktemp)"
+  cat > "$tmp_s" <<UNIT
+[Unit]
+Description=hypitoken off-host backup (oneshot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=${user}
+WorkingDirectory=${workdir}
+ExecStart=${BIN_DIR}/${BIN_NAME} backup --config ${cfg}
+NoNewPrivileges=true
+PrivateTmp=true
+UNIT
+  cat > "$tmp_t" <<UNIT
+[Unit]
+Description=Daily hypitoken off-host backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+  run_privileged install -m 0644 "$tmp_s" "/etc/systemd/system/${BACKUP_SERVICE}"
+  run_privileged install -m 0644 "$tmp_t" "/etc/systemd/system/${BACKUP_TIMER}"
+  rm -f "$tmp_s" "$tmp_t"
+}
+
+# ensure_backup_timer writes the units and enables the timer (idempotent).
+ensure_backup_timer() {
+  local cfg="$1" user="$2"
+  [ -z "$cfg" ] || [ -z "$user" ] && return 0
+  msg "installing daily backup timer (${BACKUP_TIMER})"
+  write_backup_units "$cfg" "$user"
+  run_privileged systemctl daemon-reload || true
+  run_privileged systemctl enable --now "$BACKUP_TIMER" \
+    || warn "could not enable $BACKUP_TIMER -- enable manually: sudo systemctl enable --now $BACKUP_TIMER"
+}
+
 # ===========================================================================
 # Argument parsing
 # ===========================================================================
@@ -306,6 +358,11 @@ if [ "$UNIT_EXISTS" = "1" ]; then
   # Upgrade path: keep existing unit, just reload + restart if it was running.
   msg "existing systemd unit detected at $UNIT_PATH -- preserving it"
   run_privileged systemctl daemon-reload || true
+  # Ensure the daily backup timer exists too, deriving cfg+user from the main
+  # unit so it stays in lockstep with the service definition.
+  _bcfg="$(systemctl cat "$UNIT_NAME" 2>/dev/null | sed -n 's/^ExecStart=.*--config[= ]\([^ ]*\).*/\1/p' | head -1)"
+  _buser="$(systemctl cat "$UNIT_NAME" 2>/dev/null | sed -n 's/^User=//p' | head -1)"
+  ensure_backup_timer "$_bcfg" "$_buser"
   if [ "$UNIT_WAS_ACTIVE" = "1" ]; then
     msg "restarting $UNIT_NAME to pick up the new binary"
     run_privileged systemctl restart "$UNIT_NAME" \
@@ -343,6 +400,7 @@ elif [ "$OS_TAG" = "linux" ] && command -v systemctl >/dev/null 2>&1 && [ -r /de
       msg "writing $UNIT_PATH"
       write_unit "$CFG_PATH" "$RUN_USER"
       run_privileged systemctl daemon-reload
+      ensure_backup_timer "$CFG_PATH" "$RUN_USER"
 
       cat <<EOF
 

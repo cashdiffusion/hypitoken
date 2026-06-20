@@ -45,6 +45,21 @@ var (
 )
 
 func main() {
+	// Subcommand dispatch (before flag.Parse so the default server path is
+	// untouched). os.Args[1] is never a flag in normal use — --config/--version
+	// start with "-" — so this is unambiguous and existing invocations
+	// (including the systemd ExecStart=... --config ...) keep working.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "backup":
+			runBackupCmd(os.Args[2:])
+			return
+		case "restore":
+			runRestoreCmd(os.Args[2:])
+			return
+		}
+	}
+
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()

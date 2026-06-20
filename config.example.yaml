@@ -290,3 +290,29 @@ shop:
     password: ""
     from: "support@example.com"
     use_tls: true
+
+# ---------------------------------------------------------------------------
+# Off-host disaster-recovery backup (the `backup` subcommand + systemd timer).
+# Daily, the binary snapshots the critical state (saas.db + jwt_secret, shop.db,
+# tokens.json, auths/, kiro_auths/, config.yaml, payment secrets), encrypts it
+# to an X25519 PUBLIC key, and uploads it to an S3-compatible bucket as
+# <prefix>YYYY-MM-DD.tar.gz.enc, pruning anything older than retention_days.
+#
+# The private key NEVER lives on the server — generate a keypair with
+#   hypitoken backup keygen
+# put the PUBLIC key in recipient_pubkey below, store the PRIVATE key OFFLINE
+# (password manager + paper). Without the private key a server/bucket breach
+# cannot read backups; but losing it makes the backups unrecoverable.
+backup:
+  enabled: false
+  retention_days: 7
+  recipient_pubkey: ""          # base64 X25519 public key from `backup keygen`
+  s3:
+    endpoint: "s3.bitiful.net"  # Bitiful S3-compatible endpoint (host only)
+    region: "cn-east-1"
+    bucket: "apibackup"
+    prefix: "hypitoken/"        # namespaces this app inside the shared bucket
+    # Use a LEAST-PRIVILEGE key (PutObject + ListBucket + DeleteObject; NO
+    # GetObject). @/path keeps the secret out of this file.
+    access_key_id: "@/etc/hypitoken/s3_key_id"
+    secret_access_key: "@/etc/hypitoken/s3_secret"

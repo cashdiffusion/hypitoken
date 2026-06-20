@@ -64,6 +64,10 @@ type Config struct {
 	// Persistence file for usage statistics and session state.
 	StateFile string `yaml:"state_file"`
 
+	// Off-host disaster-recovery backup to an S3-compatible bucket. Disabled
+	// by default. See BackupConfig.
+	Backup BackupConfig `yaml:"backup,omitempty"`
+
 	// Minutes of inactivity after which a client session releases its OAuth slot.
 	ActiveWindowMinutes int `yaml:"active_window_minutes"`
 
@@ -311,6 +315,7 @@ func applyDefaults(c *Config, path string) {
 	} else if !filepath.IsAbs(c.KiroAuthDir) {
 		c.KiroAuthDir = filepath.Join(dir, c.KiroAuthDir)
 	}
+	c.Backup.applyDefaults()
 	c.applyTokenGroupDefaults()
 }
 
