@@ -79,6 +79,63 @@ func AddBalanceTx(ctx context.Context, tx *sql.Tx, userID int64, kind string, de
 	return bal, nil
 }
 
+// ChargeWithFloor deducts amountUSD (must be >= 0) from the user's wallet in a
+// single transaction, recording a wallet_tx of the given kind with a negative
+// amount. The balance may go negative — a request that has already hit upstream
+// must be billed — but never below -maxOverdraftUSD: if the full charge would
+// breach that floor it is clamped so the balance rests exactly on the floor,
+// and the clamped (actually-charged) amount is returned so the request log
+// stays in lockstep with the ledger. A maxOverdraftUSD <= 0 disables the floor
+// (unbounded negative). Returns (newBalance, chargedUSD).
+func (db *DB) ChargeWithFloor(ctx context.Context, userID int64, kind string, amountUSD float64, ref, note string, maxOverdraftUSD float64) (newBal float64, charged float64, err error) {
+	if amountUSD <= 0 {
+		bal, gerr := db.GetBalance(ctx, userID)
+		return bal, 0, gerr
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+
+	var bal float64
+	if err := tx.QueryRowContext(ctx, `SELECT balance_usd FROM users WHERE id = ?`, userID).Scan(&bal); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, 0, ErrNotFound
+		}
+		return 0, 0, err
+	}
+
+	charged = amountUSD
+	if maxOverdraftUSD > 0 {
+		// Clamp so the post-charge balance never drops below the floor. If the
+		// wallet is already at/below the floor, charge nothing.
+		if room := bal + maxOverdraftUSD; charged > room {
+			charged = room
+		}
+		if charged < 0 {
+			charged = 0
+		}
+	}
+	newBal = bal - charged
+	if charged == 0 {
+		return newBal, 0, nil
+	}
+
+	now := time.Now().Unix()
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET balance_usd = ?, updated_at = ? WHERE id = ?`, newBal, now, userID); err != nil {
+		return 0, 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx (user_id, kind, amount_usd, ref, note, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		userID, kind, -charged, ref, note, now); err != nil {
+		return 0, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return newBal, charged, nil
+}
+
 func (db *DB) GetBalance(ctx context.Context, userID int64) (float64, error) {
 	var bal float64
 	err := db.QueryRowContext(ctx, `SELECT balance_usd FROM users WHERE id = ?`, userID).Scan(&bal)

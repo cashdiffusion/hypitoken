@@ -188,6 +188,22 @@ saas:
   # Open registration. Set false to require operator-pre-creation.
   free_register: true
 
+  # Maximum USD a user wallet may be driven negative by in-flight requests
+  # (one large request, or many concurrent ones, can each pass the balance>0
+  # check and then bill against a near-zero balance). Charges are clamped so the
+  # wallet never rests below -max_overdraft_usd. Omit for the default ($10); set
+  # 0 to disable the floor (unbounded negative — not recommended).
+  max_overdraft_usd: 10
+
+  # Payment gateway: zpay | alipay | mock. Empty = inferred from whichever
+  # block below is configured (zpay → alipay → mock). The mock gateway
+  # auto-confirms every top-up after 2s WITHOUT taking real money, and is
+  # hard-refused at startup on a public site (non-local site_url). For a real
+  # deployment configure zpay or alipay; set allow_mock_payment: true only to
+  # deliberately run the auto-confirm mock on a public host (testing).
+  payment_provider: ""
+  allow_mock_payment: false
+
   # Outbound mail. Empty host = log-only mailer (verification codes
   # appear in server logs — useful for development).
   smtp:
@@ -198,9 +214,9 @@ saas:
     from: ""
     use_tls: true
 
-  # Alipay gateway. Empty app_id = mock gateway: orders auto-confirm
-  # 2 seconds after creation. Useful for local dev without sandbox
-  # credentials.
+  # Alipay gateway. With no gateway configured the server falls back to the
+  # mock (auto-confirm) gateway — allowed only on a local site_url (or with
+  # allow_mock_payment: true). Useful for local dev without sandbox credentials.
   alipay:
     app_id: ""
     private_key: ""        # PEM string or @/path/to/file

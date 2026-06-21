@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+
 	"github.com/wjsoj/CPA-Claude/internal/saas/arena"
 	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
@@ -27,12 +29,21 @@ const (
 	defaultCodexMultiplier  = 0.05
 )
 
+// DefaultMaxOverdraftUSD bounds how far a wallet may be driven negative by
+// in-flight requests when the operator hasn't set saas.max_overdraft_usd.
+const DefaultMaxOverdraftUSD = 10.0
+
 // Adapter implements server.SaaSAdapter against the SaaS DB. It is created
 // in main.go and passed into server.New via WithSaaS.
 type Adapter struct {
 	DB      *db.DB
 	Catalog *pricing.Catalog
 	Rate    *billing.Rate
+
+	// MaxOverdraftUSD caps how far a wallet may be driven negative by in-flight
+	// requests. 0 disables the floor (unbounded negative). Set from
+	// saas.max_overdraft_usd; NewAdapter seeds the default.
+	MaxOverdraftUSD float64
 
 	// Arena, when set, receives a per-request pulse for the public leaderboard
 	// + real-time "Agent office". Optional / nil-safe — OnCharge is fire-and-
@@ -60,7 +71,7 @@ type ReferralReleaser interface {
 }
 
 func NewAdapter(store *db.DB, catalog *pricing.Catalog, rate *billing.Rate) *Adapter {
-	return &Adapter{DB: store, Catalog: catalog, Rate: rate, groups: map[int64]*db.PricingGroup{}, groupsTTL: 30 * time.Second}
+	return &Adapter{DB: store, Catalog: catalog, Rate: rate, MaxOverdraftUSD: DefaultMaxOverdraftUSD, groups: map[int64]*db.PricingGroup{}, groupsTTL: 30 * time.Second}
 }
 
 func (a *Adapter) refreshGroups(ctx context.Context) {
@@ -174,15 +185,24 @@ func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provide
 		return 0, nil
 	}
 	ref := fmt.Sprintf("token=%d model=%s", info.TokenID, model)
-	if _, err := a.DB.AddBalance(ctx, info.UserID, db.TxKindCharge, -billed, ref, "", true); err != nil {
+	// Deduct with an overdraft floor: a request that already hit upstream must
+	// be billed, but the wallet can never be driven below -MaxOverdraftUSD by a
+	// single huge request or a burst of concurrent ones. The clamped amount is
+	// what we record, so the request log and the wallet ledger stay in lockstep.
+	_, charged, err := a.DB.ChargeWithFloor(ctx, info.UserID, db.TxKindCharge, billed, ref, "", a.MaxOverdraftUSD)
+	if err != nil {
 		return 0, err
 	}
+	if charged < billed {
+		log.Warnf("saas: overdraft floor hit for user %d — billed %.6f clamped to %.6f (max_overdraft=$%.2f)", info.UserID, billed, charged, a.MaxOverdraftUSD)
+	}
+	billed = charged
 	a.DB.TouchUserToken(ctx, info.TokenID)
 	// First real spend by an invited user releases any deferred inviter reward.
 	// Fire-and-forget off the billing goroutine; a no-op for the common case.
 	// WithoutCancel keeps any request values but detaches from the request's
 	// cancellation so the release survives the response returning.
-	if a.Referral != nil {
+	if a.Referral != nil && charged > 0 {
 		go a.Referral.ReleaseInviterReward(context.WithoutCancel(ctx), info.UserID)
 	}
 	return billed, nil

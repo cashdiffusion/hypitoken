@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -289,6 +291,9 @@ func main() {
 		// internal billing — the SaaS layer only adds the multiplier on top).
 		catalog := pricing.NewCatalog(cfg.Pricing)
 		adapter := saasadapter.NewAdapter(saasDB, catalog, rate)
+		if cfg.SaaS.MaxOverdraftUSD != nil {
+			adapter.MaxOverdraftUSD = *cfg.SaaS.MaxOverdraftUSD
+		}
 		adapter.Arena = arenaSvc
 		adapter.Referral = referralSvc
 		s.SetSaaS(adapter)
@@ -460,6 +465,13 @@ func selectPaymentGateway(s saas.Config) (billing.Gateway, string, error) {
 			provider = "mock"
 		}
 	}
+	// Hard guard: the mock gateway auto-confirms every order after 2s without
+	// taking real money. Refuse it on a public/production deployment unless the
+	// operator has explicitly opted in. This catches the common footgun of
+	// shipping a server with no payment block configured.
+	if provider == "mock" && !mockPaymentAllowed(s) {
+		return nil, "", fmt.Errorf("refusing mock payment gateway on a public site (SiteURL=%q): configure a real gateway (payment_provider: zpay|alipay + its credentials), or set saas.allow_mock_payment: true to override for testing", strings.TrimSpace(s.SiteURL))
+	}
 	switch provider {
 	case "zpay":
 		key, err := loadKeyFile(s.ZPay.Key)
@@ -493,6 +505,42 @@ func selectPaymentGateway(s saas.Config) (billing.Gateway, string, error) {
 		return &billing.MockGateway{}, "mock (auto-confirms after 2s — DO NOT use in production)", nil
 	}
 	return nil, "", fmt.Errorf("unknown payment_provider %q (want zpay|alipay|mock)", provider)
+}
+
+// mockPaymentAllowed reports whether the mock (auto-confirm) gateway may run.
+// It is permitted only when explicitly opted in, or when SiteURL points at a
+// local host (dev). An empty SiteURL counts as non-local: a real deployment
+// sets SiteURL, so "unset" should fail closed rather than silently mock.
+func mockPaymentAllowed(s saas.Config) bool {
+	return s.AllowMockPayment || isLocalSiteURL(s.SiteURL)
+}
+
+// isLocalSiteURL reports whether the configured site origin is a loopback /
+// development host (localhost, 127.0.0.0/8, ::1, 0.0.0.0, or a *.local /
+// *.localhost name). Empty or unparsable URLs are treated as non-local.
+func isLocalSiteURL(siteURL string) bool {
+	siteURL = strings.TrimSpace(siteURL)
+	if siteURL == "" {
+		return false
+	}
+	if !strings.Contains(siteURL, "://") {
+		siteURL = "http://" + siteURL
+	}
+	u, err := url.Parse(siteURL)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	switch {
+	case host == "localhost", host == "0.0.0.0", host == "::1":
+		return true
+	case strings.HasSuffix(host, ".local"), strings.HasSuffix(host, ".localhost"):
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // buildStripeGateway constructs the optional Stripe gateway. Returns

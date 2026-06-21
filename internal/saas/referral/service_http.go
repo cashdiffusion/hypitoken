@@ -3,6 +3,7 @@ package referral
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -275,6 +276,15 @@ func (s *Service) handleClaimGift(c *gin.Context) {
 	if u == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
 		return
+	}
+	// Rate-limit redeem attempts per (user, IP) so a redeem code can't be
+	// brute-forced even though it's an 80-bit bearer secret.
+	if s.claimRL != nil {
+		if ok, retry := s.claimRL.allow(fmt.Sprintf("%d|%s", u.ID, c.ClientIP())); !ok {
+			c.Header("Retry-After", strconv.Itoa(retry))
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many redeem attempts", "retry_after": retry})
+			return
+		}
 	}
 	var req claimGiftReq
 	if err := c.ShouldBindJSON(&req); err != nil {

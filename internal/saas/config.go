@@ -62,8 +62,24 @@ type Config struct {
 	// Payment gateway selector. One of "alipay" (direct merchant), "zpay"
 	// (易支付 aggregator), or "mock" (auto-confirms after 2s — dev only).
 	// Empty defaults to whichever block is configured: zpay if zpay.pid
-	// set, alipay if alipay.app_id set, else mock.
+	// set, alipay if alipay.app_id set, else mock — but the mock fallback is
+	// hard-blocked on a public/production site (see AllowMockPayment).
 	PaymentProvider string `yaml:"payment_provider,omitempty"`
+
+	// AllowMockPayment opts a public deployment into the mock gateway, which
+	// auto-confirms every top-up after 2s without taking real money. It is
+	// otherwise refused whenever SiteURL points at a non-local host, so a
+	// misconfigured production server can never silently hand out free credit.
+	// Leave false in production. Local dev (localhost SiteURL) needs no flag.
+	AllowMockPayment bool `yaml:"allow_mock_payment,omitempty"`
+
+	// MaxOverdraftUSD caps how far a user's USD wallet may be driven negative
+	// by in-flight requests (a single huge request, or many concurrent ones,
+	// can each pass the balance>0 PreCheck and then bill against a near-zero
+	// balance). Charges are clamped so the wallet can never rest below
+	// -MaxOverdraftUSD. nil → default 10.0; set to 0 to disable the floor
+	// (unbounded negative — not recommended).
+	MaxOverdraftUSD *float64 `yaml:"max_overdraft_usd"`
 
 	// Alipay direct-merchant gateway. Requires real merchant onboarding.
 	Alipay AlipayConfig `yaml:"alipay"`

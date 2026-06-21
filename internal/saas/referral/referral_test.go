@@ -260,3 +260,20 @@ func TestCodeFormatting(t *testing.T) {
 		t.Fatalf("normalizeInviteCode should reject spaces/punct")
 	}
 }
+
+func TestClaimLimiter(t *testing.T) {
+	l := newClaimLimiter() // max 8 / minute
+	key := "1|1.2.3.4"
+	for i := 0; i < 8; i++ {
+		if ok, _ := l.allow(key); !ok {
+			t.Fatalf("attempt %d should be allowed", i+1)
+		}
+	}
+	if ok, retry := l.allow(key); ok || retry <= 0 {
+		t.Fatalf("9th attempt should be blocked with a retry hint, got ok=%v retry=%d", ok, retry)
+	}
+	// A different (user, IP) key is independent.
+	if ok, _ := l.allow("2|5.6.7.8"); !ok {
+		t.Fatal("a different key must not be rate-limited")
+	}
+}

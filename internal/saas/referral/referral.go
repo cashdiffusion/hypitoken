@@ -52,13 +52,15 @@ type Service struct {
 	Channel  ChannelGranter
 	SiteName string
 	SiteURL  string
+
+	claimRL *claimLimiter
 }
 
 // New builds the referral service. channel may be nil (signup anti-abuse + admin
 // channel fallback then degrade to "clean, no channel"); mailer may be nil (the
 // in-app card link still works, only email delivery is skipped).
 func New(store *db.DB, mailer Mailer, channel ChannelGranter, siteName, siteURL string) *Service {
-	return &Service{DB: store, Mailer: mailer, Channel: channel, SiteName: siteName, SiteURL: siteURL}
+	return &Service{DB: store, Mailer: mailer, Channel: channel, SiteName: siteName, SiteURL: siteURL, claimRL: newClaimLimiter()}
 }
 
 // StartSweeper launches the background gift-expiry sweeper. It refunds every
@@ -79,6 +81,9 @@ func (s *Service) StartSweeper(ctx context.Context) {
 				return
 			case <-t.C:
 				s.sweepExpiredGifts(ctx)
+				if s.claimRL != nil {
+					s.claimRL.gc()
+				}
 				t.Reset(time.Hour)
 			}
 		}
