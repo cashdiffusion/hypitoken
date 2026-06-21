@@ -2,7 +2,7 @@
 // design/token-cards/index.html with every CDN dependency removed: fonts fall
 // back to bundled/system families, the QR is generated offline via
 // qrcode-generator, and the design's WebGL light-flow is reproduced with a
-// React-Three-Fiber aurora shader. Both faces (front + back) render stacked so
+// React-Three-Fiber 3D scene. Both faces (front + back) render stacked so
 // the whole card is visible at once. The faces are single SVG strings so they
 // export cleanly to PNG/SVG (the share artifact that drives referrals).
 
@@ -351,100 +351,322 @@ function buildBackSVG(p: TokenCardProps, uid: string): string {
 </svg>`;
 }
 
-// ── R3F aurora overlay (the design's WebGL light-flow, offline) ──────────────
+// ── R3F 3D scene (ported from the design's WebGL layer) ─────────────────────
 
-const AURA_VERT = `
-varying vec2 vUv;
-void main() {
-  vUv = uv;
-  gl_Position = vec4(position.xy, 0.0, 1.0);
-}`;
+// Iridescent morphing crystal: normal-wave breathing displacement + Fresnel rim
+// + view-angle iridescence (oil-slick / holo foil). Ported from the design.
+const CRYSTAL_VERT = `
+  uniform float u_time; uniform float u_amp;
+  varying vec3 vN; varying vec3 vView; varying float vW;
+  void main(){
+    float w = sin(normal.x*3.0 + u_time)*0.5 + sin(normal.y*4.0 - u_time*0.8)*0.3 + sin(normal.z*5.0 + u_time*1.2)*0.2;
+    vW = w;
+    vec3 p = position + normal * w * u_amp;
+    vN = normalize(normalMatrix * normal);
+    vec4 mv = modelViewMatrix * vec4(p,1.0);
+    vView = -mv.xyz;
+    gl_Position = projectionMatrix * mv;
+  }`;
+const CRYSTAL_FRAG = `
+  precision highp float;
+  uniform vec3 u_c1; uniform vec3 u_c2; uniform float u_time; uniform float u_light;
+  varying vec3 vN; varying vec3 vView; varying float vW;
+  void main(){
+    vec3 N = normalize(vN); vec3 V = normalize(vView);
+    float fres = pow(1.0 - clamp(dot(N,V),0.0,1.0), 2.2);
+    float hue = vW*0.6 + dot(N,V)*0.5 + u_time*0.06;
+    float m = 0.5 + 0.5*sin(hue*6.2831);
+    vec3 base = mix(u_c1, u_c2, m);
+    vec3 shimmer = vec3(0.5+0.5*sin(hue*6.2831), 0.5+0.5*sin(hue*6.2831+2.094), 0.5+0.5*sin(hue*6.2831+4.188));
+    vec3 col = base*(0.25+0.55*fres) + shimmer*fres*0.55;
+    if(u_light>0.5){
+      vec3 o = vec3(0.5) + (col-0.32)*0.64;
+      gl_FragColor = vec4(clamp(o,0.0,1.0), 0.5 + fres*0.45);
+    } else {
+      gl_FragColor = vec4(col, 0.62 + fres*0.38);
+    }
+  }`;
+// Curl-drift light particles (procedural in the vertex shader).
+const PARTICLE_VERT = `
+  uniform float u_time; uniform float u_light; uniform float u_pr;
+  uniform vec3 u_c1; uniform vec3 u_c2;
+  attribute float aSeed;
+  varying float vA; varying vec3 vCol;
+  void main(){
+    vec3 p = position;
+    float s = aSeed;
+    float t = u_time*0.16 + s*6.2831;
+    p.x += sin(t + p.y*1.6)*0.55;
+    p.y += cos(t*0.9 + p.z*1.3)*0.5;
+    p.z += sin(t*1.1 + p.x*1.5)*0.55;
+    vec4 mv = modelViewMatrix * vec4(p,1.0);
+    float tw = 0.45 + 0.55*sin(t*2.3 + s*3.0);
+    gl_PointSize = (u_light>0.5 ? 16.0 : 26.0) * u_pr * tw / max(0.1,-mv.z);
+    gl_Position = projectionMatrix * mv;
+    vA = tw;
+    vCol = mix(u_c1, u_c2, fract(s*7.31));
+  }`;
+const PARTICLE_FRAG = `
+  precision highp float;
+  varying float vA; varying vec3 vCol; uniform float u_light;
+  void main(){
+    vec2 uv = gl_PointCoord - 0.5;
+    float d = length(uv);
+    if(d>0.5) discard;
+    float a = smoothstep(0.5,0.0,d);
+    gl_FragColor = vec4(vCol, a*vA*(u_light>0.5?0.55:0.95));
+  }`;
 
-const AURA_FRAG = `
-precision mediump float;
-uniform float uTime;
-uniform vec3 uA;
-uniform vec3 uB;
-uniform float uIntensity;
-varying vec2 vUv;
-float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float noise(vec2 p){
-  vec2 i = floor(p), f = fract(p);
-  float a = hash(i), b = hash(i + vec2(1.0,0.0)), c = hash(i + vec2(0.0,1.0)), d = hash(i + vec2(1.0,1.0));
-  vec2 u = f*f*(3.0-2.0*f);
-  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+const prefersReducedMotion = () =>
+  typeof window !== "undefined" &&
+  !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+// softDotTexture is the soft round sprite for the depth stars.
+function softDotTexture(): THREE.Texture {
+  const c = document.createElement("canvas");
+  c.width = 64;
+  c.height = 64;
+  const x = c.getContext("2d");
+  if (x) {
+    const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.45, "rgba(255,255,255,0.5)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    x.fillStyle = g;
+    x.fillRect(0, 0, 64, 64);
+  }
+  return new THREE.CanvasTexture(c);
 }
-float fbm(vec2 p){ float v=0.0,a=0.5; for(int i=0;i<4;i++){ v+=a*noise(p); p*=2.0; a*=0.5; } return v; }
-void main(){
-  vec2 uv = vUv;
-  float t = uTime * 0.05;
-  float n = fbm(uv * vec2(3.0, 2.0) + vec2(t, t * 0.6));
-  float bands = sin((uv.x * 2.5 + uv.y * 1.2 + n * 2.2 - t * 2.0) * 3.14159);
-  float flow = smoothstep(0.15, 1.0, n) * (0.45 + 0.55 * bands);
-  vec3 col = mix(uA, uB, clamp(n + bands * 0.2, 0.0, 1.0));
-  float corner = smoothstep(0.95, 0.15, distance(uv, vec2(0.84, 0.82)));
-  float a = clamp(flow, 0.0, 1.0) * uIntensity * (0.3 + 0.7 * corner);
-  gl_FragColor = vec4(col, a);
-}`;
 
-function AuraMesh({
-  a,
-  b,
-  intensity,
+function Stars({ light, color }: { light: boolean; color: THREE.Color }) {
+  const geo = useMemo(() => {
+    const n = light ? 30 : 54;
+    const sp = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      sp[i * 3] = (Math.random() * 2 - 1) * 3.2;
+      sp[i * 3 + 1] = (Math.random() * 2 - 1) * 2.0;
+      sp[i * 3 + 2] = (Math.random() * 2 - 1) * 2.2;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(sp, 3));
+    return g;
+  }, [light]);
+  const tex = useMemo(softDotTexture, []);
+  return (
+    <points geometry={geo}>
+      <pointsMaterial
+        map={tex}
+        color={color}
+        size={light ? 0.07 : 0.11}
+        sizeAttenuation
+        transparent
+        depthWrite={false}
+        blending={light ? THREE.NormalBlending : THREE.AdditiveBlending}
+        opacity={light ? 0.7 : 0.9}
+      />
+    </points>
+  );
+}
+
+function Crystal({
+  style,
+  light,
+  c1,
+  c2,
   animate,
 }: {
-  a: string;
-  b: string;
-  intensity: number;
+  style: CardStyle;
+  light: boolean;
+  c1: THREE.Color;
+  c2: THREE.Color;
   animate: boolean;
 }) {
-  const mat = useRef<THREE.ShaderMaterial>(null);
+  const ref = useRef<THREE.Mesh>(null);
   const uniforms = useMemo(
     () => ({
-      uTime: { value: 0 },
-      uA: { value: new THREE.Color(a) },
-      uB: { value: new THREE.Color(b) },
-      uIntensity: { value: intensity },
+      u_time: { value: 0 },
+      u_amp: { value: light ? 0.12 : 0.18 },
+      u_light: { value: light ? 1 : 0 },
+      u_c1: { value: c1 },
+      u_c2: { value: c2 },
     }),
-    [a, b, intensity],
+    [light, c1, c2],
   );
   useFrame((_, dt) => {
-    if (animate && mat.current) mat.current.uniforms.uTime.value += dt;
+    if (!animate || !ref.current) return;
+    ref.current.rotation.y += dt * 0.32;
+    ref.current.rotation.x += dt * 0.2;
+    uniforms.u_time.value += dt;
   });
   return (
-    <mesh frustumCulled={false}>
-      <planeGeometry args={[2, 2]} />
+    <mesh ref={ref}>
+      {style === "claude" ? (
+        <octahedronGeometry args={[0.82, 0]} />
+      ) : (
+        <icosahedronGeometry args={[0.8, 1]} />
+      )}
       <shaderMaterial
-        ref={mat}
+        vertexShader={CRYSTAL_VERT}
+        fragmentShader={CRYSTAL_FRAG}
         uniforms={uniforms}
-        vertexShader={AURA_VERT}
-        fragmentShader={AURA_FRAG}
         transparent
-        depthTest={false}
         depthWrite={false}
+        side={THREE.DoubleSide}
+        blending={light ? THREE.NormalBlending : THREE.AdditiveBlending}
       />
     </mesh>
   );
 }
 
-function CardAura({ style, tone }: { style: CardStyle; tone: CardTone }) {
+function Shell({
+  style,
+  light,
+  color,
+  animate,
+}: {
+  style: CardStyle;
+  light: boolean;
+  color: THREE.Color;
+  animate: boolean;
+}) {
+  const ref = useRef<THREE.LineSegments>(null);
+  const geo = useMemo(
+    () =>
+      new THREE.WireframeGeometry(
+        style === "claude"
+          ? new THREE.OctahedronGeometry(1.04, 0)
+          : new THREE.IcosahedronGeometry(1.02, 1),
+      ),
+    [style],
+  );
+  useFrame((_, dt) => {
+    if (!animate || !ref.current) return;
+    ref.current.rotation.y -= dt * 0.2;
+    ref.current.rotation.x += dt * 0.12;
+  });
+  return (
+    <lineSegments ref={ref} geometry={geo}>
+      <lineBasicMaterial
+        color={color}
+        transparent
+        opacity={light ? 0.22 : 0.55}
+        depthWrite={false}
+      />
+    </lineSegments>
+  );
+}
+
+function Particles({
+  light,
+  c1,
+  c2,
+  animate,
+}: {
+  light: boolean;
+  c1: THREE.Color;
+  c2: THREE.Color;
+  animate: boolean;
+}) {
+  const geo = useMemo(() => {
+    const n = light ? 60 : 120;
+    const pp = new Float32Array(n * 3);
+    const ps = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const r = 1.1 + Math.random() * 1.7;
+      const th = Math.random() * 6.2831;
+      const ph = Math.acos(Math.random() * 2 - 1);
+      pp[i * 3] = Math.sin(ph) * Math.cos(th) * r;
+      pp[i * 3 + 1] = Math.cos(ph) * r * 0.82;
+      pp[i * 3 + 2] = Math.sin(ph) * Math.sin(th) * r;
+      ps[i] = Math.random();
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pp, 3));
+    g.setAttribute("aSeed", new THREE.BufferAttribute(ps, 1));
+    return g;
+  }, [light]);
+  const dpr = typeof window !== "undefined" ? Math.min(2, window.devicePixelRatio || 1) : 1;
+  const uniforms = useMemo(
+    () => ({
+      u_time: { value: 0 },
+      u_light: { value: light ? 1 : 0 },
+      u_pr: { value: dpr },
+      u_c1: { value: c1 },
+      u_c2: { value: c2 },
+    }),
+    [light, dpr, c1, c2],
+  );
+  useFrame((_, dt) => {
+    if (animate) uniforms.u_time.value += dt;
+  });
+  return (
+    <points geometry={geo}>
+      <shaderMaterial
+        vertexShader={PARTICLE_VERT}
+        fragmentShader={PARTICLE_FRAG}
+        uniforms={uniforms}
+        transparent
+        depthWrite={false}
+        blending={light ? THREE.NormalBlending : THREE.AdditiveBlending}
+      />
+    </points>
+  );
+}
+
+function CardScene({
+  style,
+  tone,
+  animate,
+}: {
+  style: CardStyle;
+  tone: CardTone;
+  animate: boolean;
+}) {
   const t = THEMES[`${style}-${tone}`];
-  const dark = tone === "dark";
-  const animate =
-    typeof window !== "undefined" &&
-    !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const light = tone === "light";
+  const c1 = useMemo(() => new THREE.Color(t.glow), [t.glow]);
+  const cAccent = useMemo(() => new THREE.Color(t.accent), [t.accent]);
+  const c2 = useMemo(() => new THREE.Color(t.accent2), [t.accent2]);
+  const group = useRef<THREE.Group>(null);
+  useFrame((state) => {
+    if (!animate || !group.current) return;
+    const tt = state.clock.elapsedTime;
+    group.current.rotation.y = tt * 0.05;
+    group.current.rotation.x = Math.sin(tt * 0.06) * 0.12;
+  });
+  return (
+    <group ref={group}>
+      <Stars light={light} color={light ? c2 : c1} />
+      <Crystal style={style} light={light} c1={c1} c2={cAccent} animate={animate} />
+      <Shell style={style} light={light} color={cAccent} animate={animate} />
+      <Particles light={light} c1={c1} c2={c2} animate={animate} />
+    </group>
+  );
+}
+
+// CardAura overlays the design's animated 3D scene on the static SVG face,
+// brand-blended (screen on dark, overlay on light).
+function CardAura({ style, tone }: { style: CardStyle; tone: CardTone }) {
+  const light = tone === "light";
+  const animate = !prefersReducedMotion();
   return (
     <div
       className="pointer-events-none absolute inset-0"
-      style={{ mixBlendMode: dark ? "screen" : "overlay", opacity: dark ? 0.55 : 0.4 }}
+      style={{ mixBlendMode: light ? "overlay" : "screen", opacity: light ? 0.5 : 0.62 }}
     >
       <Canvas
-        gl={{ alpha: true, antialias: false, powerPreference: "low-power" }}
-        dpr={[1, 1.5]}
+        gl={{
+          alpha: true,
+          antialias: true,
+          premultipliedAlpha: false,
+          powerPreference: "low-power",
+        }}
+        dpr={[1, 2]}
+        camera={{ fov: 50, position: [0, 0, 4.2], near: 0.1, far: 100 }}
         frameloop={animate ? "always" : "demand"}
         style={{ width: "100%", height: "100%" }}
       >
-        <AuraMesh a={t.glow} b={t.accent2} intensity={dark ? 1 : 0.7} animate={animate} />
+        <CardScene style={style} tone={tone} animate={animate} />
       </Canvas>
     </div>
   );
@@ -493,7 +715,7 @@ function Face({ svg, aura }: { svg: string; aura?: React.ReactNode }) {
   );
 }
 
-/** The in-app card renderer: front face (with the live aurora shader) stacked
+/** The in-app card renderer: front face (with the live 3D scene) stacked
  *  above the back face, both visible at once. */
 export function TokenCard(props: TokenCardProps) {
   const rawId = useId();

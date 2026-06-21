@@ -79,6 +79,10 @@ type OpsStats struct {
 	KFactor       float64        `json:"k_factor"`       // confirmed invites / total users
 	GiftTotals    *db.GiftTotals `json:"gift_totals"`
 	TopReferrers  []TopReferrer  `json:"top_referrers"`
+	// Circuit breaker state.
+	TodayBonusUSD  float64 `json:"today_bonus_usd"`  // bonuses paid since UTC midnight
+	DailyBudgetUSD float64 `json:"daily_budget_usd"` // active campaign cap (0 = unlimited)
+	BudgetTripped  bool    `json:"budget_tripped"`   // granting paused for today
 }
 
 // OpsStats aggregates the referral system for the admin dashboard.
@@ -125,6 +129,13 @@ func (s *Service) OpsStats(ctx context.Context) (*OpsStats, error) {
 	}
 	if o.TopReferrers == nil {
 		o.TopReferrers = []TopReferrer{}
+	}
+
+	// Circuit breaker snapshot.
+	o.TodayBonusUSD = s.todayBonusSpend(ctx)
+	if camp, err := s.ActiveCampaign(ctx); err == nil {
+		o.DailyBudgetUSD = camp.DailyBudgetUSD
+		o.BudgetTripped = camp.DailyBudgetUSD > 0 && o.TodayBonusUSD >= camp.DailyBudgetUSD
 	}
 	return o, nil
 }

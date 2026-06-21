@@ -450,6 +450,16 @@ SELECT id, 10, 'RESERVE',   'openai', 5,  'reserve',   strftime('%s','now') FROM
 INSERT INTO referral_tiers (campaign_id, threshold, tier_name, card_style_unlock, bonus_usd, badge, created_at)
 SELECT id, 25, 'SIGNATURE', 'openai', 15, 'signature', strftime('%s','now') FROM referral_campaigns WHERE slug='default';
 `,
+
+	// v12 — referral bonus circuit breaker. A per-campaign daily budget cap on
+	// platform-funded bonus payouts: once a day's total referral bonus spend
+	// (invitee + inviter + milestone) reaches this, granting auto-pauses (the
+	// conversion is still recorded, but $0 is paid) until the next UTC day or
+	// the operator raises the cap. Defends platform money against a registration
+	// spike that slips past the per-signup anti-abuse. 0 = unlimited (default).
+	`
+ALTER TABLE referral_campaigns ADD COLUMN daily_budget_usd REAL NOT NULL DEFAULT 0;
+`,
 }
 
 func (db *DB) migrate() error {

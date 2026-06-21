@@ -14,6 +14,27 @@ import (
 // referral/milestone bonuses never count as revenue.
 const txKindBonus = db.TxKindAdjust
 
+// todayBonusSpend sums platform-funded referral bonuses paid since UTC midnight
+// (invitee + inviter + milestone). It is the circuit breaker's running meter.
+func (s *Service) todayBonusSpend(ctx context.Context) float64 {
+	var v float64
+	_ = s.DB.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(amount_usd),0) FROM wallet_tx
+		 WHERE kind = ? AND created_at >= strftime('%s','now','start of day')
+		   AND (ref LIKE 'ref_invitee:%' OR ref LIKE 'ref_inviter:%' OR ref LIKE 'ref_tier:%')`,
+		txKindBonus).Scan(&v)
+	return v
+}
+
+// capTripped reports whether today's referral-bonus spend has reached the daily
+// budget cap. capUSD <= 0 means unlimited (breaker disabled).
+func (s *Service) capTripped(ctx context.Context, capUSD float64) bool {
+	if capUSD <= 0 {
+		return false
+	}
+	return s.todayBonusSpend(ctx) >= capUSD
+}
+
 // GrantSignupBonus implements auth.ReferralGranter. It is called once, right
 // after a new account is created, with the ?ref= the browser captured. Two
 // outcomes:
@@ -67,11 +88,14 @@ func (s *Service) grantInvite(ctx context.Context, inviteeID int64, card *Card, 
 	// lets the invitee fall back to the normal trial credit (friendlier than a
 	// silent zero). We still record the conversion + bump the inviter's count.
 	active := camp.activeNow()
+	// Circuit breaker: once the day's platform bonus spend hits the cap, record
+	// the conversion but pay nothing — defends platform money against a spike.
+	budgetTripped := active && !fraud && s.capTripped(ctx, camp.DailyBudgetUSD)
 
 	inviteeBonus := camp.InviteeBonusUSD
 	inviterBonus := camp.InviterBonusUSD
 	inviterPaid := 1
-	if !active || fraud {
+	if !active || fraud || budgetTripped {
 		inviteeBonus, inviterBonus = 0, 0
 	} else {
 		if camp.MaxRewardedInvites > 0 && s.countConfirmedInvites(ctx, inviterID) >= camp.MaxRewardedInvites {
@@ -97,6 +121,9 @@ func (s *Service) grantInvite(ctx context.Context, inviteeID int64, card *Card, 
 	if fraud {
 		log.Warnf("referral: invite signup user=%d via code=%s flagged fraud — bonus withheld", inviteeID, card.Code)
 		return 0, "", active, true, err
+	}
+	if budgetTripped {
+		log.Warnf("referral: daily bonus budget cap reached — invite signup user=%d recorded but $0 paid (raise daily_budget_usd to resume)", inviteeID)
 	}
 
 	if inviteeBonus > 0 {
@@ -166,6 +193,12 @@ func (s *Service) checkMilestones(ctx context.Context, inviterID int64, camp *Ca
 		if t.Threshold > count {
 			continue
 		}
+		// Defer a paid tier when the daily budget is exhausted: skip entirely so
+		// it isn't recorded-as-granted-but-unpaid, and is retried once budget frees.
+		if t.BonusUSD > 0 && s.capTripped(ctx, camp.DailyBudgetUSD) {
+			log.Warnf("referral: daily bonus budget cap reached — deferring tier %s for user %d", t.TierName, inviterID)
+			continue
+		}
 		res, err := s.DB.ExecContext(ctx, `INSERT OR IGNORE INTO referral_milestone_grants
 			(user_id, threshold, tier_id, bonus_usd, granted_at)
 			VALUES (?, ?, ?, ?, strftime('%s','now'))`, inviterID, t.Threshold, t.ID, t.BonusUSD)
@@ -202,6 +235,19 @@ func (s *Service) ReleaseInviterReward(ctx context.Context, inviteeID int64) {
 		inviteeID).Scan(&inviterID, &code, &bonus)
 	if err != nil {
 		return // no pending reward (or no row) — nothing to do
+	}
+	// Honour the daily budget cap: leave the reward pending (inviter_paid=0) so a
+	// later charge retries it once the budget frees, instead of marking it paid
+	// for $0.
+	if bonus > 0 {
+		var budgetCap float64
+		if camp, cerr := s.ActiveCampaign(ctx); cerr == nil {
+			budgetCap = camp.DailyBudgetUSD
+		}
+		if s.capTripped(ctx, budgetCap) {
+			log.Warnf("referral: daily bonus budget cap reached — deferring inviter reward for invitee=%d", inviteeID)
+			return
+		}
 	}
 	res, uerr := s.DB.ExecContext(ctx, `UPDATE referral_conversions SET inviter_paid = 1 WHERE invitee_user_id = ? AND inviter_paid = 0`, inviteeID)
 	if uerr != nil {

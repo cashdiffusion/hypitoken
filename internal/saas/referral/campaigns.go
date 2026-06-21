@@ -25,6 +25,7 @@ type Campaign struct {
 	GiftExpiryDays     int       `json:"gift_expiry_days"`
 	MaxGiftUSD         float64   `json:"max_gift_usd"`
 	MaxRewardedInvites int       `json:"max_rewarded_invites"` // 0 = unlimited
+	DailyBudgetUSD     float64   `json:"daily_budget_usd"`     // circuit breaker; 0 = unlimited
 	StartsAt           int64     `json:"starts_at"`
 	EndsAt             int64     `json:"ends_at"`
 	Headline           string    `json:"headline"`
@@ -47,13 +48,13 @@ type Tier struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
-const campaignCols = `id, slug, name, kind, status, invitee_bonus_usd, inviter_bonus_usd, inviter_reward_on, gift_expiry_days, max_gift_usd, max_rewarded_invites, starts_at, ends_at, headline, subcopy, variant_b, created_at, updated_at`
+const campaignCols = `id, slug, name, kind, status, invitee_bonus_usd, inviter_bonus_usd, inviter_reward_on, gift_expiry_days, max_gift_usd, max_rewarded_invites, daily_budget_usd, starts_at, ends_at, headline, subcopy, variant_b, created_at, updated_at`
 
 func scanCampaign(row interface{ Scan(...any) error }) (*Campaign, error) {
 	var c Campaign
 	var created, updated int64
 	if err := row.Scan(&c.ID, &c.Slug, &c.Name, &c.Kind, &c.Status, &c.InviteeBonusUSD, &c.InviterBonusUSD,
-		&c.InviterRewardOn, &c.GiftExpiryDays, &c.MaxGiftUSD, &c.MaxRewardedInvites, &c.StartsAt, &c.EndsAt,
+		&c.InviterRewardOn, &c.GiftExpiryDays, &c.MaxGiftUSD, &c.MaxRewardedInvites, &c.DailyBudgetUSD, &c.StartsAt, &c.EndsAt,
 		&c.Headline, &c.Subcopy, &c.VariantB, &created, &updated); err != nil {
 		return nil, err
 	}
@@ -148,6 +149,7 @@ type CampaignParams struct {
 	GiftExpiryDays     int
 	MaxGiftUSD         float64
 	MaxRewardedInvites int
+	DailyBudgetUSD     float64
 	StartsAt           int64
 	EndsAt             int64
 	Headline           string
@@ -190,10 +192,10 @@ func (s *Service) CreateCampaign(ctx context.Context, p CampaignParams) (*Campai
 		p.MaxGiftUSD = 100
 	}
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO referral_campaigns
-		(slug, name, kind, status, invitee_bonus_usd, inviter_bonus_usd, inviter_reward_on, gift_expiry_days, max_gift_usd, max_rewarded_invites, starts_at, ends_at, headline, subcopy, variant_b, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(slug, name, kind, status, invitee_bonus_usd, inviter_bonus_usd, inviter_reward_on, gift_expiry_days, max_gift_usd, max_rewarded_invites, daily_budget_usd, starts_at, ends_at, headline, subcopy, variant_b, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.Slug, p.Name, normalizeKind(p.Kind), normalizeStatus(p.Status), p.InviteeBonusUSD, p.InviterBonusUSD,
-		normalizeRewardOn(p.InviterRewardOn), p.GiftExpiryDays, p.MaxGiftUSD, p.MaxRewardedInvites,
+		normalizeRewardOn(p.InviterRewardOn), p.GiftExpiryDays, p.MaxGiftUSD, p.MaxRewardedInvites, p.DailyBudgetUSD,
 		p.StartsAt, p.EndsAt, p.Headline, p.Subcopy, p.VariantB, now, now)
 	if err != nil {
 		return nil, err
@@ -216,10 +218,10 @@ func (s *Service) UpdateCampaign(ctx context.Context, id int64, p CampaignParams
 	}
 	if _, err := s.DB.ExecContext(ctx, `UPDATE referral_campaigns SET
 		name=?, kind=?, status=?, invitee_bonus_usd=?, inviter_bonus_usd=?, inviter_reward_on=?,
-		gift_expiry_days=?, max_gift_usd=?, max_rewarded_invites=?, starts_at=?, ends_at=?,
+		gift_expiry_days=?, max_gift_usd=?, max_rewarded_invites=?, daily_budget_usd=?, starts_at=?, ends_at=?,
 		headline=?, subcopy=?, variant_b=?, updated_at=? WHERE id=?`,
 		p.Name, normalizeKind(p.Kind), normalizeStatus(p.Status), p.InviteeBonusUSD, p.InviterBonusUSD,
-		normalizeRewardOn(p.InviterRewardOn), p.GiftExpiryDays, p.MaxGiftUSD, p.MaxRewardedInvites,
+		normalizeRewardOn(p.InviterRewardOn), p.GiftExpiryDays, p.MaxGiftUSD, p.MaxRewardedInvites, p.DailyBudgetUSD,
 		p.StartsAt, p.EndsAt, p.Headline, p.Subcopy, p.VariantB, now, id); err != nil {
 		return nil, err
 	}

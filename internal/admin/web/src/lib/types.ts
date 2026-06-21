@@ -252,6 +252,7 @@ export interface ReferralCampaign {
   inviter_bonus_usd: number;
   gift_expiry_days: number;
   max_gift_usd: number;
+  daily_budget_usd?: number;
   headline: string;
   subcopy: string;
   variant?: string;
@@ -334,4 +335,7 @@ export interface ReferralOpsStats {
   k_factor: number;
   gift_totals: ReferralGiftTotals;
   top_referrers: ReferralTopReferrer[];
+  today_bonus_usd: number;
+  daily_budget_usd: number;
+  budget_tripped: boolean;
 }

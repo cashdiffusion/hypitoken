@@ -55,6 +55,24 @@ export function ReferralTab() {
 
   return (
     <div className="space-y-8">
+      {stats && stats.daily_budget_usd > 0 && (
+        <div
+          className={
+            stats.budget_tripped
+              ? "flex items-center justify-between rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-500"
+              : "flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm"
+          }
+        >
+          <span>
+            {stats.budget_tripped
+              ? t("adminReferral.breakerTripped")
+              : t("adminReferral.breakerOk")}
+          </span>
+          <span className="font-mono text-xs">
+            {fmtUSD(stats.today_bonus_usd)} / {fmtUSD(stats.daily_budget_usd)}
+          </span>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
           icon={Users}
@@ -149,6 +167,7 @@ function CampaignEditor({
   const [inviter, setInviter] = useState(String(campaign.inviter_bonus_usd));
   const [expiry, setExpiry] = useState(String(campaign.gift_expiry_days));
   const [maxGift, setMaxGift] = useState(String(campaign.max_gift_usd));
+  const [dailyBudget, setDailyBudget] = useState(String(campaign.daily_budget_usd ?? 0));
   const [headline, setHeadline] = useState(campaign.headline);
   const [subcopy, setSubcopy] = useState(campaign.subcopy);
   const [saving, setSaving] = useState(false);
@@ -166,6 +185,7 @@ function CampaignEditor({
         inviter_bonus_usd: Number(inviter),
         gift_expiry_days: Number(expiry),
         max_gift_usd: Number(maxGift),
+        daily_budget_usd: Number(dailyBudget),
         headline,
         subcopy,
       });
@@ -206,11 +226,16 @@ function CampaignEditor({
           {curStatus === "active" ? t("adminReferral.pause") : t("adminReferral.activate")}
         </Button>
       </div>
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-5">
         <Field label={t("adminReferral.inviteeBonus")} value={invitee} onChange={setInvitee} />
         <Field label={t("adminReferral.inviterBonus")} value={inviter} onChange={setInviter} />
         <Field label={t("adminReferral.giftExpiry")} value={expiry} onChange={setExpiry} />
         <Field label={t("adminReferral.maxGift")} value={maxGift} onChange={setMaxGift} />
+        <Field
+          label={t("adminReferral.dailyBudget")}
+          value={dailyBudget}
+          onChange={setDailyBudget}
+        />
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
