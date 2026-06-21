@@ -40,6 +40,16 @@ const STYLE_OPTS: { style: CardStyle; tone: CardTone; label: string }[] = [
   { style: "openai", tone: "light", label: "Platinum Codex" },
 ];
 
+// absUrl resolves a possibly-relative invite link (the backend emits "/?ref=…"
+// when saas.site_url is unset) against the current origin, so a shared link
+// always carries a host.
+function absUrl(u: string): string {
+  if (!u) return u;
+  if (/^https?:\/\//i.test(u)) return u;
+  if (typeof window !== "undefined") return window.location.origin + u;
+  return u;
+}
+
 function download(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -166,6 +176,7 @@ function InviteTab({
   tierName: string;
 }) {
   const { t } = useTranslation();
+  const inviteUrl = absUrl(me.invite_url);
   const [style, setStyle] = useState<CardStyle>(me.card.card_style);
   const [tone, setTone] = useState<CardTone>(me.card.card_tone);
   const [tagline, setTagline] = useState(me.card.tagline || t("invite.defaultTagline"));
@@ -183,10 +194,10 @@ function InviteTab({
       tagline: tagline.slice(0, 60),
       message: message.slice(0, 80),
       code: me.invite_code.toUpperCase(),
-      redeemUrl: me.invite_url,
+      redeemUrl: inviteUrl,
       serial: `REF · ${me.invite_code.toUpperCase()}`,
     }),
-    [style, tone, tagline, message, tierName, me, t],
+    [style, tone, tagline, message, tierName, me, t, inviteUrl],
   );
 
   const saveCard = async () => {
@@ -208,7 +219,7 @@ function InviteTab({
   };
 
   const copyLink = async () => {
-    await navigator.clipboard.writeText(me.invite_url);
+    await navigator.clipboard.writeText(inviteUrl);
     setCopied(true);
     toast.success(t("invite.copied"));
     setTimeout(() => setCopied(false), 1500);
@@ -217,7 +228,7 @@ function InviteTab({
   const shareX = () => {
     const text = encodeURIComponent(t("invite.shareText"));
     window.open(
-      `https://twitter.com/intent/tweet?text=${text}&url=${encodeURIComponent(me.invite_url)}`,
+      `https://twitter.com/intent/tweet?text=${text}&url=${encodeURIComponent(inviteUrl)}`,
       "_blank",
       "noopener",
     );
@@ -226,7 +237,7 @@ function InviteTab({
   const nativeShare = async () => {
     if (navigator.share) {
       await navigator
-        .share({ title: "HypiToken", text: t("invite.shareText"), url: me.invite_url })
+        .share({ title: "HypiToken", text: t("invite.shareText"), url: inviteUrl })
         .catch(() => {});
     } else {
       copyLink();
@@ -289,7 +300,7 @@ function InviteTab({
           <div className="space-y-2">
             <Label>{t("invite.linkLabel")}</Label>
             <div className="flex gap-2">
-              <Input readOnly value={me.invite_url} className="font-mono text-xs" />
+              <Input readOnly value={inviteUrl} className="font-mono text-xs" />
               <Button variant="outline" size="icon" onClick={copyLink}>
                 {copied ? <Check className="size-4 text-primary" /> : <Copy className="size-4" />}
               </Button>
@@ -375,7 +386,7 @@ function GiftTab({ me, onSent }: { me: ReferralMe; onSent: () => void }) {
       tagline: t("gift.cardTagline"),
       message: message.slice(0, 80),
       code: "HYPI · GIFT",
-      redeemUrl: me.invite_url,
+      redeemUrl: absUrl(me.invite_url),
       serial: email ? `→ ${email}` : "",
     }),
     [style, tone, amount, message, email, me.invite_url, t],
