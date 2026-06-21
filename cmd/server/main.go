@@ -30,6 +30,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/health"
 	"github.com/wjsoj/CPA-Claude/internal/saas/mail"
 	saasprofile "github.com/wjsoj/CPA-Claude/internal/saas/profile"
+	"github.com/wjsoj/CPA-Claude/internal/saas/referral"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	"github.com/wjsoj/CPA-Claude/internal/server"
 	"github.com/wjsoj/CPA-Claude/internal/shop"
@@ -258,7 +259,8 @@ func main() {
 			SubnetThreshold: cfg.SaaS.SignupFraud.IPSubnetThreshold,
 			Window:          time.Duration(cfg.SaaS.SignupFraud.WindowHours) * time.Hour,
 		})
-		authH.Referral = growthSvc
+		// authH.Referral is set below to the referral service, which composes
+		// growthSvc (personal invite codes first, then admin marketing channels).
 
 		// Analytics (site-wide visitor behaviour). Self-contained module: owns
 		// its own two tables (web_sessions, web_events from migration v7) and
@@ -272,11 +274,23 @@ func main() {
 		arenaSvc := arena.New(saasDB, issuer)
 		profileH := saasprofile.New(saasDB)
 
+		// Referral (viral growth: invite cards + peer gifting + campaigns).
+		// Self-contained module owning migration-v11 tables; credits through the
+		// audited wallet ledger and composes growthSvc for signup anti-abuse +
+		// admin-channel fallback. It becomes the auth handler's referral granter
+		// (personal invite codes first, growth channels second) and gift
+		// auto-claimer; the adapter calls it to release deferred inviter rewards.
+		referralSvc := referral.New(saasDB, mailer, growthSvc, cfg.SaaS.SiteName, cfg.SaaS.SiteURL)
+		referralSvc.StartSweeper(refresherCtx)
+		authH.Referral = referralSvc
+		authH.GiftClaimer = referralSvc
+
 		// Catalog used for pricing computation (same instance as the proxy's
 		// internal billing — the SaaS layer only adds the multiplier on top).
 		catalog := pricing.NewCatalog(cfg.Pricing)
 		adapter := saasadapter.NewAdapter(saasDB, catalog, rate)
 		adapter.Arena = arenaSvc
+		adapter.Referral = referralSvc
 		s.SetSaaS(adapter)
 
 		// Mount /api/v2/* on every gin engine the server hosts. Both Claude
@@ -304,7 +318,7 @@ func main() {
 			return true, claims.Role == "admin"
 		}
 		for _, h := range s.GinEngines() {
-			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH)
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH, referralSvc)
 			if spaFS != nil {
 				saasadapter.MountSPA(h, spaFS)
 			}

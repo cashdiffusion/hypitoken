@@ -31,6 +31,15 @@ type ReferralGranter interface {
 	GrantSignupBonus(ctx context.Context, userID int64, ref, vid, fp, ip string) (bonusUSD float64, channel string, matched, fraud bool, err error)
 }
 
+// GiftClaimer is the optional referral-module seam for delivering escrowed
+// gift cards: when a user registers or verifies an email that already has a
+// pending gift addressed to it, the gift is claimed and credited. nil disables
+// gift auto-claim; implemented by *saas/referral.Service. Best-effort — its
+// result is logged, never blocks registration.
+type GiftClaimer interface {
+	AutoClaimForEmail(ctx context.Context, email string, userID int64) (claimed int, totalUSD float64)
+}
+
 type Handler struct {
 	DB           *db.DB
 	Issuer       *Issuer
@@ -42,6 +51,10 @@ type Handler struct {
 	// Referral is optional; when set, signups carrying a ?ref= channel get the
 	// channel's bonus. Left nil disables attribution entirely.
 	Referral ReferralGranter
+
+	// GiftClaimer is optional; when set, a freshly-registered or newly-verified
+	// email auto-claims any gift cards sent to it before signup.
+	GiftClaimer GiftClaimer
 
 	// TrialBonusUSD is the welcome credit granted to every new user who did NOT
 	// arrive through a marketing channel. Channel signups are credited by the
@@ -178,8 +191,17 @@ func (h *Handler) register(c *gin.Context) {
 			log.Infof("register: user %d granted $%.2f trial signup bonus", u.ID, h.TrialBonusUSD)
 		}
 	}
+	// Auto-claim any gift cards addressed to this email before signup. Safe
+	// against pre-claim: registration already proved inbox ownership above —
+	// ConsumeEmailCode(PurposeVerify) validated the emailed OTP before the
+	// account was created — and we only claim gifts whose recipient_email
+	// equals this verified address, never an arbitrary one.
+	giftClaimed := 0
+	if h.GiftClaimer != nil {
+		giftClaimed, _ = h.GiftClaimer.AutoClaimForEmail(c.Request.Context(), req.Email, u.ID)
+	}
 	// Re-read so the response reflects the credited balance.
-	if bonusUSD > 0 {
+	if bonusUSD > 0 || giftClaimed > 0 {
 		if fresh, ferr := h.DB.GetUser(c.Request.Context(), u.ID); ferr == nil {
 			u = fresh
 		}
@@ -310,6 +332,10 @@ func (h *Handler) verifyEmail(c *gin.Context) {
 	}
 	if u, err := h.DB.GetUserByEmail(c.Request.Context(), req.Email); err == nil {
 		_ = h.DB.MarkEmailVerified(c.Request.Context(), u.ID)
+		// A verified email may have gifts waiting from before signup.
+		if h.GiftClaimer != nil {
+			h.GiftClaimer.AutoClaimForEmail(c.Request.Context(), req.Email, u.ID)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"verified": true})
 }

@@ -35,6 +35,7 @@
         "input-otp": "^1.4.2",
         "lucide-react": "^0.469.0",
         "motion": "^12.40.0",
+        "qrcode-generator": "^2.0.4",
         "qrcode.react": "^4.2.0",
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
@@ -817,6 +818,8 @@
     "prop-types": ["prop-types@15.8.1", "https://registry.npmmirror.com/prop-types/-/prop-types-15.8.1.tgz", { "dependencies": { "loose-envify": "^1.4.0", "object-assign": "^4.1.1", "react-is": "^16.13.1" } }, "sha512-oj87CgZICdulUohogVAR7AjlC0327U4el4L6eAvOqCeudMDVU0NThNaV+b9Df4dXgSP1gXMTnPdhfe/2qDH5cg=="],
 
     "property-information": ["property-information@7.1.0", "https://registry.npmmirror.com/property-information/-/property-information-7.1.0.tgz", {}, "sha512-TwEZ+X+yCJmYfL7TPUOcvBZ4QfoT5YenQiJuX//0th53DE6w0xxLEtfK3iyryQFddXuvkIk51EEgrJQ0WJkOmQ=="],
+
+    "qrcode-generator": ["qrcode-generator@2.0.4", "https://registry.npmmirror.com/qrcode-generator/-/qrcode-generator-2.0.4.tgz", {}, "sha512-mZSiP6RnbHl4xL2Ap5HfkjLnmxfKcPWpWe/c+5XxCuetEenqmNFf1FH/ftXPCtFG5/TDobjsjz6sSNL0Sr8Z9g=="],
 
     "qrcode.react": ["qrcode.react@4.2.0", "https://registry.npmmirror.com/qrcode.react/-/qrcode.react-4.2.0.tgz", { "peerDependencies": { "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-QpgqWi8rD9DsS9EP3z7BT+5lY5SFhsqGjpgW5DY/i3mK4M9DTBNz3ErMi8BWYEfI3L0d8GIbGmcdFAS1uIRGjA=="],
 

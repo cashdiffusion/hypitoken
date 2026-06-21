@@ -88,6 +88,7 @@ type leaderRow struct {
 	IsYou    bool   `json:"is_you"`
 	Tokens   int64  `json:"tokens"`
 	Requests int64  `json:"requests"`
+	Invites  int64  `json:"invites"`
 	LastSeen int64  `json:"last_seen"` // unix seconds, 0 if never
 }
 
@@ -98,8 +99,11 @@ func (s *Service) leaderboard(c *gin.Context) {
 		return
 	}
 	metric := db.MetricTokens
-	if c.Query("metric") == "requests" {
+	switch c.Query("metric") {
+	case "requests":
 		metric = db.MetricRequests
+	case "invites":
+		metric = db.MetricInvites
 	}
 	rows, err := s.DB.Leaderboard(c.Request.Context(), metric, 100)
 	if err != nil {
@@ -117,6 +121,7 @@ func (s *Service) leaderboard(c *gin.Context) {
 			IsYou:    r.UserID == u.ID,
 			Tokens:   r.LifetimeTokens,
 			Requests: r.LifetimeRequests,
+			Invites:  r.LifetimeInvites,
 		}
 		if !r.LastActiveAt.IsZero() {
 			lr.LastSeen = r.LastActiveAt.Unix()
@@ -140,6 +145,7 @@ func (s *Service) leaderboard(c *gin.Context) {
 				IsYou:    true,
 				Tokens:   p.LifetimeTokens,
 				Requests: p.LifetimeRequests,
+				Invites:  p.LifetimeInvites,
 			}
 			if !p.LastActiveAt.IsZero() {
 				yr.LastSeen = p.LastActiveAt.Unix()

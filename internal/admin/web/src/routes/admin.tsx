@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Gauge,
+  Gift,
   KeyRound,
   LayoutDashboard,
   Megaphone,
@@ -26,6 +27,7 @@ import { toast } from "sonner";
 import { AdminDashboard } from "@/components/admin/admin-dashboard";
 import { AttributionTab } from "@/components/admin/attribution-tab";
 import { OverviewPanel } from "@/components/admin/overview-panel";
+import { ReferralTab } from "@/components/admin/referral-tab";
 import { RequestsExplorer } from "@/components/admin/requests-explorer";
 import { Sparkline as MiniSpark } from "@/components/admin/sparkline";
 import { UpstreamUsageDialog } from "@/components/admin/upstream-usage-dialog";
@@ -65,6 +67,7 @@ const TABS = [
   { to: "requests", labelKey: "admin.tabs.requests", icon: ScrollText },
   { to: "payments", labelKey: "admin.tabs.payments", icon: ShoppingCart },
   { to: "growth", labelKey: "admin.tabs.growth", icon: Megaphone },
+  { to: "referral", labelKey: "admin.tabs.referral", icon: Gift },
 ];
 
 export default function AdminPage() {
@@ -103,6 +106,7 @@ export default function AdminPage() {
         <Route path="requests" element={<RequestsExplorer refreshTick={0} />} />
         <Route path="payments" element={<PaymentsTab />} />
         <Route path="growth" element={<AttributionTab />} />
+        <Route path="referral" element={<ReferralTab />} />
       </Routes>
     </div>
   );

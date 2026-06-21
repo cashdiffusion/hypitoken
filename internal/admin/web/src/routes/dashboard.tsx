@@ -1,4 +1,4 @@
-import { Activity, ArrowUpRight, Gauge, KeyRound, Pencil, Wallet } from "lucide-react";
+import { Activity, ArrowUpRight, Gauge, Gift, KeyRound, Pencil, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
@@ -107,6 +107,18 @@ export default function DashboardPage() {
       )}
 
       <NicknameDialog open={nickOpen} onOpenChange={setNickOpen} />
+
+      <Reveal>
+        <Link
+          to="/app/invite"
+          viewTransition
+          className="group flex items-center gap-3 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm transition-colors hover:bg-primary/10"
+        >
+          <Gift className="h-5 w-5 shrink-0 text-primary" />
+          <span className="flex-1 text-foreground">{t("dashboard.inviteCta")}</span>
+          <ArrowUpRight className="h-4 w-4 shrink-0 text-primary transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+        </Link>
+      </Reveal>
 
       <RevealStagger className="grid gap-4 md:grid-cols-3">
         <RevealItem className="flex">
