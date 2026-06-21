@@ -119,10 +119,11 @@ export function AppShell() {
   );
 }
 
-// FloatingDiscord — a bottom-right FAB linking to the community server. Lives in
-// AppShell so it persists across every signed-in route. z-30 keeps it under the
-// header pill (z-40) and dialog overlays (z-50); toasts render top-right so
-// there's no collision. The label pill expands on hover/focus.
+// FloatingDiscord — an upper-right FAB linking to the community server. Lives in
+// AppShell so it persists across every signed-in route. Sits just below the
+// sticky header pill (top-0, z-40) so it never overlaps the nav controls; z-30
+// keeps it under the header and dialog overlays (z-50). The label pill expands
+// on hover/focus.
 function FloatingDiscord() {
   const { t } = useTranslation();
   const reduce = useReducedMotion();
@@ -133,9 +134,9 @@ function FloatingDiscord() {
       rel="noopener noreferrer"
       aria-label={t("common.joinDiscord")}
       title={t("common.joinDiscord")}
-      className="group fixed bottom-5 right-5 z-30 flex items-center gap-0 rounded-full text-white shadow-lg ring-1 ring-white/10 md:bottom-6 md:right-6"
+      className="group fixed top-20 right-5 z-30 flex items-center gap-0 rounded-full text-white shadow-lg ring-1 ring-white/10 md:top-24 md:right-6"
       style={{ backgroundColor: DISCORD_BLURPLE, boxShadow: `0 10px 30px -8px ${DISCORD_BLURPLE}` }}
-      initial={reduce ? false : { opacity: 0, y: 16, scale: 0.9 }}
+      initial={reduce ? false : { opacity: 0, y: -16, scale: 0.9 }}
       animate={reduce ? undefined : { opacity: 1, y: 0, scale: 1 }}
       transition={reduce ? undefined : { delay: 0.4, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       whileHover={reduce ? undefined : { scale: 1.05 }}

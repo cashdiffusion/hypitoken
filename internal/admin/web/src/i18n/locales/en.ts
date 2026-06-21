@@ -374,7 +374,7 @@ export default {
     copied: "Link copied",
     shareText: "I'm using HypiToken — one card for every model. Sign up for free credit 👇",
     fineprint:
-      "When someone signs up through your link, they get {{invitee}} and you get {{inviter}}. Anti-abuse: repeat signups from the same device/subnet earn nothing.",
+      "When someone signs up through your link, they get {{invitee}} and you get {{inviter}}.",
   },
   gift: {
     cardCaption: "Gift card",

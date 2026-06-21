@@ -356,7 +356,7 @@ export default {
     copied: "链接已复制",
     shareText: "我在用 HypiToken，一张卡用上所有模型。注册领体验金 👇",
     fineprint:
-      "对方通过你的链接注册成功后，TA 获得 {{invitee}} 体验金，你也获得 {{inviter}} 奖励。防刷规则下同设备/同网段重复注册不发奖。",
+      "对方通过你的链接注册成功后，TA 获得 {{invitee}} 体验金，你也获得 {{inviter}} 奖励。",
   },
   gift: {
     cardCaption: "礼品卡",
