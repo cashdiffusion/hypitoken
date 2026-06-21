@@ -75,9 +75,13 @@ func (s *Service) newInviteCode(ctx context.Context) (string, error) {
 }
 
 // newRedeemCode mints a unique gift redeem code (stored compact, shown grouped).
+// Unlike the invite code — a public, shareable referral link — a redeem code is
+// a BEARER SECRET: whoever holds it can claim the gift's wallet credit. So it
+// carries 16 chars from the 32-symbol alphabet ≈ 80 bits of entropy, making
+// brute-force enumeration of /referral/gifts/claim infeasible.
 func (s *Service) newRedeemCode(ctx context.Context) (string, error) {
 	for range 6 {
-		body, err := randString(redeemAlphabet, 8)
+		body, err := randString(redeemAlphabet, 16)
 		if err != nil {
 			return "", err
 		}
@@ -85,7 +89,7 @@ func (s *Service) newRedeemCode(ctx context.Context) (string, error) {
 			return code, nil
 		}
 	}
-	body, err := randString(redeemAlphabet, 12)
+	body, err := randString(redeemAlphabet, 24)
 	if err != nil {
 		return "", err
 	}
