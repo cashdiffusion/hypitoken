@@ -24,7 +24,7 @@ func newClaudeStreamCtx() (*gin.Context, *httptest.ResponseRecorder) {
 // connection after the 200 but before any SSE event arrives.
 type failReader struct{ err error }
 
-func (f *failReader) Read(p []byte) (int, error) { return 0, f.err }
+func (f *failReader) Read(_ []byte) (int, error) { return 0, f.err }
 
 // A stream that breaks before emitting any event must NOT commit the response
 // headers, so forwardWithFailover can still transparently retry on another

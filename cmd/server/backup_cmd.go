@@ -52,33 +52,39 @@ func runBackupCmd(args []string) {
 		return
 	}
 
-	opt, err := backupOptions(cfg)
-	if err != nil {
+	if err := runBackup(cfg, *configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "backup: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// runBackup snapshots → archives → uploads. It returns errors instead of
+// calling os.Exit so the deferred tmp-dir cleanup always runs (gocritic
+// exitAfterDefer); runBackupCmd maps a non-nil error to a non-zero exit.
+func runBackup(cfg *config.Config, configPath string) error {
+	opt, err := backupOptions(cfg)
+	if err != nil {
+		return err
 	}
 	// System temp (not the config dir — that may be root-owned while the
 	// backup runs as a less-privileged service user). PrivateTmp on the unit
 	// keeps it isolated.
 	tmpDir, err := os.MkdirTemp("", "hypitoken-backup-")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "backup: tmp dir: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("tmp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	entries, err := buildManifest(context.Background(), cfg, *configPath, tmpDir)
+	entries, err := buildManifest(context.Background(), cfg, configPath, tmpDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "backup: manifest: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("manifest: %w", err)
 	}
-
 	key, err := backup.RunBackup(context.Background(), opt, entries)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "backup: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 	log.Infof("backup: uploaded %d files → s3://%s/%s", len(entries), opt.S3.Bucket, key)
+	return nil
 }
 
 // runRestoreCmd implements `<binary> restore` for disaster recovery. The
