@@ -347,7 +347,12 @@ func corsMiddleware() gin.HandlerFunc {
 
 // clientAuth matches the incoming Authorization: Bearer or x-api-key against
 // the SaaS user-token DB first (when enabled), then the legacy clienttoken
-// store. If both are empty the proxy runs in open mode.
+// store. It FAILS CLOSED: a request that matches neither is always rejected.
+// There is deliberately no "open mode" — the legacy "empty token store ⇒ open
+// proxy" convenience was removed because, once SaaS moved client tokens into
+// its own DB, the empty legacy store turned the proxy into an unbilled open
+// relay (any bearer token served for free against the operator's upstream
+// credentials).
 func (s *Server) clientAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tok := extractClientToken(c.Request)
@@ -365,32 +370,34 @@ func (s *Server) clientAuth() gin.HandlerFunc {
 				return
 			}
 		}
-		if s.tokens.Empty() {
+		// Legacy clienttoken store (cc-core). When populated, the token must be
+		// a configured operator token.
+		if !s.tokens.Empty() {
 			if tok == "" {
-				tok = c.ClientIP()
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
+				return
+			}
+			entry, ok := s.tokens.Lookup(tok)
+			if !ok {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+				return
 			}
 			c.Set("client_token", tok)
-			c.Set("client_name", "")
+			c.Set("client_name", entry.Name)
 			c.Next()
 			return
 		}
+		// Fail closed: matched neither a SaaS token nor a configured legacy token.
 		if tok == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
 			return
 		}
-		entry, ok := s.tokens.Lookup(tok)
-		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-			return
-		}
-		c.Set("client_token", tok)
-		c.Set("client_name", entry.Name)
-		c.Next()
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 	}
 }
 
 // saasInfoFrom returns the SaaS token info attached by clientAuth, or
-// (zero, false) if this request is on a legacy / open token.
+// (zero, false) if this request is on a legacy (non-SaaS) token.
 func saasInfoFrom(c *gin.Context) (SaaSTokenInfo, bool) {
 	v, ok := c.Get("saas_info")
 	if !ok {
