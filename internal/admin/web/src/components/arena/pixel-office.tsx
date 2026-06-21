@@ -41,7 +41,13 @@ const WALK_FRAME_SEC = 0.16;
 const TYPE_FRAME_SEC = 0.28;
 const WANDER_PAUSE = [1.4, 6.0];
 const WANDER_MOVES = [2, 5];
+// TYPE_AFTER_PULSE — how long a pulse keeps the working bubble + typing
+// animation on (only shown while responses are actively arriving).
 const TYPE_AFTER_PULSE = 6.0;
+// SEAT_AFTER_PULSE — how long the agent stays seated at its desk after the last
+// pulse before it gets up to wander. Between pulses (within this window) it just
+// sits (no bubble); it only leaves the desk once a full minute passes idle.
+const SEAT_AFTER_PULSE = 60.0;
 const MAX_AGENTS = 40;
 
 const UNITS_PER_ROW = 5; // desks per row
@@ -449,10 +455,13 @@ export const PixelOffice = forwardRef<PixelOfficeHandle, { players: OfficePlayer
     const roomW = layout.cols * TILE;
     const roomH = layout.rows * TILE;
 
+    // pulses maps an actor to the timestamp of its most recent request. Two
+    // windows are derived from it: TYPE_AFTER_PULSE (bubble + typing) and
+    // SEAT_AFTER_PULSE (stay seated at the desk).
     const pulses = useRef<Map<string, number>>(new Map());
     useImperativeHandle(ref, () => ({
       pulse: (actor: string) => {
-        pulses.current.set(actor, performance.now() + TYPE_AFTER_PULSE * 1000);
+        pulses.current.set(actor, performance.now());
       },
     }));
 
@@ -526,13 +535,20 @@ export const PixelOffice = forwardRef<PixelOfficeHandle, { players: OfficePlayer
 
       const step = (a: Agent, dt: number, now: number) => {
         a.frameT += dt;
-        const active = (pulses.current.get(a.actor) ?? 0) > now;
+        const since = now - (pulses.current.get(a.actor) ?? -1e12);
+        const typing = since < TYPE_AFTER_PULSE * 1000; // bubble + typing frames
+        const seated = since < SEAT_AFTER_PULSE * 1000; // stay at the desk
         if (a.state === "type") {
-          if (a.frameT >= TYPE_FRAME_SEC) {
-            a.frameT -= TYPE_FRAME_SEC;
-            a.frame = (a.frame + 1) % 2;
+          if (typing) {
+            if (a.frameT >= TYPE_FRAME_SEC) {
+              a.frameT -= TYPE_FRAME_SEC;
+              a.frame = (a.frame + 1) % 2;
+            }
+          } else {
+            a.frame = 0; // seated but no active response — hold a still sitting pose
           }
-          if (!active) {
+          if (!seated) {
+            // a full minute idle at the desk — get up and wander
             a.state = "idle";
             a.frame = 0;
             a.wanderT = randRange(WANDER_PAUSE);
@@ -543,7 +559,7 @@ export const PixelOffice = forwardRef<PixelOfficeHandle, { players: OfficePlayer
         }
         if (a.state === "idle") {
           a.frame = 0;
-          if (active && a.seat) {
+          if (seated && a.seat) {
             a.path = bfsPath(layout, { col: a.col, row: a.row }, a.seat);
             a.state = a.path.length ? "walk" : "type";
             return;
@@ -573,7 +589,7 @@ export const PixelOffice = forwardRef<PixelOfficeHandle, { players: OfficePlayer
           a.frameT -= WALK_FRAME_SEC;
           a.frame = (a.frame + 1) % 4;
         }
-        if (active && a.seat) {
+        if (seated && a.seat) {
           const lastTile = a.path[a.path.length - 1];
           if (!lastTile || lastTile.col !== a.seat.col || lastTile.row !== a.seat.row) {
             const np = bfsPath(layout, { col: a.col, row: a.row }, a.seat);
@@ -682,9 +698,12 @@ export const PixelOffice = forwardRef<PixelOfficeHandle, { players: OfficePlayer
             drawChar(ctx, chars[it.a.sprite], it.a, reduce);
           }
         }
-        // working bubbles above active agents
+        // working bubbles — only while a response is actively arriving (a pulse
+        // within TYPE_AFTER_PULSE). A seated-but-idle agent shows no bubble.
         for (const a of agents) {
-          if ((pulses.current.get(a.actor) ?? 0) > now) drawBubble(ctx, a, now, reduce);
+          if (now - (pulses.current.get(a.actor) ?? -1e12) < TYPE_AFTER_PULSE * 1000) {
+            drawBubble(ctx, a, now, reduce);
+          }
         }
         // bobbing "you" pin above the viewer's own character (always on top)
         for (const a of agents) if (a.isYou) drawYouPin(ctx, a, now, reduce);

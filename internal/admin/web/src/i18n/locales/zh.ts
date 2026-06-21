@@ -335,7 +335,7 @@ export default {
     eyebrow: "邀请有礼",
     title: "邀请好友，一起省钱",
     subtitle: "生成你的专属 token 卡，分享给朋友 —— 对方注册成功，你们各得体验金。",
-    defaultTagline: "和我一起，用上每一个模型",
+    defaultTagline: "别让灵感因 usage limit 而枯竭",
     cardCaption: "注册即得",
     stats: {
       invites: "成功邀请",

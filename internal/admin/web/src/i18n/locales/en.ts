@@ -353,7 +353,7 @@ export default {
     title: "Invite friends, save together",
     subtitle:
       "Mint your own token card and share it — when a friend signs up, you both get free credit.",
-    defaultTagline: "Join me — one card, every model",
+    defaultTagline: "Don't let the usage limit dry up your inspiration",
     cardCaption: "Sign up to claim",
     stats: {
       invites: "Invites",
