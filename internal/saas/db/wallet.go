@@ -39,6 +39,24 @@ func (db *DB) AddBalance(ctx context.Context, userID int64, kind string, deltaUS
 		return 0, err
 	}
 	defer tx.Rollback()
+	bal, err := AddBalanceTx(ctx, tx, userID, kind, deltaUSD, ref, note, allowNegative)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return bal, nil
+}
+
+// AddBalanceTx is the transaction-scoped core of AddBalance: it reads the
+// balance, applies the signed delta, and writes both the users row and the
+// wallet_tx ledger entry using the caller-supplied transaction. It does NOT
+// commit — the caller owns the transaction lifecycle. This lets a feature
+// (e.g. a gift transfer) compose a balance move with its own table writes in a
+// single atomic unit, so we can't end up with money moved but the gift row
+// unrecorded if the process crashes between the two. Returns the new balance.
+func AddBalanceTx(ctx context.Context, tx *sql.Tx, userID int64, kind string, deltaUSD float64, ref, note string, allowNegative bool) (float64, error) {
 	var bal float64
 	if err := tx.QueryRowContext(ctx, `SELECT balance_usd FROM users WHERE id = ?`, userID).Scan(&bal); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -56,9 +74,6 @@ func (db *DB) AddBalance(ctx context.Context, userID int64, kind string, deltaUS
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx (user_id, kind, amount_usd, ref, note, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		userID, kind, deltaUSD, ref, note, now); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return bal, nil

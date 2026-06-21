@@ -18,6 +18,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 	"github.com/wjsoj/CPA-Claude/internal/saas/growth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/profile"
+	"github.com/wjsoj/CPA-Claude/internal/saas/referral"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/pricing"
@@ -29,7 +30,7 @@ import (
 // /api/v2/admin/credentials/* is exposed. legacyH may be nil — when set, the
 // /api/v2/admin/* group also exposes request-log queries + Anthropic OAuth
 // quota probe (handlers reused from the legacy operator API).
-func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service, arenaH *arena.Service, profileH *profile.Handler) {
+func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service, arenaH *arena.Service, profileH *profile.Handler, referralH *referral.Service) {
 	v2 := engine.Group("/api/v2")
 
 	// Public.
@@ -93,6 +94,10 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	}
 	if profileH != nil {
 		profileH.Routes(authed)
+	}
+	// Referral (invite cards + peer gifting) — authed user routes.
+	if referralH != nil {
+		referralH.UserRoutes(authed)
 	}
 
 	// Available credential channels — the dropdown source for the per-token
@@ -653,6 +658,9 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	}
 	if growthH != nil {
 		growthH.AdminRoutes(adminG)
+	}
+	if referralH != nil {
+		referralH.AdminRoutes(adminG)
 	}
 	if analyticsH != nil {
 		analyticsH.AdminRoutes(adminG)

@@ -327,6 +327,129 @@ CREATE TABLE user_profiles (
 CREATE INDEX idx_user_profiles_tokens   ON user_profiles(lifetime_tokens DESC);
 CREATE INDEX idx_user_profiles_requests ON user_profiles(lifetime_requests DESC);
 `,
+
+	// v11 — referral & gift growth system. Two distinct money flows live here:
+	//
+	//   1. invite cards  — platform-funded two-sided acquisition bonus. A user
+	//      mints a personalised invite card (custom face + a unique code that
+	//      doubles as the ?ref= value); when a new account registers through it
+	//      both sides get a configurable credit, gated by the same signup
+	//      anti-abuse (signup_devices) the growth module already records.
+	//   2. gift cards    — peer-to-peer wallet transfer. The sender's balance is
+	//      debited into escrow; the recipient claims by email/code; an expired
+	//      gift is refunded to the sender.
+	//
+	// Everything an operator tunes (bonus amounts, expiry, caps, A/B copy,
+	// milestone tiers) lives in referral_campaigns / referral_tiers so the
+	// behaviour is runtime-configurable from the admin panel rather than baked
+	// into code. Owned by internal/saas/referral; the only cross-table coupling
+	// is the wallet ledger (gift escrow / bonus credit) and user_profiles
+	// (lifetime_invites, so the existing leaderboard can rank by invites too).
+	`
+CREATE TABLE referral_campaigns (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug                 TEXT    NOT NULL UNIQUE,
+    name                 TEXT    NOT NULL DEFAULT '',
+    kind                 TEXT    NOT NULL DEFAULT 'both',    -- invite | gift | both
+    status               TEXT    NOT NULL DEFAULT 'active',  -- active | paused | ended
+    invitee_bonus_usd    REAL    NOT NULL DEFAULT 1,
+    inviter_bonus_usd    REAL    NOT NULL DEFAULT 1,
+    inviter_reward_on    TEXT    NOT NULL DEFAULT 'signup',  -- signup | first_spend
+    gift_expiry_days     INTEGER NOT NULL DEFAULT 30,
+    max_gift_usd         REAL    NOT NULL DEFAULT 100,
+    max_rewarded_invites INTEGER NOT NULL DEFAULT 0,         -- 0 = unlimited
+    starts_at            INTEGER NOT NULL DEFAULT 0,
+    ends_at              INTEGER NOT NULL DEFAULT 0,
+    headline             TEXT    NOT NULL DEFAULT '',
+    subcopy              TEXT    NOT NULL DEFAULT '',
+    variant_b            TEXT    NOT NULL DEFAULT '',         -- JSON {headline,subcopy}, optional A/B
+    created_at           INTEGER NOT NULL,
+    updated_at           INTEGER NOT NULL
+);
+CREATE TABLE referral_tiers (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id       INTEGER NOT NULL,
+    threshold         INTEGER NOT NULL,                       -- confirmed invites to reach this tier
+    tier_name         TEXT    NOT NULL DEFAULT '',
+    card_style_unlock TEXT    NOT NULL DEFAULT '',            -- '' | claude | openai
+    bonus_usd         REAL    NOT NULL DEFAULT 0,             -- one-off credit on reaching the tier
+    badge             TEXT    NOT NULL DEFAULT '',
+    created_at        INTEGER NOT NULL,
+    FOREIGN KEY (campaign_id) REFERENCES referral_campaigns(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_referral_tiers_campaign ON referral_tiers(campaign_id, threshold);
+CREATE TABLE referral_cards (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id INTEGER NOT NULL,
+    campaign_id   INTEGER NOT NULL DEFAULT 0,
+    code          TEXT    NOT NULL UNIQUE,                    -- invite code, doubles as ?ref=
+    card_style    TEXT    NOT NULL DEFAULT 'claude',          -- claude | openai
+    card_tone     TEXT    NOT NULL DEFAULT 'dark',            -- dark | light
+    tagline       TEXT    NOT NULL DEFAULT '',
+    message       TEXT    NOT NULL DEFAULT '',
+    impressions   INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_referral_cards_owner ON referral_cards(owner_user_id);
+CREATE TABLE referral_conversions (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id       INTEGER NOT NULL DEFAULT 0,
+    code              TEXT    NOT NULL DEFAULT '',
+    inviter_user_id   INTEGER NOT NULL,
+    invitee_user_id   INTEGER NOT NULL UNIQUE,                -- a user can be referred at most once
+    inviter_bonus_usd REAL    NOT NULL DEFAULT 0,
+    invitee_bonus_usd REAL    NOT NULL DEFAULT 0,
+    fraud             INTEGER NOT NULL DEFAULT 0,
+    inviter_paid      INTEGER NOT NULL DEFAULT 1,             -- 0 = pending (reward_on=first_spend)
+    created_at        INTEGER NOT NULL
+);
+CREATE INDEX idx_referral_conv_inviter ON referral_conversions(inviter_user_id);
+CREATE TABLE referral_milestone_grants (
+    user_id    INTEGER NOT NULL,
+    threshold  INTEGER NOT NULL,
+    tier_id    INTEGER NOT NULL,
+    bonus_usd  REAL    NOT NULL DEFAULT 0,
+    granted_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, threshold)
+);
+CREATE TABLE gift_cards (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_user_id     INTEGER NOT NULL,
+    code               TEXT    NOT NULL UNIQUE,               -- redeem code
+    recipient_email    TEXT    NOT NULL DEFAULT '',
+    amount_usd         REAL    NOT NULL,
+    message            TEXT    NOT NULL DEFAULT '',
+    card_style         TEXT    NOT NULL DEFAULT 'claude',
+    card_tone          TEXT    NOT NULL DEFAULT 'dark',
+    status             TEXT    NOT NULL DEFAULT 'pending',    -- pending | claimed | expired | refunded
+    claimed_by_user_id INTEGER NOT NULL DEFAULT 0,
+    claimed_at         INTEGER NOT NULL DEFAULT 0,
+    expires_at         INTEGER NOT NULL DEFAULT 0,
+    created_at         INTEGER NOT NULL,
+    FOREIGN KEY (sender_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_gift_cards_sender    ON gift_cards(sender_user_id);
+CREATE INDEX idx_gift_cards_recipient ON gift_cards(recipient_email, status);
+CREATE INDEX idx_gift_cards_status    ON gift_cards(status, expires_at);
+ALTER TABLE user_profiles ADD COLUMN lifetime_invites INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX idx_user_profiles_invites ON user_profiles(lifetime_invites DESC);
+INSERT INTO referral_campaigns
+    (slug, name, kind, status, invitee_bonus_usd, inviter_bonus_usd, inviter_reward_on,
+     gift_expiry_days, max_gift_usd, max_rewarded_invites, headline, subcopy, created_at, updated_at)
+VALUES
+    ('default', '邀请有礼', 'both', 'active', 1, 1, 'signup', 30, 100, 0,
+     '邀请好友，各得 $1', '把 hypitoken 送给朋友 — 对方注册成功，你们各得 $1 体验金',
+     strftime('%s','now'), strftime('%s','now'));
+INSERT INTO referral_tiers (campaign_id, threshold, tier_name, card_style_unlock, bonus_usd, badge, created_at)
+SELECT id, 1,  'NOIR',      'claude', 0,  'noir',      strftime('%s','now') FROM referral_campaigns WHERE slug='default';
+INSERT INTO referral_tiers (campaign_id, threshold, tier_name, card_style_unlock, bonus_usd, badge, created_at)
+SELECT id, 3,  'PLATINUM',  'claude', 2,  'platinum',  strftime('%s','now') FROM referral_campaigns WHERE slug='default';
+INSERT INTO referral_tiers (campaign_id, threshold, tier_name, card_style_unlock, bonus_usd, badge, created_at)
+SELECT id, 10, 'RESERVE',   'openai', 5,  'reserve',   strftime('%s','now') FROM referral_campaigns WHERE slug='default';
+INSERT INTO referral_tiers (campaign_id, threshold, tier_name, card_style_unlock, bonus_usd, badge, created_at)
+SELECT id, 25, 'SIGNATURE', 'openai', 15, 'signature', strftime('%s','now') FROM referral_campaigns WHERE slug='default';
+`,
 }
 
 func (db *DB) migrate() error {

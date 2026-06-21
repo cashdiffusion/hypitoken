@@ -227,3 +227,111 @@ export interface AdminAdjustment {
   note: string;
   created_at: number;
 }
+
+// ── Referral / gift system (internal/saas/referral) ─────────────────────────
+
+export interface ReferralTier {
+  id: number;
+  campaign_id: number;
+  threshold: number;
+  tier_name: string;
+  card_style_unlock: string;
+  bonus_usd: number;
+  badge: string;
+}
+
+export interface ReferralCampaign {
+  id: number;
+  slug: string;
+  name: string;
+  kind: string;
+  // `status` is present on the admin campaign list, omitted from the
+  // user-facing campaign payload.
+  status?: string;
+  invitee_bonus_usd: number;
+  inviter_bonus_usd: number;
+  gift_expiry_days: number;
+  max_gift_usd: number;
+  headline: string;
+  subcopy: string;
+  variant?: string;
+  tiers: ReferralTier[];
+}
+
+export interface ReferralCard {
+  id: number;
+  owner_user_id: number;
+  campaign_id: number;
+  code: string;
+  card_style: "openai" | "claude";
+  card_tone: "dark" | "light";
+  tagline: string;
+  message: string;
+  impressions: number;
+  created_at: number;
+}
+
+export interface ReferralStats {
+  invites: number;
+  earned_usd: number;
+  pending_usd: number;
+  rank: number;
+  current_tier: ReferralTier | null;
+  next_tier: ReferralTier | null;
+  next_remaining: number;
+  unlocked_styles: string[];
+}
+
+export interface ReferralMe {
+  stats: ReferralStats;
+  card: ReferralCard;
+  invite_url: string;
+  invite_code: string;
+  campaign: ReferralCampaign;
+}
+
+export interface GiftCard {
+  id: number;
+  code: string;
+  recipient_email: string;
+  amount_usd: number;
+  message: string;
+  card_style: "openai" | "claude";
+  card_tone: "dark" | "light";
+  status: "pending" | "claimed" | "expired" | "refunded";
+  created_at: number;
+  expires_at?: number;
+  claimed_at?: number;
+}
+
+// Admin referral ops dashboard.
+export interface ReferralTopReferrer {
+  user_id: number;
+  email: string;
+  invites: number;
+  earned_usd: number;
+}
+
+export interface ReferralGiftTotals {
+  sent_count: number;
+  sent_usd: number;
+  claimed_count: number;
+  claimed_usd: number;
+  pending_count: number;
+  pending_usd: number;
+  refunded_count: number;
+  refunded_usd: number;
+}
+
+export interface ReferralOpsStats {
+  total_users: number;
+  cards_minted: number;
+  impressions: number;
+  conversions: number;
+  fraud_blocked: number;
+  inviters: number;
+  platform_spend: number;
+  k_factor: number;
+  gift_totals: ReferralGiftTotals;
+  top_referrers: ReferralTopReferrer[];
+}

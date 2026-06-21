@@ -39,12 +39,24 @@ type Adapter struct {
 	// forget so it never blocks the billing hot path.
 	Arena *arena.Service
 
+	// Referral, when set, releases a deferred (reward_on=first_spend) inviter
+	// bonus the first time an invited user actually spends. Optional / nil-safe;
+	// invoked fire-and-forget off the request goroutine.
+	Referral ReferralReleaser
+
 	// groupCache memoizes pricing groups for the request hot path. Groups
 	// change rarely (admin action) so a 30s TTL is plenty.
 	groupMu   sync.RWMutex
 	groups    map[int64]*db.PricingGroup
 	groupsAt  time.Time
 	groupsTTL time.Duration
+}
+
+// ReferralReleaser releases a deferred inviter reward when an invited user first
+// spends. *saas/referral.Service satisfies it; kept an interface so the adapter
+// doesn't import the referral package.
+type ReferralReleaser interface {
+	ReleaseInviterReward(ctx context.Context, inviteeUserID int64)
 }
 
 func NewAdapter(store *db.DB, catalog *pricing.Catalog, rate *billing.Rate) *Adapter {
@@ -166,6 +178,13 @@ func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provide
 		return 0, err
 	}
 	a.DB.TouchUserToken(ctx, info.TokenID)
+	// First real spend by an invited user releases any deferred inviter reward.
+	// Fire-and-forget off the billing goroutine; a no-op for the common case.
+	// WithoutCancel keeps any request values but detaches from the request's
+	// cancellation so the release survives the response returning.
+	if a.Referral != nil {
+		go a.Referral.ReleaseInviterReward(context.WithoutCancel(ctx), info.UserID)
+	}
 	return billed, nil
 }
 

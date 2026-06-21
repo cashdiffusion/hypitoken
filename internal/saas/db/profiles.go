@@ -19,18 +19,19 @@ type UserProfile struct {
 	PublicOptIn      bool
 	LifetimeTokens   int64
 	LifetimeRequests int64
+	LifetimeInvites  int64
 	LastActiveAt     time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
 
-const profileCols = `user_id, display_name, name_is_default, public_opt_in, lifetime_tokens, lifetime_requests, last_active_at, created_at, updated_at`
+const profileCols = `user_id, display_name, name_is_default, public_opt_in, lifetime_tokens, lifetime_requests, lifetime_invites, last_active_at, created_at, updated_at`
 
 func scanProfile(row interface{ Scan(...any) error }) (*UserProfile, error) {
 	var p UserProfile
 	var nameDefault, optIn int
 	var lastActive, created, updated int64
-	if err := row.Scan(&p.UserID, &p.DisplayName, &nameDefault, &optIn, &p.LifetimeTokens, &p.LifetimeRequests, &lastActive, &created, &updated); err != nil {
+	if err := row.Scan(&p.UserID, &p.DisplayName, &nameDefault, &optIn, &p.LifetimeTokens, &p.LifetimeRequests, &p.LifetimeInvites, &lastActive, &created, &updated); err != nil {
 		return nil, err
 	}
 	p.NameIsDefault = nameDefault != 0
@@ -139,6 +140,27 @@ func (db *DB) BumpActivity(ctx context.Context, userID int64, tokens int64) {
 		VALUES (?, ?, 1, 0, ?, 1, ?, ?, ?)`, userID, nick, tokens, now, now, now)
 }
 
+// BumpInvites increments a user's confirmed-invite counter, used by the
+// referral module so the existing leaderboard can also rank by invites.
+// Self-creating + best-effort like BumpActivity: a brand-new inviter who has no
+// profile row yet still gets one. Never returns an error to the caller.
+func (db *DB) BumpInvites(ctx context.Context, userID int64) {
+	now := time.Now().Unix()
+	res, err := db.ExecContext(ctx, `UPDATE user_profiles
+		SET lifetime_invites = lifetime_invites + 1, updated_at = ?
+		WHERE user_id = ?`, now, userID)
+	if err != nil {
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return
+	}
+	nick := defaultNicknameFor(userID)
+	_, _ = db.ExecContext(ctx, `INSERT OR IGNORE INTO user_profiles
+		(user_id, display_name, name_is_default, public_opt_in, lifetime_tokens, lifetime_requests, lifetime_invites, last_active_at, created_at, updated_at)
+		VALUES (?, ?, 1, 0, 0, 0, 1, 0, ?, ?)`, userID, nick, now, now)
+}
+
 // LeaderboardRow is one ranked user. Identity (real name vs pseudonym) is
 // resolved by the arena service at fan-out time, not here.
 type LeaderboardRow struct {
@@ -147,6 +169,7 @@ type LeaderboardRow struct {
 	PublicOptIn      bool
 	LifetimeTokens   int64
 	LifetimeRequests int64
+	LifetimeInvites  int64
 	LastActiveAt     time.Time
 }
 
@@ -156,13 +179,18 @@ type LeaderboardMetric string
 const (
 	MetricTokens   LeaderboardMetric = "tokens"
 	MetricRequests LeaderboardMetric = "requests"
+	MetricInvites  LeaderboardMetric = "invites"
 )
 
 func (m LeaderboardMetric) column() string {
-	if m == MetricRequests {
+	switch m {
+	case MetricRequests:
 		return "lifetime_requests"
+	case MetricInvites:
+		return "lifetime_invites"
+	default:
+		return "lifetime_tokens"
 	}
-	return "lifetime_tokens"
 }
 
 // Leaderboard returns the top `limit` users by the given metric, skipping
@@ -174,7 +202,7 @@ func (db *DB) Leaderboard(ctx context.Context, metric LeaderboardMetric, limit i
 		limit = 100
 	}
 	col := metric.column()
-	rows, err := db.QueryContext(ctx, `SELECT p.user_id, p.display_name, p.public_opt_in, p.lifetime_tokens, p.lifetime_requests, p.last_active_at
+	rows, err := db.QueryContext(ctx, `SELECT p.user_id, p.display_name, p.public_opt_in, p.lifetime_tokens, p.lifetime_requests, p.lifetime_invites, p.last_active_at
 		FROM user_profiles p JOIN users u ON u.id = p.user_id AND u.disabled = 0
 		WHERE p.`+col+` > 0
 		ORDER BY p.`+col+` DESC, p.last_active_at DESC
@@ -188,7 +216,7 @@ func (db *DB) Leaderboard(ctx context.Context, metric LeaderboardMetric, limit i
 		var r LeaderboardRow
 		var optIn int
 		var lastActive int64
-		if err := rows.Scan(&r.UserID, &r.DisplayName, &optIn, &r.LifetimeTokens, &r.LifetimeRequests, &lastActive); err != nil {
+		if err := rows.Scan(&r.UserID, &r.DisplayName, &optIn, &r.LifetimeTokens, &r.LifetimeRequests, &r.LifetimeInvites, &lastActive); err != nil {
 			return nil, err
 		}
 		r.PublicOptIn = optIn != 0

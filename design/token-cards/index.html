@@ -1,0 +1,959 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HYPITOKEN · Token Gift Cards 通证礼品卡</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<!-- Platform fonts: Bricolage Grotesque (display+sans) + JetBrains Mono. Fraunces kept ONLY for Claude card faces. -->
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=JetBrains+Mono:wght@400..700&family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,400..700&family=Noto+Sans+SC:wght@300..700&family=Noto+Serif+SC:wght@300..700&display=swap" rel="stylesheet" />
+<!-- real, scannable QR -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js" integrity="sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k" crossorigin="anonymous"></script>
+<!-- three.js (ESM) for the animated WebGL aurora background, with SRI -->
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js" integrity="sha384-8/hf5tabFfIo0BPku31TKUvGIKpWGYaMwNtlSNqNyZzXgZCMd4lnOGWbJElML9dv" crossorigin="anonymous" />
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js" } }
+</script>
+<style>
+/* === platform design tokens (mirrors internal/admin/web/src/styles/globals.css · dark) === */
+:root{
+  --background:oklch(0.17 0.03 215);
+  --foreground:oklch(0.94 0.008 85);
+  --card:oklch(0.19 0.013 260);
+  --primary:oklch(0.82 0.16 145);            /* phosphor green */
+  --primary-foreground:oklch(0.14 0.012 260);
+  --info:oklch(0.72 0.14 215);
+  --warning:oklch(0.82 0.16 72);
+  --muted-foreground:oklch(0.76 0.014 80);
+  --border:oklch(0.26 0.015 260);
+  --border-strong:oklch(0.36 0.02 260);
+  --radius:0.5rem;
+  --display:"Bricolage Grotesque","Noto Sans SC",ui-sans-serif,system-ui,sans-serif;
+  --sans:"Bricolage Grotesque","Noto Sans SC",ui-sans-serif,system-ui,sans-serif;
+  --mono:"JetBrains Mono","Noto Sans SC",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; color-scheme:dark; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; font-feature-settings:"ss01","cv11"; scrollbar-gutter:stable}
+body{
+  margin:0; min-height:100vh; position:relative; background-attachment:fixed;
+  background-color:var(--background); color:var(--foreground);
+  font-family:var(--sans); font-variation-settings:"opsz" 14,"wdth" 100;
+  overflow-x:hidden;
+  /* lightweight CSS aurora — the page is just a viewer; the spectacle is on the cards */
+  background-image:
+    radial-gradient(ellipse 70% 50% at 8% 0%, color-mix(in oklch, var(--primary) 18%, transparent) 0%, transparent 60%),
+    radial-gradient(ellipse 55% 45% at 95% 5%, color-mix(in oklch, var(--info) 14%, transparent) 0%, transparent 65%),
+    radial-gradient(ellipse 60% 45% at 100% 100%, color-mix(in oklch, var(--warning) 9%, transparent) 0%, transparent 70%);
+}
+/* fine 48px masked grid overlay — platform signature */
+.grid{position:fixed; inset:0; z-index:0; pointer-events:none;
+  background-image:
+    linear-gradient(to right, color-mix(in oklch, var(--border) 30%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--border) 30%, transparent) 1px, transparent 1px);
+  background-size:48px 48px;
+  -webkit-mask-image:radial-gradient(ellipse 92% 92% at 50% 30%, black 15%, transparent 92%);
+  mask-image:radial-gradient(ellipse 92% 92% at 50% 30%, black 15%, transparent 92%);
+  opacity:.28}
+.wrap{position:relative; z-index:1; max-width:1200px; margin:0 auto; padding:0 28px}
+
+/* eyebrow — platform mono label */
+.eyebrow{font-family:var(--mono); font-size:10.5px; line-height:1; letter-spacing:.18em; text-transform:uppercase; color:var(--muted-foreground); font-feature-settings:"tnum","zero"}
+.font-display{font-family:var(--display); font-variation-settings:"opsz" 96,"wdth" 100}
+
+/* header */
+header{padding:96px 0 26px; text-align:center}
+.kicker{display:inline-flex; align-items:center; gap:14px}
+.kicker .eyebrow{display:inline-flex; align-items:center; gap:10px}
+.kicker::before,.kicker::after{content:""; width:46px; height:1px; background:linear-gradient(90deg,transparent,var(--border-strong))}
+.kicker::after{background:linear-gradient(90deg,var(--border-strong),transparent)}
+h1{font-family:var(--display); font-variation-settings:"opsz" 96,"wdth" 100; font-weight:600; letter-spacing:-.03em;
+  font-size:clamp(40px,6.6vw,84px); line-height:.96; margin:24px 0 0}
+h1 .hl{color:var(--primary)}
+.lede{max-width:680px; margin:24px auto 0; color:color-mix(in oklch,var(--foreground) 78%,transparent); font-size:17px; line-height:1.72}
+.lede b{color:var(--foreground); font-weight:600}
+.lede .g{color:var(--primary); font-weight:600}
+
+.meta{display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:34px 0 0}
+.chip{font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:color-mix(in oklch,var(--foreground) 86%,transparent);
+  border:1px solid var(--border); border-radius:999px; padding:8px 15px; background:color-mix(in oklch,var(--card) 60%,transparent);
+  backdrop-filter:blur(8px); display:inline-flex; align-items:center; gap:8px}
+.dot{width:6px;height:6px;border-radius:50%}
+
+/* sections */
+.sec{padding:68px 0 8px}
+.sec-h{display:flex; align-items:baseline; gap:18px; border-bottom:1px solid var(--border); padding-bottom:18px}
+.sec-h .idx{font-family:var(--mono); font-size:13px; color:var(--muted-foreground); font-variant-numeric:tabular-nums}
+.sec-h h2{font-family:var(--display); font-variation-settings:"opsz" 96; font-weight:600; font-size:clamp(24px,3vw,38px); margin:0; letter-spacing:-.025em}
+.sec-h p{margin:0 0 0 auto; color:var(--muted-foreground); font-size:14px; max-width:380px; text-align:right}
+
+/* gallery */
+.gallery{display:grid; grid-template-columns:repeat(2,1fr); gap:34px; margin-top:42px}
+@media(max-width:880px){.gallery{grid-template-columns:1fr}}
+.slot .label{display:flex; align-items:center; justify-content:space-between; margin:0 4px 14px; gap:12px}
+.slot .label .name{font-family:var(--display); font-variation-settings:"opsz" 40; font-weight:600; font-size:19px; letter-spacing:-.01em}
+
+/* flip card */
+.flip{perspective:2200px; cursor:pointer}
+.flip-inner{position:relative; width:100%; aspect-ratio:1.586/1; transition:transform .9s cubic-bezier(.2,.7,.2,1); transform-style:preserve-3d}
+.flip.is-back .flip-inner{transform:rotateY(180deg)}
+.face{position:absolute; inset:0; backface-visibility:hidden; border-radius:5.2%; overflow:hidden;
+  box-shadow:0 2px 4px rgba(0,0,0,.4), 0 36px 72px -28px rgba(0,0,0,.8), 0 0 0 1px color-mix(in oklch,var(--border-strong) 60%,transparent) inset}
+.face.back{transform:rotateY(180deg)}
+.face svg{display:block; width:100%; height:100%}
+/* static SVG art (z0) + animated WebGL light-flow overlay (z1, brand-blended) */
+.face.front .cardart{position:absolute; inset:0; z-index:0}
+.face.front .cardgl{position:absolute; inset:0; width:100%; height:100%; z-index:1; pointer-events:none; border-radius:inherit; opacity:.48}
+.face.front .cardgl[data-tone="dark"]{mix-blend-mode:screen}
+.face.front .cardgl[data-tone="light"]{mix-blend-mode:overlay; opacity:.4}
+/* dark cards: a brand glow that follows the cursor and breathes */
+.face.front .cardglow{position:absolute; inset:0; z-index:2; pointer-events:none; border-radius:inherit;
+  background:radial-gradient(240px circle at var(--px,50%) var(--py,50%), color-mix(in srgb, var(--glow,#5b8cff) 72%, transparent) 0%, transparent 62%);
+  mix-blend-mode:screen; opacity:.4; animation:breathe 4.5s ease-in-out infinite}
+.flip:hover .face.front .cardglow{animation-duration:3s}
+@keyframes breathe{0%,100%{opacity:.3}50%{opacity:.78}}
+@media (prefers-reduced-motion:reduce){.face.front .cardglow{animation:none; opacity:.34}}
+.face::after{content:""; position:absolute; inset:0; z-index:2; pointer-events:none; border-radius:inherit;
+  background:linear-gradient(125deg, rgba(255,255,255,.16) 0%, rgba(255,255,255,0) 26%, rgba(255,255,255,0) 70%, rgba(255,255,255,.06) 100%);
+  mix-blend-mode:soft-light}
+/* pointer-tracked holographic highlight — virtual-card foil sheen */
+.face::before{content:""; position:absolute; inset:0; z-index:3; pointer-events:none; border-radius:inherit;
+  background:radial-gradient(170px circle at var(--px,50%) var(--py,50%), rgba(255,255,255,.22), rgba(255,255,255,0) 60%);
+  mix-blend-mode:soft-light; opacity:0; transition:opacity .35s}
+.flip:hover .face::before{opacity:1}
+.flip:hover .flip-inner{transform:translateY(-6px) rotateX(3deg)}
+.flip.is-back:hover .flip-inner{transform:translateY(-6px) rotateY(180deg) rotateX(-3deg)}
+
+.tools{display:flex; gap:8px; margin:14px 4px 0}
+.btn{font-family:var(--mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:color-mix(in oklch,var(--foreground) 88%,transparent);
+  background:color-mix(in oklch,var(--card) 70%,transparent); border:1px solid var(--border); border-radius:8px; padding:8px 12px; cursor:pointer; transition:.18s}
+.btn:hover{border-color:var(--primary); color:var(--primary); background:color-mix(in oklch,var(--primary) 10%,transparent)}
+
+/* hero */
+.hero{display:grid; grid-template-columns:1.12fr .88fr; gap:48px; align-items:center; margin-top:46px}
+@media(max-width:880px){.hero{grid-template-columns:1fr}}
+.hero .copy h3{font-family:var(--display); font-variation-settings:"opsz" 96; font-weight:600; font-size:clamp(30px,3.8vw,48px); line-height:1.02; margin:0 0 18px; letter-spacing:-.03em}
+.hero .copy h3 .g{color:var(--primary)}
+.hero .copy p{color:color-mix(in oklch,var(--foreground) 78%,transparent); line-height:1.74; font-size:16px}
+.tag-list{list-style:none; padding:0; margin:26px 0 0; display:grid; gap:14px}
+.tag-list li{display:flex; gap:14px; align-items:flex-start; font-size:15px; color:color-mix(in oklch,var(--foreground) 86%,transparent)}
+.tag-list b{font-family:var(--mono); font-size:10.5px; color:var(--primary); letter-spacing:.14em; margin-top:3px; min-width:46px}
+
+/* pricing explainer card (bento) */
+.note{margin-top:42px; border:1px solid var(--border); border-radius:16px; padding:26px 28px;
+  background:color-mix(in oklch,var(--card) 70%,transparent); backdrop-filter:blur(10px)}
+.note .eyebrow{margin-bottom:14px}
+.note .cells{display:grid; grid-template-columns:repeat(3,1fr); gap:18px}
+@media(max-width:720px){.note .cells{grid-template-columns:1fr}}
+.note .cell{border-left:2px solid color-mix(in oklch,var(--primary) 60%,transparent); padding:2px 0 2px 14px}
+.note .cell .k{font-family:var(--mono); font-size:12px; color:var(--muted-foreground); letter-spacing:.06em}
+.note .cell .v{font-family:var(--display); font-variation-settings:"opsz" 40; font-weight:600; font-size:24px; margin-top:4px}
+.note .cell .s{color:var(--muted-foreground); font-size:13px; margin-top:4px; line-height:1.5}
+.note .foot{margin-top:18px; padding-top:16px; border-top:1px solid var(--border); color:var(--muted-foreground); font-size:13px; line-height:1.6}
+.note .foot code{font-family:var(--mono); color:var(--primary); background:color-mix(in oklch,var(--primary) 12%,transparent); padding:1px 6px; border-radius:5px}
+
+/* copy gallery */
+.copygrid{display:grid; grid-template-columns:repeat(2,1fr); gap:18px; margin-top:42px}
+@media(max-width:720px){.copygrid{grid-template-columns:1fr}}
+.qbox{border:1px solid var(--border); border-radius:16px; padding:26px; background:color-mix(in oklch,var(--card) 60%,transparent); backdrop-filter:blur(8px)}
+.qbox .q{font-family:var(--display); font-variation-settings:"opsz" 72; font-weight:600; font-size:23px; line-height:1.22; letter-spacing:-.02em}
+.qbox .zh{margin-top:12px; color:var(--muted-foreground); font-size:14px}
+.qbox .pin{margin-bottom:16px; display:flex; gap:10px; align-items:center}
+
+footer{margin:96px 0 60px; padding-top:34px; border-top:1px solid var(--border); color:var(--muted-foreground); font-size:13px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:14px}
+footer .mono{font-family:var(--mono); letter-spacing:.08em}
+
+/* stagger rise — platform riseIn */
+[data-rise]{opacity:0; transform:translateY(20px); animation:riseIn .6s cubic-bezier(.22,1,.36,1) forwards}
+@keyframes riseIn{to{opacity:1; transform:none}}
+</style>
+</head>
+<body>
+<div class="grid"></div>
+<div class="wrap">
+
+  <header>
+    <div class="kicker" data-rise style="animation-delay:.05s"><span class="eyebrow">Welfare Drop · 福利活动专属礼遇</span></div>
+    <h1 class="font-display" data-rise style="animation-delay:.12s">The Token<br/><span class="hl">Gift Card</span> Collection</h1>
+    <p class="lede" data-rise style="animation-delay:.2s">
+      为 <b>hypitoken</b> 福利活动打造的一套精制通证礼品卡 —— 对齐顶级金融机构文创卡的工艺语言:
+      EMV 芯片、扭索防伪纹、烫金描边。两套视觉系 · 正反两面 · 明暗双调,每一张都把<b>「不受 usage limit 束缚的灵感」</b>装进口袋。
+      面额是<span class="g">真实平台额度(USD)</span>,正面按平台默认计费折算成等值官方用量。
+    </p>
+    <div class="meta" data-rise style="animation-delay:.28s">
+      <span class="chip"><span class="dot" style="background:var(--info)"></span>OpenAI 视觉系</span>
+      <span class="chip"><span class="dot" style="background:#d97757"></span>Claude 视觉系</span>
+      <span class="chip">正面 / 反面</span>
+      <span class="chip">明 · 暗双调</span>
+      <span class="chip"><span class="dot" style="background:var(--primary)"></span>100% 矢量 SVG</span>
+    </div>
+  </header>
+
+  <!-- ============ GALLERY ============ -->
+  <section class="sec">
+    <div class="sec-h">
+      <span class="idx">01 ——</span>
+      <h2>四张主卡 · 正反双面</h2>
+      <p>点击任意卡片翻面 · 悬停查看背面工艺 · 可单独导出 SVG</p>
+    </div>
+    <div class="gallery" id="gallery"></div>
+  </section>
+
+  <!-- ============ PRICING NOTE ============ -->
+  <section class="sec">
+    <div class="sec-h">
+      <span class="idx">02 ——</span>
+      <h2>额度怎么算 · 平台默认计费</h2>
+      <p>钱包以 USD 计价 · 实付 = 官方价 × 倍率</p>
+    </div>
+    <div class="note" data-rise>
+      <div class="eyebrow">Billing · billed = official × multiplier</div>
+      <div class="cells">
+        <div class="cell"><div class="k">CLAUDE 倍率</div><div class="v">0.3×</div><div class="s">Opus 官方 $5 / $25 每 M(输入 / 输出)。$1 平台额度 ≈ 官方 $3.33 的 Claude 用量。</div></div>
+        <div class="cell"><div class="k">CODEX 倍率</div><div class="v">0.05×</div><div class="s">gpt-5.3-codex 官方 $1.25 / $10 每 M。$1 平台额度 ≈ 官方 $20 的 Codex 用量。</div></div>
+        <div class="cell"><div class="k">卡面标注</div><div class="v">官方等值</div><div class="s">正面给出「≈ 官方 $X Claude · $Y Codex」—— 精确、可核验,且直观体现折扣。</div></div>
+      </div>
+      <div class="foot">
+        例:一张 <code>$30</code> 的卡 = 平台钱包 +$30。全部用于 Claude 时,可消耗官方 <code>$100</code> 的用量(30 ÷ 0.3);全部用于 Codex 时,可消耗官方 <code>$600</code>(30 ÷ 0.05)。倍率为操作员可在后台调整的默认值。
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HERO ============ -->
+  <section class="sec">
+    <div class="sec-h">
+      <span class="idx">03 ——</span>
+      <h2>旗舰卡面 · Clay Atelier</h2>
+      <p>Claude 视觉系 · 奶油暖调 · 黏土橙星芒</p>
+    </div>
+    <div class="hero">
+      <div class="hero-card" id="hero"></div>
+      <div class="copy">
+        <h3>让灵感<br/>不被 <span class="g">usage limit</span><br/>困住。</h3>
+        <p>一张卡,通行平台全部模型额度。礼品卡按官方用量结算,正面标注等值的 Claude / Codex 官方用量 —— 送的是创造力本身。</p>
+        <ul class="tag-list">
+          <li><b>CRAFT</b><span>哑光卡基 + 烫金描边 + 扭索防伪纹,触感对齐 Amex Centurion 级文创卡。</span></li>
+          <li><b>SMART</b><span>正面动态标注「≈ 官方 $X Claude · $Y Codex」,折扣一目了然。</span></li>
+          <li><b>GIFT</b><span>专为福利活动设计,背面兑换码 + 真实可扫 QR,世界范围通用(限制地区除外)。</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COPY ============ -->
+  <section class="sec">
+    <div class="sec-h">
+      <span class="idx">04 ——</span>
+      <h2>卡面文案 · 调性</h2>
+      <p>双语 · 克制而锋利 · 反映平台底气</p>
+    </div>
+    <div class="copygrid" id="copygrid"></div>
+  </section>
+
+  <footer>
+    <span class="mono">HYPITOKEN · ONE CARD, EVERY MODEL</span>
+    <span>设计稿 · 仅视觉演示,无业务功能 · 2026</span>
+  </footer>
+</div>
+
+<script>
+/* =====================================================================
+   THEME TOKENS — 2 styles × 2 tones. value = real USD platform credit;
+   conv = official-list equivalent (value / multiplier, claude 0.3 / codex 0.05).
+   ===================================================================== */
+const THEMES = {
+  "openai-dark": {
+    name:"Midnight Codex", style:"openai", tone:"dark",
+    bg:["#0a0b0f","#14161d","#0c0d12"], glow:"#2e6bff", glow2:"#10a37f",
+    fg:"#f4f6fa", muted:"#8b93a3", hair:"rgba(255,255,255,.10)",
+    chipA:"#dfe4ea", chipB:"#9aa3b2", chipEdge:"#c3cad4", foil:"#aeb6c4",
+    accent:"#5b8cff", accent2:"#15c79a", guilloche:"rgba(120,150,220,.16)",
+    value:"$15", number:"4096 0408 1106 2170",
+    tagEN:["Ship at the","speed of thought."], tagZH:"让代码追上灵感",
+    conv:"$50 Claude · $300 Codex", edition:"OPENAI · NOIR EDITION",
+    tier:"NOIR", serial:"0042", holo:["#7fd8ff","#5b8cff","#15c79a","#9b8cff"]
+  },
+  "openai-light": {
+    name:"Platinum Codex", style:"openai", tone:"light",
+    bg:["#f6f6f1","#ecede7","#e3e4dd"], glow:"#1a66ff", glow2:"#0e8c6f",
+    fg:"#0d0e12", muted:"#6b6f78", hair:"rgba(13,14,18,.10)",
+    chipA:"#e8eaed", chipB:"#aab1bd", chipEdge:"#bcc2cb", foil:"#9aa1ab",
+    accent:"#1a55ff", accent2:"#0e8c6f", guilloche:"rgba(40,70,150,.14)",
+    value:"$30", number:"4096 8160 2240 2170",
+    tagEN:["Your terminal,","unchained."], tagZH:"终端,从此无上限",
+    conv:"$100 Claude · $600 Codex", edition:"OPENAI · PLATINUM EDITION",
+    tier:"PLATINUM", serial:"0118", holo:["#9fb6ff","#6ad0ff","#bfe3c8","#cfc4ff"]
+  },
+  "claude-dark": {
+    name:"Clay Nocturne", style:"claude", tone:"dark",
+    bg:["#1b1310","#2a1c15","#15110e"], glow:"#d97757", glow2:"#6a9bcc",
+    fg:"#faf9f5", muted:"#b3a99c", hair:"rgba(255,243,234,.12)",
+    chipA:"#f0d9a8", chipB:"#c79a4e", chipEdge:"#d9a441", foil:"#caa15a",
+    accent:"#e89070", accent2:"#7fa8d4", guilloche:"rgba(217,119,87,.20)",
+    value:"$45", number:"1709 7570 6320 2170",
+    tagEN:["Let inspiration","outrun the limit."], tagZH:"让灵感跑赢 usage limit",
+    conv:"$150 Claude · $900 Codex", edition:"CLAUDE · NOCTURNE EDITION",
+    tier:"RESERVE", serial:"0073", holo:["#ffd9a8","#e89070","#ff9e7a","#ffcaa0"]
+  },
+  "claude-light": {
+    name:"Cream Atelier", style:"claude", tone:"light",
+    bg:["#faf8f2","#f1ede2","#e7dccb"], glow:"#d97757", glow2:"#c15f3c",
+    fg:"#1a1714", muted:"#7a7367", hair:"rgba(26,23,20,.10)",
+    chipA:"#f3dca6", chipB:"#cfa14e", chipEdge:"#c79a4e", foil:"#b88a3f",
+    accent:"#c15f3c", accent2:"#788c5d", guilloche:"rgba(193,95,60,.18)",
+    value:"$60", number:"1709 3280 8400 2170",
+    tagEN:["Think bigger.","Build kinder."], tagZH:"想得更大 · 造得更暖",
+    conv:"$200 Claude · $1200 Codex", edition:"CLAUDE · ATELIER EDITION",
+    tier:"SIGNATURE", serial:"0009", holo:["#ffe6c2","#f0a878","#e7b98f","#ffd6a8"]
+  },
+};
+window.__THEMES = THEMES;   // bridge to the ESM card-shader module below
+
+const W=1012, H=638, R=52;
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+/* ---------- guilloche rosette (anti-counterfeit lattice) ---------- */
+function guilloche(cx,cy,color,id){
+  let p=`<g opacity=".9" clip-path="url(#clip${id})">`;
+  const N=58;
+  for(let i=0;i<N;i++){
+    const a=(i/N)*Math.PI*2;
+    const rx=190+38*Math.sin(i*0.7), ry=64+30*Math.cos(i*0.9);
+    p+=`<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="none" stroke="${color}" stroke-width="0.7" transform="rotate(${(a*180/Math.PI).toFixed(2)} ${cx} ${cy})"/>`;
+  }
+  for(let i=0;i<22;i++){
+    p+=`<circle cx="${cx}" cy="${cy}" r="${30+i*9}" fill="none" stroke="${color}" stroke-width="0.5" opacity="${0.5-i*0.012}"/>`;
+  }
+  return p+`</g>`;
+}
+
+/* ---------- EMV chip (metallic: gloss + specular + bevel) ---------- */
+function chip(x,y,t){
+  const w=92,h=70,r=12,id=t.style+t.tone;
+  const X=p=>(w*p).toFixed(1), Y=p=>(h*p).toFixed(1);
+  return `
+  <g transform="translate(${x},${y})">
+    <defs>
+      <linearGradient id="chipShine${id}" x1="0" y1="0" x2="0.7" y2="1">
+        <stop offset="0" stop-color="#ffffff" stop-opacity=".7"/>
+        <stop offset=".22" stop-color="#ffffff" stop-opacity="0"/>
+        <stop offset=".54" stop-color="${t.chipB}" stop-opacity=".3"/>
+        <stop offset=".78" stop-color="#ffffff" stop-opacity="0"/>
+        <stop offset="1" stop-color="#ffffff" stop-opacity=".45"/>
+      </linearGradient>
+      <clipPath id="chipClip${id}"><rect width="${w}" height="${h}" rx="${r}"/></clipPath>
+    </defs>
+    <rect width="${w}" height="${h}" rx="${r}" fill="url(#chip${id})"/>
+    <g clip-path="url(#chipClip${id})">
+      <g stroke="${t.chipEdge}" stroke-width="1.6" opacity=".55" fill="none">
+        <line x1="0" y1="${Y(0.34)}" x2="${w}" y2="${Y(0.34)}"/>
+        <line x1="0" y1="${Y(0.66)}" x2="${w}" y2="${Y(0.66)}"/>
+        <line x1="${X(0.30)}" y1="0" x2="${X(0.30)}" y2="${h}"/>
+        <line x1="${X(0.70)}" y1="0" x2="${X(0.70)}" y2="${h}"/>
+      </g>
+      <rect x="${X(0.30)}" y="${Y(0.34)}" width="${X(0.40)}" height="${Y(0.32)}" rx="4" fill="${t.chipA}" stroke="${t.chipEdge}" stroke-width="1" opacity=".9"/>
+      <rect width="${w}" height="${h}" fill="url(#chipShine${id})"/>
+      <ellipse cx="${X(0.24)}" cy="${Y(0.2)}" rx="16" ry="7" fill="#ffffff" opacity=".4"/>
+      <path d="M${r} 1 H ${w-r} M1 ${r} V ${h-r}" stroke="#ffffff" stroke-opacity=".5" stroke-width="1.2" fill="none"/>
+      <path d="M${r} ${h-1} H ${w-r} M${w-1} ${r} V ${h-r}" stroke="#000000" stroke-opacity=".22" stroke-width="1.2" fill="none"/>
+    </g>
+    <rect width="${w}" height="${h}" rx="${r}" fill="none" stroke="${t.chipEdge}" stroke-width="1"/>
+  </g>`;
+}
+
+/* ---------- brand marks ---------- */
+/* Real OpenAI Codex logo (source: LobeHub static-svg, viewBox 0 0 24 24):
+   rounded "cloud" silhouette with a knocked-out `❮ _` code-prompt mark. */
+const CODEX_PATH="M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z";
+function codexMark(cx,cy,size,color,glow){
+  const s=size/24;
+  return `<g>
+    <circle cx="${cx}" cy="${cy}" r="${(size*0.95).toFixed(1)}" fill="${glow}" opacity="0.16"/>
+    <circle cx="${cx}" cy="${cy}" r="${(size*0.6).toFixed(1)}" fill="${glow}" opacity="0.12"/>
+    <g transform="translate(${(cx-12*s).toFixed(2)},${(cy-12*s).toFixed(2)}) scale(${s.toFixed(4)})">
+      <path fill-rule="evenodd" clip-rule="evenodd" fill="${color}" d="${CODEX_PATH}"/>
+    </g>
+  </g>`;
+}
+function openaiMark(cx,cy,r,color,glow){
+  let g=`<g>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#disc)"/>
+    <circle cx="${cx}" cy="${cy}" r="${r*0.62}" fill="none" stroke="${color}" stroke-width="2" opacity=".55"/>
+    <circle cx="${cx}" cy="${cy}" r="${r*0.30}" fill="${color}" opacity=".9"/>`;
+  g+=`<g transform="translate(${cx},${cy})" opacity=".9">`;
+  for(let i=0;i<6;i++){
+    g+=`<path d="M0,${-r*0.5} C ${r*0.34},${-r*0.5} ${r*0.34},${-r*0.12} 0,${-r*0.12} C ${-r*0.34},${-r*0.12} ${-r*0.34},${-r*0.5} 0,${-r*0.5} Z"
+        fill="none" stroke="${glow}" stroke-width="2.4" opacity=".5" transform="rotate(${i*60})"/>`;
+  }
+  return g+`</g></g>`;
+}
+function claudeMark(cx,cy,r,color){
+  let g=`<g transform="translate(${cx},${cy})">`;
+  const N=14;
+  for(let i=0;i<N;i++){
+    const a=(i/N)*Math.PI*2;
+    const len = r*(0.62 + 0.38*Math.abs(Math.sin(i*1.7)));
+    const w = 7;
+    const x1=Math.cos(a)*r*0.16, y1=Math.sin(a)*r*0.16;
+    const x2=Math.cos(a)*len, y2=Math.sin(a)*len;
+    const px=Math.cos(a+Math.PI/2)*w, py=Math.sin(a+Math.PI/2)*w;
+    g+=`<path d="M${(x1+px).toFixed(1)},${(y1+py).toFixed(1)} L${x2.toFixed(1)},${y2.toFixed(1)} L${(x1-px).toFixed(1)},${(y1-py).toFixed(1)} Z" fill="${color}"/>`;
+  }
+  return g+`<circle r="${r*0.14}" fill="${color}"/></g>`;
+}
+
+/* ---------- contactless / NFC wave (premium card detail) ---------- */
+function nfcWave(x,y,color){
+  let g=`<g transform="translate(${x},${y})" fill="none" stroke="${color}" stroke-width="3.2" stroke-linecap="round" opacity=".8">`;
+  for(let i=1;i<=3;i++){ const r=7*i; g+=`<path d="M0,${-r} A ${r} ${r} 0 0 1 0 ${r}"/>`; }
+  return g+`</g>`;
+}
+
+/* ---------- tier badge pill (right-anchored) ---------- */
+function tierBadge(xr,y,t){
+  const label=`${t.tier} TIER`;
+  const w=Math.round(label.length*9.2)+46;
+  const x=xr-w;
+  return `<g>
+    <rect x="${x}" y="${y-22}" width="${w}" height="32" rx="16" fill="${t.tone==='dark'?'rgba(255,255,255,.08)':'rgba(0,0,0,.05)'}" stroke="${t.foil}" stroke-opacity=".55"/>
+    <path d="M${x+20},${y-6} l5,-7 l5,7 l-5,7 z" fill="${t.accent}"/>
+    <text x="${x+34}" y="${y-1}" font-size="14" letter-spacing="2.5" fill="${t.fg}" font-family="JetBrains Mono, monospace">${esc(label)}</text>
+  </g>`;
+}
+
+/* ---------- 4-point sparkle glyph ---------- */
+function starGlyph(cx,cy,r,color){
+  const r2=r*0.36, pts=[];
+  for(let i=0;i<8;i++){ const a=i*Math.PI/4-Math.PI/2, rr=(i%2===0)?r:r2;
+    pts.push(`${(cx+Math.cos(a)*rr).toFixed(1)},${(cy+Math.sin(a)*rr).toFixed(1)}`); }
+  return `<polygon points="${pts.join(' ')}" fill="${color}"/>`;
+}
+
+/* ---------- holographic security medallion (SMIL-animated iridescence,
+   survives SVG export) ---------- */
+function holoMedallion(cx,cy,r,t,idp){
+  const gid=`holo${idp}`, cols=t.holo||["#9fd","#7af","#fd9","#fbe"];
+  const stops=cols.map((c,i)=>`<stop offset="${Math.round(i/(cols.length-1)*100)}%" stop-color="${c}"/>`).join("");
+  return `<g>
+    <defs>
+      <linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1">
+        ${stops}
+        <animateTransform attributeName="gradientTransform" type="rotate" from="0 0.5 0.5" to="360 0.5 0.5" dur="7s" repeatCount="indefinite"/>
+      </linearGradient>
+    </defs>
+    <circle cx="${cx}" cy="${cy}" r="${r+3}" fill="${t.foil}" opacity=".22"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#${gid})" opacity=".92"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${t.foil}" stroke-width="2" opacity=".75"/>
+    <circle cx="${cx}" cy="${cy}" r="${r-4}" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1"/>
+    ${starGlyph(cx,cy,r*0.52,"rgba(20,18,16,.6)")}
+    <animate xlink:href="#${gid}" attributeName="x1" values="0;0.4;0" dur="5s" repeatCount="indefinite"/>
+  </g>`;
+}
+
+/* ===================================================================
+   ANIMATED VECTOR ILLUSTRATIONS (SMIL — live in the showcase AND survive
+   SVG export). Themed per brand. Kept low-opacity so text stays legible.
+   =================================================================== */
+function rngFn(seed){ let s=(seed>>>0)||1; return ()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
+
+/* neural-network constellation: pulsing nodes + flowing edge pulses */
+function constellation(cx,cy,w,h,color,seed){
+  const rnd=rngFn(seed), N=9, nodes=[];
+  for(let i=0;i<N;i++) nodes.push([cx-w/2+rnd()*w, cy-h/2+rnd()*h]);
+  const seen=new Set(); let edges=[];
+  for(let i=0;i<N;i++){
+    const d=nodes.map((p,j)=>[j,(p[0]-nodes[i][0])**2+(p[1]-nodes[i][1])**2]).filter(x=>x[0]!==i).sort((a,b)=>a[1]-b[1]);
+    for(let k=0;k<2;k++){ const j=d[k][0], key=i<j?i+'-'+j:j+'-'+i; if(!seen.has(key)){ seen.add(key); edges.push([i,j]); } }
+  }
+  let g=`<g>`;
+  edges.forEach((e,idx)=>{
+    const a=nodes[e[0]], b=nodes[e[1]];
+    g+=`<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${color}" stroke-width="1" opacity=".18"/>`;
+    g+=`<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${color}" stroke-width="1.6" stroke-dasharray="3 27" opacity=".7"><animate attributeName="stroke-dashoffset" from="30" to="0" dur="${(2.4+(idx%4)*0.7).toFixed(1)}s" repeatCount="indefinite"/></line>`;
+  });
+  nodes.forEach((p,i)=>{
+    const dur=(2+(i%5)*0.4).toFixed(1);
+    g+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.6" fill="${color}"><animate attributeName="r" values="2;3.6;2" dur="${dur}s" repeatCount="indefinite"/><animate attributeName="opacity" values=".45;1;.45" dur="${dur}s" repeatCount="indefinite"/></circle>`;
+  });
+  return g+`</g>`;
+}
+
+/* twinkling 4-point sparkles */
+function sparkles(list,color){
+  return `<g>`+list.map((p,i)=>{
+    const dur=(2+i*0.5).toFixed(1);
+    return `<g transform="translate(${p[0]},${p[1]})"><g>${starGlyph(0,0,p[2]||6,color)}<animateTransform attributeName="transform" type="scale" values="0.45;1.15;0.45" dur="${dur}s" repeatCount="indefinite" additive="sum"/><animate attributeName="opacity" values=".25;1;.25" dur="${dur}s" repeatCount="indefinite"/></g></g>`;
+  }).join("")+`</g>`;
+}
+
+/* rising embers (Claude) */
+function risingEmbers(x0,x1,yb,yt,color,seed,n){
+  const rnd=rngFn(seed); let g=`<g>`;
+  for(let i=0;i<(n||8);i++){
+    const x=(x0+rnd()*(x1-x0)).toFixed(1), r=(1+rnd()*2.2).toFixed(1), dur=(3+rnd()*3).toFixed(1), beg=(-rnd()*5).toFixed(1);
+    g+=`<circle cx="${x}" cy="${yb}" r="${r}" fill="${color}"><animate attributeName="cy" from="${yb}" to="${yt}" dur="${dur}s" begin="${beg}s" repeatCount="indefinite"/><animate attributeName="opacity" values="0;.75;0" dur="${dur}s" begin="${beg}s" repeatCount="indefinite"/></circle>`;
+  }
+  return g+`</g>`;
+}
+
+/* orbiting dots around a point (Codex mark) */
+function orbitRing(cx,cy,r,color,dur,n){
+  let dots=``; n=n||2;
+  for(let i=0;i<n;i++) dots+=`<circle cx="${(cx+r).toFixed(1)}" cy="${cy}" r="3" fill="${color}" transform="rotate(${i/n*360} ${cx} ${cy})"/>`;
+  return `<g><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="1" opacity=".3" stroke-dasharray="2 7"/><g>${dots}<animateTransform attributeName="transform" type="rotate" from="0 ${cx} ${cy}" to="360 ${cx} ${cy}" dur="${dur}s" repeatCount="indefinite"/></g></g>`;
+}
+
+/* radar pulse rings emanating from a point */
+function pulseRings(cx,cy,maxR,color,n){
+  n=n||3; let g=`<g>`;
+  for(let i=0;i<n;i++){ const dur=4, beg=(i*dur/n).toFixed(2);
+    g+=`<circle cx="${cx}" cy="${cy}" r="6" fill="none" stroke="${color}" stroke-width="1.4"><animate attributeName="r" from="6" to="${maxR}" dur="${dur}s" begin="${beg}s" repeatCount="indefinite"/><animate attributeName="opacity" from=".55" to="0" dur="${dur}s" begin="${beg}s" repeatCount="indefinite"/></circle>`;
+  }
+  return g+`</g>`;
+}
+
+/* ---------- security micro-print line ---------- */
+function microPrint(x,y,w,text,color){
+  const unit=`${text} · `;
+  const reps=Math.ceil(w/(unit.length*4.05));
+  return `<text x="${x}" y="${y}" font-size="6.6" letter-spacing="1.1" fill="${color}" opacity=".5" font-family="JetBrains Mono, monospace">${esc(unit.repeat(reps))}</text>`;
+}
+
+/* ---------- REAL scannable QR (qrcode-generator). Dark modules on a light
+   panel + quiet zone = reliably scannable on any card tone. ---------- */
+function qr(x,y,size,url){
+  let g=`<g transform="translate(${x},${y})">`;
+  try{
+    const q=qrcode(0,"M"); q.addData(url); q.make();
+    const n=q.getModuleCount(); const cell=size/n;
+    for(let r=0;r<n;r++)for(let c=0;c<n;c++){
+      if(q.isDark(r,c)) g+=`<rect x="${(c*cell).toFixed(2)}" y="${(r*cell).toFixed(2)}" width="${(cell+0.4).toFixed(2)}" height="${(cell+0.4).toFixed(2)}" fill="#141413"/>`;
+    }
+  }catch(e){
+    g+=`<text x="${size/2}" y="${size/2}" text-anchor="middle" font-size="12" fill="#141413">QR</text>`;
+  }
+  return g+`</g>`;
+}
+
+/* ===================== FRONT FACE ===================== */
+function front(key){
+  const t=THEMES[key];
+  const sid=t.style+t.tone;
+  const markX=866, markY=116;
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" font-family="${t.style==='claude'?'Fraunces, Noto Serif SC, serif':'Bricolage Grotesque, Noto Sans SC, sans-serif'}">
+  <defs>
+    <clipPath id="card${sid}f"><rect width="${W}" height="${H}" rx="${R}"/></clipPath>
+    <clipPath id="clip${sid}f"><rect width="${W}" height="${H}" rx="${R}"/></clipPath>
+    <linearGradient id="bg${sid}f" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${t.bg[0]}"/><stop offset=".55" stop-color="${t.bg[1]}"/><stop offset="1" stop-color="${t.bg[2]}"/>
+    </linearGradient>
+    <radialGradient id="disc" cx="50%" cy="42%" r="60%">
+      <stop offset="0" stop-color="${t.glow}" stop-opacity=".95"/>
+      <stop offset="55%" stop-color="${t.glow}" stop-opacity=".25"/>
+      <stop offset="100%" stop-color="${t.glow}" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="chip${sid}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${t.chipA}"/><stop offset=".5" stop-color="${t.chipB}"/><stop offset="1" stop-color="${t.chipA}"/>
+    </linearGradient>
+    <linearGradient id="foil${sid}" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="${t.foil}" stop-opacity=".0"/>
+      <stop offset=".5" stop-color="${t.foil}" stop-opacity=".9"/>
+      <stop offset="1" stop-color="${t.foil}" stop-opacity=".0"/>
+    </linearGradient>
+    <!-- tone-specific finish: dark = vignette depth, light = pearlescent brushed sheen -->
+    <radialGradient id="vig${sid}" cx="50%" cy="42%" r="80%">
+      <stop offset="58%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="${t.tone==='dark'?0.5:0.06}"/>
+    </radialGradient>
+    <linearGradient id="pearl${sid}" x1="0" y1="0" x2="1" y2="0.7">
+      <stop offset="0"   stop-color="#ffffff" stop-opacity="${t.tone==='light'?0.55:0.04}"/>
+      <stop offset="0.32" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.52" stop-color="${t.glow}" stop-opacity="${t.tone==='light'?0.06:0}"/>
+      <stop offset="0.72" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1"   stop-color="#ffffff" stop-opacity="${t.tone==='light'?0.34:0.05}"/>
+    </linearGradient>
+    <!-- fine brushed-metal hairlines (light cards only) -->
+    <pattern id="brush${sid}" width="4" height="2.4" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="0.4" x2="4" y2="0.4" stroke="#ffffff" stroke-opacity="${t.tone==='light'?0.55:0}" stroke-width="0.45"/>
+      <line x1="0" y1="1.6" x2="4" y2="1.6" stroke="#5a5249" stroke-opacity="${t.tone==='light'?0.10:0}" stroke-width="0.45"/>
+    </pattern>
+    <!-- metallic foil numerals: bright silver on dark, embossed chip-metal on light -->
+    <linearGradient id="metal${sid}" x1="0.1" y1="0" x2="0" y2="1">
+      ${t.tone==='dark'
+        ? `<stop offset="0" stop-color="#ffffff"/><stop offset=".42" stop-color="#dbe2ec"/><stop offset=".52" stop-color="#ffffff"/><stop offset=".64" stop-color="#b4bdca"/><stop offset="1" stop-color="#eaeff5"/>`
+        : `<stop offset="0" stop-color="${t.chipA}"/><stop offset=".5" stop-color="${t.foil}"/><stop offset="1" stop-color="${t.chipB}"/>`}
+    </linearGradient>
+    <filter id="valglow${sid}" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="7"/></filter>
+    <filter id="soft"><feGaussianBlur stdDeviation="36"/></filter>
+  </defs>
+
+  <g clip-path="url(#card${sid}f)">
+    <rect width="${W}" height="${H}" fill="url(#bg${sid}f)"/>
+    <circle cx="838" cy="150" r="220" fill="${t.glow}" opacity="${t.tone==='dark'?.22:.14}" filter="url(#soft)"/>
+    <circle cx="120" cy="600" r="200" fill="${t.glow2}" opacity="${t.tone==='dark'?.16:.10}" filter="url(#soft)"/>
+    <rect width="${W}" height="${H}" fill="url(#pearl${sid})"/>
+    ${t.tone==='light' ? `<rect width="${W}" height="${H}" fill="url(#brush${sid})" opacity=".6"/>` : ''}
+    <rect width="${W}" height="${H}" fill="url(#vig${sid})"/>
+    <rect x="22" y="22" width="${W-44}" height="${H-44}" rx="${R-16}" fill="none" stroke="${t.hair}" stroke-width="1.4"/>
+    ${t.tone==='light' ? `<rect x="23.5" y="23.5" width="${W-47}" height="${H-47}" rx="${R-17}" fill="none" stroke="#ffffff" stroke-width="1" opacity=".45"/>` : ''}
+    <rect x="22" y="22" width="${W-44}" height="${H-44}" rx="${R-16}" fill="none" stroke="url(#foil${sid})" stroke-width="1" opacity="${t.tone==='dark'?.8:.55}"/>
+
+    <!-- animated vector illustrations (SMIL); the 3D constellation lives on the WebGL layer -->
+    <g clip-path="url(#clip${sid}f)" opacity="${t.tone==='light'?0.62:0.92}">
+      ${sparkles([[560,168,6],[636,130,5],[716,202,6.5],[598,250,4.5],[700,150,5]], t.accent)}
+      ${t.style==='claude' ? risingEmbers(120,470,500,150,t.glow, 311, 8) : ''}
+    </g>
+
+    ${t.tone==='light' ? `<text x="64" y="93.2" font-size="30" font-weight="700" letter-spacing="6" fill="#ffffff" opacity=".55">HYPITOKEN</text>` : ''}
+    <text x="64" y="92" font-size="30" font-weight="700" letter-spacing="6" fill="${t.fg}">HYPITOKEN</text>
+    <text x="64" y="120" font-size="14" letter-spacing="5" fill="${t.muted}" font-family="JetBrains Mono, monospace">TOKEN GIFT CARD · 通证礼品卡</text>
+
+    ${t.style==='openai'
+      ? `${orbitRing(markX,markY,50,t.accent,16,2)}${codexMark(markX,markY,56,t.fg,t.glow)}`
+      : `${pulseRings(markX,markY,62,t.glow,3)}<g>${claudeMark(markX,markY,58,t.glow)}<animateTransform attributeName="transform" type="rotate" from="0 ${markX} ${markY}" to="360 ${markX} ${markY}" dur="64s" repeatCount="indefinite"/></g>`}
+    ${tierBadge(W-64,198,t)}
+
+    ${chip(70,236,t)}
+    ${nfcWave(192,271,t.fg)}
+
+    <text x="70" y="392" font-size="58" font-weight="${t.style==='claude'?500:600}" fill="${t.fg}" letter-spacing="-1" font-style="${t.style==='claude'?'italic':'normal'}">${esc(t.tagEN[0])}</text>
+    <text x="70" y="452" font-size="58" font-weight="${t.style==='claude'?500:600}" fill="${t.fg}" letter-spacing="-1" font-style="${t.style==='claude'?'italic':'normal'}">${esc(t.tagEN[1])}</text>
+    <text x="74" y="486" font-size="17" letter-spacing="3" fill="${t.muted}" font-family="Noto Sans SC, sans-serif">${esc(t.tagZH)}</text>
+
+    <!-- stored value: metallic foil numerals (glow on dark / emboss on light) -->
+    ${t.tone==='dark'
+      ? `<text x="${W-64}" y="300" text-anchor="end" font-size="74" font-weight="700" fill="${t.glow}" opacity=".55" filter="url(#valglow${sid})" font-family="JetBrains Mono, monospace">${esc(t.value)}</text>`
+      : `<text x="${W-63.2}" y="301.6" text-anchor="end" font-size="74" font-weight="700" fill="#ffffff" opacity=".75" font-family="JetBrains Mono, monospace">${esc(t.value)}</text>`}
+    <text x="${W-64}" y="300" text-anchor="end" font-size="74" font-weight="700" fill="url(#metal${sid})" font-family="JetBrains Mono, monospace">${esc(t.value)}</text>
+    <text x="${W-64}" y="330" text-anchor="end" font-size="13" letter-spacing="2" fill="${t.muted}" font-family="JetBrains Mono, monospace">STORED VALUE · 平台储值额度</text>
+
+    <!-- holographic security medallion (SMIL iridescence) -->
+    ${holoMedallion(896,432,40,t,sid)}
+
+    <!-- card number + security micro-print + serial -->
+    <text x="70" y="556" font-size="30" letter-spacing="6" fill="${t.fg}" font-family="JetBrains Mono, monospace" opacity=".92">${esc(t.number)}</text>
+    ${microPrint(72,576,540,"HYPITOKEN·ONE CARD EVERY MODEL",t.muted)}
+    <text x="70" y="600" font-size="13" letter-spacing="2" fill="${t.muted}" font-family="JetBrains Mono, monospace">BEARER · 持卡即享</text>
+    <text x="70" y="618" font-size="11" letter-spacing="2" fill="${t.muted}" font-family="JetBrains Mono, monospace" opacity=".75">VALID ∞ · No.${esc(t.serial)} · MEMBER SINCE 2026</text>
+
+    <!-- official-equivalent usage -->
+    <g transform="translate(${W-64},556)">
+      <text x="0" y="-30" text-anchor="end" font-size="10.5" letter-spacing="2.5" fill="${t.muted}" font-family="JetBrains Mono, monospace">OFFICIAL-LIST EQUIVALENT · 官方等值用量</text>
+      <rect x="-410" y="-26" width="410" height="40" rx="20" fill="${t.tone==='dark'?'rgba(255,255,255,.07)':'rgba(0,0,0,.05)'}" stroke="${t.hair}"/>
+      <circle cx="-386" cy="-6" r="5" fill="${t.accent}"/>
+      <text x="-368" y="0" font-size="17" fill="${t.fg}" font-family="JetBrains Mono, monospace">≈ ${esc(t.conv)}</text>
+    </g>
+    <text x="${W-64}" y="618" text-anchor="end" font-size="11" letter-spacing="3" fill="${t.muted}" font-family="JetBrains Mono, monospace">${esc(t.edition)}</text>
+  </g>
+</svg>`;
+}
+
+/* ===================== BACK FACE ===================== */
+function back(key){
+  const t=THEMES[key];
+  const sid=t.style+t.tone;
+  const code = `HYPI-2170-${t.style==='claude'?'CLDE':'CDEX'}-${t.tone==='dark'?'NX48':'PL56'}`;
+  const url = `https://hypitoken.com/redeem?c=${code}`;
+  const stripe = t.tone==='dark' ? "#07070a" : "#1a1a1f";
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace">
+  <defs>
+    <clipPath id="card${sid}b"><rect width="${W}" height="${H}" rx="${R}"/></clipPath>
+    <clipPath id="clip${sid}b"><rect width="${W}" height="${H}" rx="${R}"/></clipPath>
+    <linearGradient id="bg${sid}b" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${t.bg[1]}"/><stop offset="1" stop-color="${t.bg[2]}"/>
+    </linearGradient>
+    <linearGradient id="foilb${sid}" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="${t.foil}" stop-opacity="0"/>
+      <stop offset=".5" stop-color="${t.foil}" stop-opacity=".9"/>
+      <stop offset="1" stop-color="${t.foil}" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#card${sid}b)">
+    <rect width="${W}" height="${H}" fill="url(#bg${sid}b)"/>
+    ${guilloche(500,520,t.guilloche,sid+'b')}
+
+    <!-- magnetic stripe -->
+    <rect x="0" y="78" width="${W}" height="104" fill="${stripe}"/>
+    <rect x="0" y="78" width="${W}" height="104" fill="url(#foilb${sid})" opacity=".25"/>
+
+    <!-- redeem panel -->
+    <g transform="translate(64,212)">
+      <rect width="560" height="92" rx="10" fill="${t.tone==='dark'?'#ece9e2':'#fbfaf6'}"/>
+      <rect width="560" height="92" rx="10" fill="none" stroke="${t.hair}"/>
+      ${Array.from({length:14}).map((_,i)=>`<rect x="${10+i*40}" y="10" width="22" height="72" fill="${t.accent}" opacity=".08"/>`).join("")}
+      <text x="18" y="34" font-size="12" letter-spacing="2" fill="#6b6760">REDEEM CODE · 兑换码</text>
+      <text x="18" y="68" font-size="26" letter-spacing="3" fill="#141413" font-weight="700">${code}</text>
+    </g>
+
+    <!-- QR on a white label (quiet zone) — real & scannable -->
+    <g transform="translate(${W-64-164},198)">
+      <rect width="164" height="164" rx="14" fill="#fbfaf6" stroke="${t.hair}"/>
+      ${qr(20,20,124,url)}
+    </g>
+    <text x="${W-64-82}" y="384" text-anchor="middle" font-size="11" letter-spacing="1.5" fill="${t.muted}">扫码兑换 · SCAN TO REDEEM</text>
+
+    <!-- terms -->
+    <text x="64" y="350" font-size="13" letter-spacing="1" fill="${t.fg}" font-weight="700">使用条款 · TERMS</text>
+    ${[
+      "本卡为 hypitoken 福利活动赠礼,到账为等额平台钱包额度(USD)。",
+      "平台默认计费 Claude 0.3× / Codex 0.05× 官方价,余额按实时用量结算。",
+      "不可兑换现金,不设找零,丢失不补。全球通用(法律限制地区除外)。",
+      "Welfare gift · non-cash · settles at official usage × group multiplier.",
+    ].map((l,i)=>`<text x="64" y="${380+i*25}" font-size="13.5" fill="${t.muted}" font-family="Noto Sans SC, sans-serif">${esc(l)}</text>`).join("")}
+
+    <text x="64" y="566" font-size="20" font-weight="700" letter-spacing="4" fill="${t.fg}" font-family="${t.style==='claude'?'Fraunces, serif':'Bricolage Grotesque, sans-serif'}">HYPITOKEN</text>
+    <text x="64" y="592" font-size="13" letter-spacing="2" fill="${t.muted}">one card · every model · api.hypitoken</text>
+    <text x="${W-64}" y="592" text-anchor="end" font-size="12" letter-spacing="3" fill="${t.muted}">${esc(t.edition)}</text>
+
+    ${t.style==='openai'
+      ? codexMark(W-94,H-74,30,t.fg,t.glow)
+      : `<g transform="translate(${W-118},${H-92}) scale(.38)">${claudeMark(0,0,84,t.glow)}</g>`}
+  </g>
+</svg>`;
+}
+
+/* ===================== RENDER ===================== */
+function downloadSVG(svg, name){
+  const blob=new Blob([svg],{type:"image/svg+xml"});
+  const u=URL.createObjectURL(blob); const a=document.createElement("a");
+  a.href=u; a.download=name+".svg"; a.click(); URL.revokeObjectURL(u);
+}
+
+const order=["openai-dark","openai-light","claude-dark","claude-light"];
+const gallery=document.getElementById("gallery");
+order.forEach((key,idx)=>{
+  const t=THEMES[key];
+  const slot=document.createElement("div");
+  slot.className="slot"; slot.setAttribute("data-rise",""); slot.style.animationDelay=(0.1+idx*0.08)+"s";
+  slot.innerHTML=`
+    <div class="label">
+      <span class="name">${t.name}</span>
+      <span class="eyebrow">${t.style} · ${t.tone==='dark'?'暗调':'明调'} · ${t.value}</span>
+    </div>
+    <div class="flip">
+      <div class="flip-inner">
+        <div class="face front"><div class="cardart">${front(key)}</div><canvas class="cardgl" data-key="${key}" data-tone="${t.tone}"></canvas>${t.tone==='dark'?`<div class="cardglow" style="--glow:${t.glow}"></div>`:''}</div>
+        <div class="face back">${back(key)}</div>
+      </div>
+    </div>
+    <div class="tools">
+      <button class="btn" data-flip>翻面 Flip</button>
+      <button class="btn" data-dl="front">↓ 正面 SVG</button>
+      <button class="btn" data-dl="back">↓ 反面 SVG</button>
+    </div>`;
+  gallery.appendChild(slot);
+  const flip=slot.querySelector(".flip");
+  flip.addEventListener("click",e=>{ if(e.target.closest(".tools"))return; flip.classList.toggle("is-back"); });
+  slot.querySelector("[data-flip]").addEventListener("click",()=>flip.classList.toggle("is-back"));
+  slot.querySelector('[data-dl="front"]').addEventListener("click",()=>downloadSVG(front(key),`hypitoken-${key}-front`));
+  slot.querySelector('[data-dl="back"]').addEventListener("click",()=>downloadSVG(back(key),`hypitoken-${key}-back`));
+});
+
+document.getElementById("hero").innerHTML=`
+  <div class="flip"><div class="flip-inner">
+    <div class="face front"><div class="cardart">${front("claude-light")}</div><canvas class="cardgl" data-key="claude-light" data-tone="light"></canvas></div>
+    <div class="face back">${back("claude-light")}</div>
+  </div></div>`;
+const hf=document.querySelector("#hero .flip");
+hf.addEventListener("click",()=>hf.classList.toggle("is-back"));
+
+const copy=[
+  {pin:"OPENAI · NOIR", q:"Ship at the speed of thought.", zh:"让代码追上灵感 —— 终端不再为 usage limit 暂停。", c:"var(--info)"},
+  {pin:"OPENAI · PLATINUM", q:"Your terminal, unchained.", zh:"把 Codex 装进口袋,额度由我们买单。", c:"#10a37f"},
+  {pin:"CLAUDE · NOCTURNE", q:"Let inspiration outrun the limit.", zh:"让灵感跑赢 usage limit —— 想多远,跑多远。", c:"#d97757"},
+  {pin:"CLAUDE · ATELIER", q:"Think bigger. Build kinder.", zh:"想得更大,造得更暖。一张卡,通行全部模型。", c:"#c15f3c"},
+];
+document.getElementById("copygrid").innerHTML=copy.map((x,i)=>`
+  <div class="qbox" data-rise style="animation-delay:${0.1+i*0.06}s">
+    <div class="pin"><span class="dot" style="background:${x.c};width:7px;height:7px;border-radius:50%"></span><span class="eyebrow">${x.pin}</span></div>
+    <div class="q">${x.q}</div>
+    <div class="zh">${x.zh}</div>
+  </div>`).join("");
+
+/* pointer-tracked holographic highlight on every card */
+document.querySelectorAll(".flip").forEach(f=>{
+  f.addEventListener("pointermove",e=>{
+    const r=f.getBoundingClientRect();
+    f.style.setProperty("--px", ((e.clientX-r.left)/r.width*100).toFixed(1)+"%");
+    f.style.setProperty("--py", ((e.clientY-r.top)/r.height*100).toFixed(1)+"%");
+  });
+});
+</script>
+
+<!-- ============ per-card three.js brand light-flow (blended over the static SVG) ============ -->
+<script type="module">
+import * as THREE from "three";
+
+function hex(h){ const n=parseInt(h.slice(1),16); return [((n>>16)&255)/255,((n>>8)&255)/255,(n&255)/255]; }
+
+/* === iridescent morphing brand crystal ===
+   vertex: sin-wave breathing displacement along normals.
+   fragment: Fresnel-Schlick rim + view-angle iridescence (oil-slick / holo foil),
+   tinted toward the theme's holo poles. Light tone → overlay-safe satin sheen;
+   dark tone → additive neon glow. */
+const CRYSTAL_VERT = `
+  uniform float u_time; uniform float u_amp;
+  varying vec3 vN; varying vec3 vView; varying float vW;
+  void main(){
+    float w = sin(normal.x*3.0 + u_time)*0.5
+            + sin(normal.y*4.0 - u_time*0.8)*0.3
+            + sin(normal.z*5.0 + u_time*1.2)*0.2;
+    vW = w;
+    vec3 p = position + normal * w * u_amp;
+    vN = normalize(normalMatrix * normal);
+    vec4 mv = modelViewMatrix * vec4(p,1.0);
+    vView = -mv.xyz;
+    gl_Position = projectionMatrix * mv;
+  }`;
+const CRYSTAL_FRAG = `
+  precision highp float;
+  uniform vec3 u_c1; uniform vec3 u_c2; uniform float u_time; uniform float u_light;
+  varying vec3 vN; varying vec3 vView; varying float vW;
+  void main(){
+    vec3 N = normalize(vN); vec3 V = normalize(vView);
+    float fres = pow(1.0 - clamp(dot(N,V),0.0,1.0), 2.2);
+    float hue = vW*0.6 + dot(N,V)*0.5 + u_time*0.06;
+    float m = 0.5 + 0.5*sin(hue*6.2831);
+    vec3 base = mix(u_c1, u_c2, m);
+    vec3 shimmer = vec3(0.5+0.5*sin(hue*6.2831),
+                        0.5+0.5*sin(hue*6.2831+2.094),
+                        0.5+0.5*sin(hue*6.2831+4.188));
+    vec3 col = base*(0.25+0.55*fres) + shimmer*fres*0.55;
+    if(u_light>0.5){
+      vec3 o = vec3(0.5) + (col-0.32)*0.64;            // overlay-friendly iridescent satin
+      gl_FragColor = vec4(clamp(o,0.0,1.0), 0.5 + fres*0.45);
+    } else {
+      gl_FragColor = vec4(col, 0.62 + fres*0.38);      // additive neon glow
+    }
+  }`;
+/* === curl-drift light particles (procedural in the vertex shader — no CPU GPGPU) === */
+const PARTICLE_VERT = `
+  uniform float u_time; uniform float u_light; uniform float u_pr;
+  uniform vec3 u_c1; uniform vec3 u_c2;
+  attribute float aSeed;
+  varying float vA; varying vec3 vCol;
+  void main(){
+    vec3 p = position;
+    float s = aSeed;
+    float t = u_time*0.16 + s*6.2831;
+    p.x += sin(t + p.y*1.6)*0.55;
+    p.y += cos(t*0.9 + p.z*1.3)*0.5;
+    p.z += sin(t*1.1 + p.x*1.5)*0.55;
+    vec4 mv = modelViewMatrix * vec4(p,1.0);
+    float tw = 0.45 + 0.55*sin(t*2.3 + s*3.0);
+    gl_PointSize = (u_light>0.5 ? 16.0 : 26.0) * u_pr * tw / max(0.1,-mv.z);
+    gl_Position = projectionMatrix * mv;
+    vA = tw;
+    vCol = mix(u_c1, u_c2, fract(s*7.31));
+  }`;
+const PARTICLE_FRAG = `
+  precision highp float;
+  varying float vA; varying vec3 vCol; uniform float u_light;
+  void main(){
+    vec2 uv = gl_PointCoord - 0.5;
+    float d = length(uv);
+    if(d>0.5) discard;
+    float a = smoothstep(0.5,0.0,d);
+    gl_FragColor = vec4(vCol, a*vA*(u_light>0.5?0.55:0.95));
+  }`;
+
+const cards=[];
+const visible=new Set();
+const io=new IntersectionObserver(es=>es.forEach(e=>{ e.isIntersecting?visible.add(e.target):visible.delete(e.target); }),{threshold:0.01});
+
+// shared round-star sprite + seeded rng + global pointer (for parallax)
+const DOT=(()=>{ const c=document.createElement("canvas"); c.width=c.height=64; const x=c.getContext("2d");
+  const g=x.createRadialGradient(32,32,0,32,32,32);
+  g.addColorStop(0,"rgba(255,255,255,1)"); g.addColorStop(0.35,"rgba(255,255,255,0.55)"); g.addColorStop(1,"rgba(255,255,255,0)");
+  x.fillStyle=g; x.fillRect(0,0,64,64); return new THREE.CanvasTexture(c); })();
+function rngF(seed){ let s=(seed>>>0)||1; return ()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
+const mouse={x:0,y:0};
+window.addEventListener("pointermove",e=>{ mouse.x=e.clientX/window.innerWidth*2-1; mouse.y=e.clientY/window.innerHeight*2-1; },{passive:true});
+
+const PR = Math.min(window.devicePixelRatio, 1.5);
+document.querySelectorAll(".cardgl").forEach(canvas=>{
+  const T=window.__THEMES[canvas.dataset.key]; if(!T) return;
+  let renderer;
+  try{ renderer=new THREE.WebGLRenderer({canvas, antialias:true, alpha:true, premultipliedAlpha:false}); }
+  catch(e){ console.warn("card WebGL unavailable", e); return; }
+  renderer.setPixelRatio(PR);
+  const light = canvas.dataset.tone==="light";
+  const c1=hex(T.glow), c2=hex(T.accent2||T.glow), c3=hex((T.holo&&T.holo[0])||T.glow);
+  const col1=new THREE.Color(c1[0],c1[1],c1[2]);          // brand glow
+  const colB=new THREE.Color(c3[0],c3[1],c3[2]);          // iridescence pole (holo accent)
+  const colP=new THREE.Color(c2[0],c2[1],c2[2]);          // secondary accent
+
+  const scene=new THREE.Scene();
+  const cam=new THREE.PerspectiveCamera(50, 1.586, 0.1, 100); cam.position.z=4.2;
+  const group=new THREE.Group(); scene.add(group);
+
+  // (1) sparse depth stars — keeps the 3D constellation feel, NO lines (no spider-web)
+  const rnd=rngF((T.style==="openai"?137:251) ^ (T.tone==="dark"?0:64));
+  const SN= light?30:54, sp=new Float32Array(SN*3);
+  for(let i=0;i<SN;i++){ sp[i*3]=(rnd()*2-1)*3.2; sp[i*3+1]=(rnd()*2-1)*2.0; sp[i*3+2]=(rnd()*2-1)*2.2; }
+  const sg=new THREE.BufferGeometry(); sg.setAttribute("position",new THREE.BufferAttribute(sp,3));
+  const stars=new THREE.Points(sg, new THREE.PointsMaterial({
+    map:DOT, color: light?colP:col1, size: light?0.07:0.11, sizeAttenuation:true, transparent:true,
+    depthWrite:false, blending: light?THREE.NormalBlending:THREE.AdditiveBlending, opacity: light?0.7:0.9 }));
+  group.add(stars);
+
+  // (2) iridescent morphing brand crystal — the showpiece
+  const cgeo = T.style==="claude" ? new THREE.OctahedronGeometry(0.82,0) : new THREE.IcosahedronGeometry(0.8,1);
+  const cmat = new THREE.ShaderMaterial({
+    vertexShader:CRYSTAL_VERT, fragmentShader:CRYSTAL_FRAG, transparent:true, depthWrite:false,
+    side:THREE.DoubleSide, blending: light?THREE.NormalBlending:THREE.AdditiveBlending,
+    uniforms:{ u_time:{value:0}, u_amp:{value: light?0.12:0.18}, u_light:{value:light?1:0},
+               u_c1:{value:col1}, u_c2:{value:colB} } });
+  const core=new THREE.Group(); core.add(new THREE.Mesh(cgeo, cmat)); group.add(core);
+
+  // faceted wireframe shell, counter-rotating around the crystal
+  const sgeo = T.style==="claude" ? new THREE.OctahedronGeometry(1.04,0) : new THREE.IcosahedronGeometry(1.02,1);
+  const shell=new THREE.LineSegments(new THREE.WireframeGeometry(sgeo),
+    new THREE.LineBasicMaterial({color:colB, transparent:true, opacity: light?0.22:0.55, depthWrite:false}));
+  group.add(shell);
+
+  // (3) curl-drift light particles streaming around the crystal
+  const PN= light?60:120, pp=new Float32Array(PN*3), pseed=new Float32Array(PN);
+  for(let i=0;i<PN;i++){
+    const r=1.1+rnd()*1.7, th=rnd()*6.2831, ph=Math.acos(rnd()*2-1);
+    pp[i*3]=Math.sin(ph)*Math.cos(th)*r; pp[i*3+1]=Math.cos(ph)*r*0.82; pp[i*3+2]=Math.sin(ph)*Math.sin(th)*r;
+    pseed[i]=rnd();
+  }
+  const pgeo=new THREE.BufferGeometry();
+  pgeo.setAttribute("position",new THREE.BufferAttribute(pp,3));
+  pgeo.setAttribute("aSeed",new THREE.BufferAttribute(pseed,1));
+  const pmat=new THREE.ShaderMaterial({
+    vertexShader:PARTICLE_VERT, fragmentShader:PARTICLE_FRAG, transparent:true, depthWrite:false,
+    blending: light?THREE.NormalBlending:THREE.AdditiveBlending,
+    uniforms:{ u_time:{value:0}, u_light:{value:light?1:0}, u_pr:{value:PR},
+               u_c1:{value:col1}, u_c2:{value:colP} } });
+  group.add(new THREE.Points(pgeo,pmat));
+
+  const off=cards.length*1.7;
+  function size(){ const r=canvas.getBoundingClientRect(); const w=Math.max(2,r.width),h=Math.max(2,r.height);
+    renderer.setSize(w,h,false); cam.aspect=w/h; cam.updateProjectionMatrix(); }
+  cards.push({canvas,renderer,scene,cam,group,core,shell,cmat,pmat,off,size});
+  io.observe(canvas); size();
+});
+
+window.addEventListener("resize",()=>cards.forEach(c=>c.size()));
+const t0=performance.now();
+function loop(now){
+  const tt=(now-t0)/1000;
+  for(const c of cards){
+    if(!visible.has(c.canvas)) continue;
+    c.group.rotation.y = tt*0.05 + c.off + mouse.x*0.28;   // slow spin + pointer parallax
+    c.group.rotation.x = Math.sin(tt*0.06)*0.12 - mouse.y*0.2;
+    c.core.rotation.y = tt*0.32; c.core.rotation.x = tt*0.2;
+    c.shell.rotation.y = -tt*0.2; c.shell.rotation.x = tt*0.12;
+    c.cmat.uniforms.u_time.value = tt;
+    c.pmat.uniforms.u_time.value = tt;
+    c.renderer.render(c.scene,c.cam);
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+
+</body>
+</html>

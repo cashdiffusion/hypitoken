@@ -22,6 +22,9 @@ import LogsPage from "@/routes/logs";
 // the dashboard bundle isn't burdened for users who never open the arena.
 const LeaderboardPage = lazy(() => import("@/routes/leaderboard"));
 
+// Invite page renders the SVG token-card + offline QR — lazy-load it too.
+const InvitePage = lazy(() => import("@/routes/invite"));
+
 import PricingPage from "@/routes/pricing";
 import PrivacyPage from "@/routes/privacy";
 import RegisterPage from "@/routes/register";
@@ -78,6 +81,14 @@ export default function App() {
                 element={
                   <Suspense fallback={null}>
                     <LeaderboardPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="invite"
+                element={
+                  <Suspense fallback={null}>
+                    <InvitePage />
                   </Suspense>
                 }
               />
