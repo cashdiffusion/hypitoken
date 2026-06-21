@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -769,12 +770,14 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 
 recoveredFromSignature:
 	// Success or non-retryable error — stream response body to client.
-	writeResponseHeaders(c, resp)
+	authKind := "oauth"
+	if a.Kind == auth.KindAPIKey {
+		authKind = "apikey"
+	}
 
 	var counts usage.Counts
 	var sub advisor.SubUsage
 	counts.Requests = 1
-	a.MarkSuccess()
 
 	// When this credential rewrote the request's model name (relay vendors
 	// with vendor-prefixed names), rewrite it back in the response so the
@@ -787,8 +790,34 @@ recoveredFromSignature:
 	}
 
 	if stream && strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
-		streamSSE(c, resp, &counts, &sub, rewriteClientModel)
+		// Headers commit lazily on the first byte, so a stream that breaks
+		// before any output reaches the client can transparently fail over to
+		// another credential (the common "RST right after 200" case).
+		res := streamSSE(c, resp, &counts, &sub, rewriteClientModel, func() { writeResponseHeaders(c, resp) })
+		if !res.sawTerminal && !res.wroteAny {
+			_ = resp.Body.Close()
+			if isClientDisconnect(c.Request.Context(), res.err) {
+				a.MarkClientCancel(errString(res.err))
+				s.emitLog(requestlog.Record{
+					Client: clientName, ClientToken: maskClientToken(clientToken),
+					Provider: auth.NormalizeProvider(a.Provider), AuthID: a.ID, AuthLabel: a.Label,
+					AuthKind: authKind, Model: model, Status: 499, Stream: stream, Path: path, Attempts: attempts,
+					DurationMs: time.Since(start).Milliseconds(), Error: "client canceled before first event",
+				})
+				return false, true, nil
+			}
+			log.Warnf("proxy: stream broke before any output via %s (attempt %d, %s): %v — retrying on another credential",
+				a.ID, attempts, time.Since(start).Round(time.Millisecond), res.err)
+			return true, false, nil
+		}
+		a.MarkSuccess()
+		if !res.sawTerminal {
+			log.Warnf("proxy: SSE truncated mid-stream via %s (attempt %d, events=%d, bytes=%d, %s): %v",
+				a.ID, attempts, res.events, res.bytes, time.Since(start).Round(time.Millisecond), res.err)
+		}
 	} else {
+		writeResponseHeaders(c, resp)
+		a.MarkSuccess()
 		respBody, _ := io.ReadAll(resp.Body)
 		if rewriteClientModel != "" {
 			respBody = rewriteResponseModel(respBody, rewriteClientModel)
@@ -797,10 +826,6 @@ recoveredFromSignature:
 		counts.Add(extractUsageFromJSON(respBody, &sub))
 	}
 	_ = resp.Body.Close()
-	authKind := "oauth"
-	if a.Kind == auth.KindAPIKey {
-		authKind = "apikey"
-	}
 	s.usage.Record(a.ID, a.Label, counts)
 	// Compute the wallet-side cost: hand the official upstream price to the
 	// SaaS adapter, which applies the per-(group × provider) multiplier and
@@ -1044,7 +1069,15 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	} else {
 		counts.Requests = 1
 		if stream && strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
-			streamSSE(c, resp, &counts, &sub, rewriteClientModel)
+			// Headers are already committed above (the 4xx branch needs them),
+			// so commit=nil — no cross-credential retry on this verbatim
+			// passthrough path. The relay still adds keepalive + truncation
+			// detection so a broken stream is logged, not silently swallowed.
+			res := streamSSE(c, resp, &counts, &sub, rewriteClientModel, nil)
+			if !res.sawTerminal && !isClientDisconnect(c.Request.Context(), res.err) {
+				log.Warnf("proxy(apikey): SSE truncated mid-stream via %s (events=%d, bytes=%d, %s): %v",
+					a.ID, res.events, res.bytes, time.Since(start).Round(time.Millisecond), res.err)
+			}
 		} else {
 			respBody, _ := io.ReadAll(resp.Body)
 			if rewriteClientModel != "" {
@@ -1185,10 +1218,71 @@ func kindToMimicry(k auth.Kind) string {
 // "message.model" fields rewritten to that value before being forwarded.
 //
 // Framing uses cc-core/stream.SSEScanner so the event/data parsing logic
-// is shared with other forks; this function is just the proxy-specific
-// glue (model rewrite + usage accumulation + flusher dispatch).
-func streamSSE(c *gin.Context, resp *http.Response, counts *usage.Counts, sub *advisor.SubUsage, rewriteClientModel string) {
+// is shared with other forks; this function is the proxy-specific glue
+// (model rewrite + usage accumulation + flusher dispatch).
+//
+// Resilience (mirrors the Codex relay): headers commit lazily via commit() on
+// the first downstream byte, so a stream that breaks before any output can be
+// retried by the caller on another credential; a synthetic Anthropic `ping`
+// event is emitted after >=10s of downstream silence so intermediaries
+// (Cloudflare Tunnel / the client idle timeout) don't cut a long stream while
+// the model is mid-think or running a server-side advisor sub-call; and the
+// terminal event (message_stop) is tracked so a truncated upstream is reported
+// instead of looking like a clean end-of-stream.
+func streamSSE(c *gin.Context, resp *http.Response, counts *usage.Counts, sub *advisor.SubUsage, rewriteClientModel string, commit func()) sseRelayResult {
 	flusher, _ := c.Writer.(http.Flusher)
+	var res sseRelayResult
+	var mu sync.Mutex
+	committed := false
+	lastWrite := time.Now()
+
+	write := func(b []byte) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !committed {
+			if commit != nil {
+				commit()
+			}
+			committed = true
+			res.wroteAny = true
+		}
+		n, _ := c.Writer.Write(b)
+		res.bytes += int64(n)
+		if flusher != nil {
+			flusher.Flush()
+		}
+		lastWrite = time.Now()
+	}
+
+	// Keepalive: a synthetic `ping` event is exactly what the real Anthropic API
+	// sends during gaps, so Claude Code handles it natively. Only after the
+	// first real byte, so the pre-first-byte window stays write-free (retryable).
+	const keepaliveIdle = 10 * time.Second
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				mu.Lock()
+				idle := time.Since(lastWrite)
+				active := committed
+				mu.Unlock()
+				if active && idle >= keepaliveIdle {
+					write([]byte("event: ping\ndata: {\"type\": \"ping\"}\n\n"))
+				}
+			}
+		}
+	}()
+	defer wg.Wait()
+	defer close(done)
+
 	sc := ccstream.NewSSEScanner(resp.Body, 64*1024)
 	for sc.Scan() {
 		line := sc.Line()
@@ -1206,15 +1300,42 @@ func streamSSE(c *gin.Context, resp *http.Response, counts *usage.Counts, sub *a
 					outLine = rebuilt
 				}
 			}
-			if ev := sc.Event(); ev == "message_start" || ev == "message_delta" {
+			switch sc.Event() {
+			case "message_start", "message_delta":
 				mergeSSEUsage(counts, sub, payload)
+				res.events++
+			case "message_stop", "error":
+				res.sawTerminal = true
 			}
 		}
-		_, _ = c.Writer.Write(outLine)
-		if flusher != nil {
-			flusher.Flush()
-		}
+		write(outLine)
 	}
+	if err := sc.Err(); err != nil {
+		res.err = err
+	} else if !res.sawTerminal {
+		// Clean EOF but no terminal event → upstream truncated us.
+		res.err = io.ErrUnexpectedEOF
+	}
+	return res
+}
+
+// sseRelayResult reports the outcome of an Anthropic SSE relay so the caller can
+// choose between a transparent retry (nothing reached the client yet) and a
+// logged give-up (bytes already committed downstream — uninterruptible).
+type sseRelayResult struct {
+	sawTerminal bool  // message_stop / error event relayed
+	wroteAny    bool  // at least one byte was committed to the client
+	events      int   // message_start/_delta events relayed (diagnostics)
+	bytes       int64 // bytes written downstream (diagnostics)
+	err         error // underlying read error when the stream broke early
+}
+
+// errString renders an error for a log/record field, tolerating nil.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 type usageJSON struct {
