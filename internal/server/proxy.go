@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -1231,60 +1230,18 @@ func kindToMimicry(k auth.Kind) string {
 // instead of looking like a clean end-of-stream.
 func streamSSE(c *gin.Context, resp *http.Response, counts *usage.Counts, sub *advisor.SubUsage, rewriteClientModel string, commit func()) sseRelayResult {
 	flusher, _ := c.Writer.(http.Flusher)
-	var res sseRelayResult
-	var mu sync.Mutex
-	committed := false
-	lastWrite := time.Now()
-
-	write := func(b []byte) {
-		mu.Lock()
-		defer mu.Unlock()
-		if !committed {
-			if commit != nil {
-				commit()
-			}
-			committed = true
-			res.wroteAny = true
-		}
-		n, _ := c.Writer.Write(b)
-		res.bytes += int64(n)
-		if flusher != nil {
-			flusher.Flush()
-		}
-		lastWrite = time.Now()
-	}
-
-	// Keepalive: a synthetic `ping` event is exactly what the real Anthropic API
-	// sends during gaps, so Claude Code handles it natively. Only after the
-	// first real byte, so the pre-first-byte window stays write-free (retryable).
-	const keepaliveIdle = 10 * time.Second
-	done := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		t := time.NewTicker(2 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-t.C:
-				mu.Lock()
-				idle := time.Since(lastWrite)
-				active := committed
-				mu.Unlock()
-				if active && idle >= keepaliveIdle {
-					write([]byte("event: ping\ndata: {\"type\": \"ping\"}\n\n"))
-				}
-			}
-		}
-	}()
-	defer wg.Wait()
-	defer close(done)
-
 	sc := ccstream.NewSSEScanner(resp.Body, 64*1024)
-	for sc.Scan() {
+	events := 0
+
+	// next supplies framing + model-rewrite + usage to the shared relay; the
+	// relay (cc-core/stream.Relay) owns keepalive + lazy commit + write locking.
+	next := func() (out []byte, terminal bool, err error) {
+		if !sc.Scan() {
+			if e := sc.Err(); e != nil {
+				return nil, false, e
+			}
+			return nil, false, io.EOF
+		}
 		line := sc.Line()
 		outLine := line
 		if payload := sc.Data(); payload != nil {
@@ -1303,20 +1260,27 @@ func streamSSE(c *gin.Context, resp *http.Response, counts *usage.Counts, sub *a
 			switch sc.Event() {
 			case "message_start", "message_delta":
 				mergeSSEUsage(counts, sub, payload)
-				res.events++
+				events++
 			case "message_stop", "error":
-				res.sawTerminal = true
+				terminal = true
 			}
 		}
-		write(outLine)
+		return outLine, terminal, nil
 	}
-	if err := sc.Err(); err != nil {
-		res.err = err
-	} else if !res.sawTerminal {
-		// Clean EOF but no terminal event → upstream truncated us.
-		res.err = io.ErrUnexpectedEOF
-	}
-	return res
+
+	// A synthetic `ping` event is exactly what the real Anthropic API sends
+	// during gaps, so Claude Code handles it natively.
+	r := ccstream.Relay(c.Writer, func() {
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}, ccstream.RelayOptions{
+		Commit:           commit,
+		KeepaliveIdle:    10 * time.Second,
+		KeepalivePayload: []byte("event: ping\ndata: {\"type\": \"ping\"}\n\n"),
+		Next:             next,
+	})
+	return sseRelayResult{sawTerminal: r.SawTerminal, wroteAny: r.WroteAny, events: events, bytes: r.Bytes, err: r.Err}
 }
 
 // sseRelayResult reports the outcome of an Anthropic SSE relay so the caller can

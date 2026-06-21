@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +17,7 @@ import (
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/requestlog"
+	ccstream "github.com/wjsoj/cc-core/stream"
 	"github.com/wjsoj/cc-core/usage"
 )
 
@@ -445,51 +445,13 @@ func codexTerminalEvent(payload []byte) bool {
 // read loop share one mutex around every Write/Flush.
 func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Counts) (sawTerminal bool) {
 	flusher, _ := c.Writer.(http.Flusher)
-	var mu sync.Mutex
-	lastWrite := time.Now()
-
-	write := func(b []byte) {
-		mu.Lock()
-		_, _ = c.Writer.Write(b)
-		if flusher != nil {
-			flusher.Flush()
-		}
-		lastWrite = time.Now()
-		mu.Unlock()
-	}
-
-	// Keepalive: after >=10s of downstream silence, emit an SSE comment line
-	// (":\n\n", ignored by SSE clients) to keep the connection warm.
-	const keepaliveIdle = 10 * time.Second
-	done := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		t := time.NewTicker(2 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-t.C:
-				mu.Lock()
-				idle := time.Since(lastWrite)
-				mu.Unlock()
-				if idle >= keepaliveIdle {
-					write([]byte(":\n\n"))
-				}
-			}
-		}
-	}()
-	// LIFO: close(done) first, then wait for the goroutine to exit before
-	// returning, so no keepalive write races the caller's resp.Body.Close().
-	defer wg.Wait()
-	defer close(done)
-
 	reader := newLineReader(resp.Body)
-	for {
-		line, err := reader.readLine()
+
+	// next supplies framing (raw lines) + usage + terminal detection; the shared
+	// cc-core/stream.Relay owns keepalive + write serialization. commit=nil — the
+	// caller commits headers eagerly on this path (verbatim passthrough).
+	next := func() (out []byte, terminal bool, err error) {
+		line, rerr := reader.readLine()
 		if len(line) > 0 {
 			trim := bytes.TrimRight(line, "\r\n")
 			if bytes.HasPrefix(trim, []byte("data:")) {
@@ -497,23 +459,27 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 				if len(payload) > 0 && payload[0] == '{' {
 					counts.Add(extractCodexBackendUsageFromJSON(payload))
 					if codexTerminalEvent(payload) {
-						sawTerminal = true
+						terminal = true
 					}
 				}
 			}
-			write(line)
 		}
-		if err != nil {
-			if !sawTerminal {
-				if errors.Is(err, io.EOF) {
-					log.Warnf("codex oauth: SSE stream EOF before terminal event (truncated upstream)")
-				} else {
-					log.Warnf("codex oauth: SSE stream error before terminal event: %v", err)
-				}
-			}
-			return sawTerminal
-		}
+		return line, terminal, rerr
 	}
+
+	r := ccstream.Relay(c.Writer, func() {
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}, ccstream.RelayOptions{
+		KeepaliveIdle:    10 * time.Second,
+		KeepalivePayload: []byte(":\n\n"),
+		Next:             next,
+	})
+	if !r.SawTerminal {
+		log.Warnf("codex oauth: SSE stream ended before terminal event (truncated upstream): %v", r.Err)
+	}
+	return r.SawTerminal
 }
 
 // extractCodexBackendUsageFromJSON reads usage from the ChatGPT Codex
