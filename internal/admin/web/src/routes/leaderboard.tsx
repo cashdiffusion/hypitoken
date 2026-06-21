@@ -8,6 +8,7 @@ import {
   type PixelOfficeHandle,
 } from "@/components/arena/pixel-office";
 import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
+import { useAuth } from "@/hooks/use-auth";
 import { apiGet, getJWT } from "@/lib/api";
 import type { ArenaEvent, LeaderboardResponse, LeaderRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ type Metric = "tokens" | "requests" | "invites";
 
 export default function LeaderboardPage() {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const [metric, setMetric] = useState<Metric>("tokens");
   const [data, setData] = useState<LeaderboardResponse | null>(null);
   const officeRef = useRef<PixelOfficeHandle | null>(null);
@@ -78,9 +80,13 @@ export default function LeaderboardPage() {
 
   const rows = data?.rows ?? [];
   const you = data?.you ?? null;
+  // Your own character always shows YOUR nickname on YOUR view — the public
+  // opt-in governs what *others* see of you, not what you see of yourself, so
+  // even an anonymous (opted-out) user can spot themselves by name.
+  const myName = user?.display_name?.trim();
   const players: OfficePlayer[] = rows.map((r) => ({
     actor: r.actor,
-    name: r.name,
+    name: r.is_you && myName ? myName : r.name,
     isYou: r.is_you,
   }));
 
@@ -155,7 +161,7 @@ export default function LeaderboardPage() {
           ) : (
             <div className="divide-y divide-border/60">
               {rows.map((r) => (
-                <LeaderRowItem key={r.actor} row={r} metric={metric} />
+                <LeaderRowItem key={r.actor} row={r} metric={metric} myName={myName} />
               ))}
             </div>
           )}
@@ -193,7 +199,15 @@ function MetricToggle({ metric, onChange }: { metric: Metric; onChange: (m: Metr
   );
 }
 
-function LeaderRowItem({ row, metric }: { row: LeaderRow; metric: Metric }) {
+function LeaderRowItem({
+  row,
+  metric,
+  myName,
+}: {
+  row: LeaderRow;
+  metric: Metric;
+  myName?: string;
+}) {
   const { t } = useTranslation();
   const value = metric === "tokens" ? row.tokens : row.requests;
   return (
@@ -209,7 +223,7 @@ function LeaderRowItem({ row, metric }: { row: LeaderRow; metric: Metric }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className={cn("truncate font-medium", row.is_you && "text-primary")}>
-            {row.name}
+            {row.is_you && myName ? myName : row.name}
           </span>
           {row.is_you && (
             <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">

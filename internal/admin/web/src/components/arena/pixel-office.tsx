@@ -653,6 +653,10 @@ export const PixelOffice = forwardRef<PixelOfficeHandle, { players: OfficePlayer
         const agents = [...agentsRef.current.values()];
         for (const a of agents) step(a, dt, now);
 
+        // "you" floor halo — drawn before characters so the viewer can always
+        // locate their own coworker among the crowd.
+        for (const a of agents) if (a.isYou) drawYouRing(ctx, a, now, reduce);
+
         // depth-sorted draw of props + characters
         const pcKey = PC_KEYS[Math.floor(now / 260) % PC_KEYS.length];
         type Item =
@@ -682,6 +686,8 @@ export const PixelOffice = forwardRef<PixelOfficeHandle, { players: OfficePlayer
         for (const a of agents) {
           if ((pulses.current.get(a.actor) ?? 0) > now) drawBubble(ctx, a, now, reduce);
         }
+        // bobbing "you" pin above the viewer's own character (always on top)
+        for (const a of agents) if (a.isYou) drawYouPin(ctx, a, now, reduce);
         positionLabels(labelLayerRef.current, agents, zoom);
         if (!cancelled) raf = requestAnimationFrame(draw);
       };
@@ -776,6 +782,49 @@ function drawBubble(ctx: CanvasRenderingContext2D, a: Agent, now: number, reduce
     ctx.fillStyle = i === phase ? "#ffffff" : "rgba(255,255,255,0.5)";
     ctx.fillRect(bx + 3 + i * 4, by + 4, 2, 2);
   }
+}
+
+// drawYouRing — a pulsing emerald halo at the viewer's own character's feet.
+function drawYouRing(ctx: CanvasRenderingContext2D, a: Agent, now: number, reduce: boolean | null) {
+  const t = reduce ? 0.3 : (now / 700) % 1;
+  const cx = Math.round(a.x);
+  const cy = Math.round(a.y) + 1;
+  ctx.save();
+  ctx.lineWidth = 1.3;
+  ctx.strokeStyle = `rgba(52,211,153,${(0.75 * (1 - t)).toFixed(3)})`;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, 9 + t * 5, 4.2 + t * 2.4, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(52,211,153,0.5)";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, 9, 4.2, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// drawYouPin — a bobbing pin above the viewer's own character so it's instantly
+// findable (the name label already gets a primary highlight; this adds a
+// location beacon).
+function drawYouPin(ctx: CanvasRenderingContext2D, a: Agent, now: number, reduce: boolean | null) {
+  const bob = reduce ? 0 : Math.sin(now / 320) * 1.6;
+  const cx = Math.round(a.x);
+  const ty = Math.round(a.y - CHAR_H - 18 + bob);
+  ctx.save();
+  ctx.fillStyle = "#34d399";
+  ctx.beginPath();
+  ctx.arc(cx, ty, 4.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx - 3.6, ty + 2.4);
+  ctx.lineTo(cx + 3.6, ty + 2.4);
+  ctx.lineTo(cx, ty + 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#06251a";
+  ctx.beginPath();
+  ctx.arc(cx, ty, 1.7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function roundRect(

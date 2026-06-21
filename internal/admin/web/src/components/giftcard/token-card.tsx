@@ -1,12 +1,15 @@
 // Offline, self-contained HYPITOKEN token-card renderer. Ported from
 // design/token-cards/index.html with every CDN dependency removed: fonts fall
 // back to bundled/system families, the QR is generated offline via
-// qrcode-generator, and the WebGL aurora is replaced by a CSS sheen. The whole
-// face is a single SVG string so it renders crisply at any size and exports
-// cleanly to PNG/SVG (the share artifact that drives referrals).
+// qrcode-generator, and the design's WebGL light-flow is reproduced with a
+// React-Three-Fiber aurora shader. Both faces (front + back) render stacked so
+// the whole card is visible at once. The faces are single SVG strings so they
+// export cleanly to PNG/SVG (the share artifact that drives referrals).
 
+import { Canvas, useFrame } from "@react-three/fiber";
 import qrcode from "qrcode-generator";
-import { useId, useMemo } from "react";
+import { useId, useMemo, useRef } from "react";
+import * as THREE from "three";
 
 export type CardStyle = "openai" | "claude";
 export type CardTone = "dark" | "light";
@@ -123,7 +126,6 @@ const SANS = "Bricolage Grotesque, ui-sans-serif, system-ui, sans-serif";
 const SERIF = "Fraunces, Georgia, ui-serif, serif";
 const MONO = "JetBrains Mono, ui-monospace, monospace";
 
-// guilloche — anti-counterfeit lattice (a trimmed version of the design's).
 function guilloche(cx: number, cy: number, color: string): string {
   let p = `<g opacity=".85">`;
   const N = 46;
@@ -136,13 +138,12 @@ function guilloche(cx: number, cy: number, color: string): string {
   return `${p}</g>`;
 }
 
-// EMV chip — metallic gloss + bevel.
 function chip(x: number, y: number, t: Theme, sid: string): string {
   const w = 92;
   const h = 70;
   const r = 12;
-  const X = (p: number) => (w * p).toFixed(1);
-  const Y = (p: number) => (h * p).toFixed(1);
+  const X = (q: number) => (w * q).toFixed(1);
+  const Y = (q: number) => (h * q).toFixed(1);
   return `
   <g transform="translate(${x},${y})">
     <rect width="${w}" height="${h}" rx="${r}" fill="url(#chip${sid})"/>
@@ -158,7 +159,6 @@ function chip(x: number, y: number, t: Theme, sid: string): string {
   </g>`;
 }
 
-// brand mark — a simplified, license-clean geometric glyph per style.
 function brandMark(cx: number, cy: number, t: Theme, style: CardStyle): string {
   if (style === "openai") {
     let ring = "";
@@ -168,7 +168,6 @@ function brandMark(cx: number, cy: number, t: Theme, style: CardStyle): string {
     }
     return `${ring}<circle cx="${cx}" cy="${cy}" r="30" fill="none" stroke="${t.fg}" stroke-width="3"/><path d="M${cx - 12} ${cy - 9} L${cx - 2} ${cy} L${cx - 12} ${cy + 9}" fill="none" stroke="${t.fg}" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/><line x1="${cx + 1}" y1="${cy + 11}" x2="${cx + 14}" y2="${cy + 11}" stroke="${t.fg}" stroke-width="3.4" stroke-linecap="round"/>`;
   }
-  // claude — radial sunburst
   let rays = "";
   for (let i = 0; i < 12; i++) {
     const a = (i / 12) * Math.PI * 2;
@@ -186,15 +185,11 @@ function sparkles(pts: [number, number, number][], color: string): string {
     .join("");
 }
 
-// qrSVG — offline QR matrix rendered as <rect>s, scaled into a box.
-function qrSVG(
-  text: string,
-  x: number,
-  y: number,
-  size: number,
-  dark: string,
-  light: string,
-): string {
+// qrSVG renders an offline QR matrix as <rect>s. ALWAYS dark modules on a light
+// quiet-zone panel (regardless of card tone) so it stays scannable — on a dark
+// card the white panel makes the QR pop; matching the module colour to the card
+// would make it invisible (the bug this replaces).
+function qrSVG(text: string, x: number, y: number, size: number): string {
   let qr: ReturnType<typeof qrcode>;
   try {
     qr = qrcode(0, "M");
@@ -203,13 +198,15 @@ function qrSVG(
   } catch {
     return "";
   }
+  const pad = size * 0.08;
+  const inner = size - pad * 2;
   const count = qr.getModuleCount();
-  const cell = size / count;
-  let rects = `<rect x="${x}" y="${y}" width="${size}" height="${size}" rx="6" fill="${light}"/>`;
+  const cell = inner / count;
+  let rects = `<rect x="${x}" y="${y}" width="${size}" height="${size}" rx="${(size * 0.08).toFixed(1)}" fill="#ffffff"/>`;
   for (let r = 0; r < count; r++) {
     for (let col = 0; col < count; col++) {
       if (qr.isDark(r, col)) {
-        rects += `<rect x="${(x + col * cell).toFixed(2)}" y="${(y + r * cell).toFixed(2)}" width="${cell.toFixed(2)}" height="${cell.toFixed(2)}" fill="${dark}"/>`;
+        rects += `<rect x="${(x + pad + col * cell).toFixed(2)}" y="${(y + pad + r * cell).toFixed(2)}" width="${cell.toFixed(2)}" height="${cell.toFixed(2)}" fill="#0b0b0d"/>`;
       }
     }
   }
@@ -218,7 +215,7 @@ function qrSVG(
 
 function buildFrontSVG(p: TokenCardProps, uid: string): string {
   const t = THEMES[`${p.style}-${p.tone}`];
-  const sid = uid.replace(/[^a-zA-Z0-9]/g, "");
+  const sid = `${uid.replace(/[^a-zA-Z0-9]/g, "")}f`;
   const dark = p.tone === "dark";
   const lines = (p.tagline || "").split("\n").slice(0, 2);
   const markX = 866;
@@ -286,7 +283,7 @@ function buildFrontSVG(p: TokenCardProps, uid: string): string {
     <text x="${W - 64}" y="300" text-anchor="end" font-size="68" font-weight="700" fill="url(#metal${sid})" font-family="${MONO}">${esc(p.value)}</text>
     <text x="${W - 64}" y="330" text-anchor="end" font-size="13" letter-spacing="2" fill="${t.muted}" font-family="${MONO}">${esc(p.caption || "STORED VALUE · 储值额度")}</text>
 
-    ${qrSVG(p.redeemUrl || "", W - 168, 372, 96, dark ? t.fg : "#101010", dark ? "rgba(255,255,255,.92)" : "#ffffff")}
+    ${qrSVG(p.redeemUrl || "", W - 168, 372, 96)}
 
     <text x="70" y="556" font-size="28" letter-spacing="5" fill="${t.fg}" font-family="${MONO}" opacity=".92">${esc(p.code)}</text>
     <text x="70" y="600" font-size="13" letter-spacing="2" fill="${t.muted}" font-family="${MONO}">BEARER · 持卡即享</text>
@@ -296,12 +293,171 @@ function buildFrontSVG(p: TokenCardProps, uid: string): string {
 </svg>`;
 }
 
-/** Serialise the card to a standalone SVG string (for download / rasterise). */
+const DEFAULT_TERMS = [
+  "本卡为 HypiToken 赠礼,到账为等额平台钱包额度 (USD)。",
+  "平台按官方用量 × 分组倍率实时结算,余额可用于全部模型。",
+  "不可兑换现金,不设找零。Non-cash welfare gift · settles at usage × multiplier.",
+];
+
+function buildBackSVG(p: TokenCardProps, uid: string): string {
+  const t = THEMES[`${p.style}-${p.tone}`];
+  const sid = `${uid.replace(/[^a-zA-Z0-9]/g, "")}b`;
+  const dark = p.tone === "dark";
+  const stripe = dark ? "#07070a" : "#1a1a1f";
+  const panel = dark ? "#ece9e2" : "#fbfaf6";
+  const headFont = p.style === "claude" ? SERIF : SANS;
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="${MONO}">
+  <defs>
+    <clipPath id="card${sid}"><rect width="${W}" height="${H}" rx="${R}"/></clipPath>
+    <linearGradient id="bg${sid}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${t.bg[1]}"/><stop offset="1" stop-color="${t.bg[2]}"/>
+    </linearGradient>
+    <linearGradient id="foilb${sid}" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="${t.foil}" stop-opacity="0"/><stop offset=".5" stop-color="${t.foil}" stop-opacity=".9"/><stop offset="1" stop-color="${t.foil}" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#card${sid})">
+    <rect width="${W}" height="${H}" fill="url(#bg${sid})"/>
+    <g opacity="${dark ? 0.5 : 0.4}">${guilloche(500, 520, t.guilloche)}</g>
+    <rect x="0" y="78" width="${W}" height="104" fill="${stripe}"/>
+    <rect x="0" y="78" width="${W}" height="104" fill="url(#foilb${sid})" opacity=".25"/>
+
+    <g transform="translate(64,212)">
+      <rect width="560" height="92" rx="10" fill="${panel}"/>
+      <rect width="560" height="92" rx="10" fill="none" stroke="${t.hair}"/>
+      ${Array.from({ length: 14 })
+        .map(
+          (_, i) =>
+            `<rect x="${10 + i * 40}" y="10" width="22" height="72" fill="${t.accent}" opacity=".08"/>`,
+        )
+        .join("")}
+      <text x="18" y="34" font-size="12" letter-spacing="2" fill="#6b6760">REDEEM CODE · 兑换码</text>
+      <text x="18" y="70" font-size="26" letter-spacing="2" fill="#141413" font-weight="700">${esc(p.code)}</text>
+    </g>
+
+    <g transform="translate(${W - 64 - 164},198)">
+      <rect width="164" height="164" rx="14" fill="#fbfaf6" stroke="${t.hair}"/>
+      ${qrSVG(p.redeemUrl || "", 20, 20, 124)}
+    </g>
+    <text x="${W - 64 - 82}" y="384" text-anchor="middle" font-size="11" letter-spacing="1.5" fill="${t.muted}">扫码兑换 · SCAN TO REDEEM</text>
+
+    <text x="64" y="350" font-size="13" letter-spacing="1" fill="${t.fg}" font-weight="700">使用条款 · TERMS</text>
+    ${DEFAULT_TERMS.map((l, i) => `<text x="64" y="${380 + i * 25}" font-size="13.5" fill="${t.muted}" font-family="${SANS}">${esc(l)}</text>`).join("")}
+
+    <text x="64" y="566" font-size="20" font-weight="700" letter-spacing="4" fill="${t.fg}" font-family="${headFont}">HYPITOKEN</text>
+    <text x="64" y="592" font-size="13" letter-spacing="2" fill="${t.muted}">one card · every model</text>
+    <text x="${W - 64}" y="592" text-anchor="end" font-size="12" letter-spacing="3" fill="${t.muted}">${esc(p.style.toUpperCase())} · ${esc(p.tone.toUpperCase())}</text>
+  </g>
+</svg>`;
+}
+
+// ── R3F aurora overlay (the design's WebGL light-flow, offline) ──────────────
+
+const AURA_VERT = `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}`;
+
+const AURA_FRAG = `
+precision mediump float;
+uniform float uTime;
+uniform vec3 uA;
+uniform vec3 uB;
+uniform float uIntensity;
+varying vec2 vUv;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  float a = hash(i), b = hash(i + vec2(1.0,0.0)), c = hash(i + vec2(0.0,1.0)), d = hash(i + vec2(1.0,1.0));
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+}
+float fbm(vec2 p){ float v=0.0,a=0.5; for(int i=0;i<4;i++){ v+=a*noise(p); p*=2.0; a*=0.5; } return v; }
+void main(){
+  vec2 uv = vUv;
+  float t = uTime * 0.05;
+  float n = fbm(uv * vec2(3.0, 2.0) + vec2(t, t * 0.6));
+  float bands = sin((uv.x * 2.5 + uv.y * 1.2 + n * 2.2 - t * 2.0) * 3.14159);
+  float flow = smoothstep(0.15, 1.0, n) * (0.45 + 0.55 * bands);
+  vec3 col = mix(uA, uB, clamp(n + bands * 0.2, 0.0, 1.0));
+  float corner = smoothstep(0.95, 0.15, distance(uv, vec2(0.84, 0.82)));
+  float a = clamp(flow, 0.0, 1.0) * uIntensity * (0.3 + 0.7 * corner);
+  gl_FragColor = vec4(col, a);
+}`;
+
+function AuraMesh({
+  a,
+  b,
+  intensity,
+  animate,
+}: {
+  a: string;
+  b: string;
+  intensity: number;
+  animate: boolean;
+}) {
+  const mat = useRef<THREE.ShaderMaterial>(null);
+  const uniforms = useMemo(
+    () => ({
+      uTime: { value: 0 },
+      uA: { value: new THREE.Color(a) },
+      uB: { value: new THREE.Color(b) },
+      uIntensity: { value: intensity },
+    }),
+    [a, b, intensity],
+  );
+  useFrame((_, dt) => {
+    if (animate && mat.current) mat.current.uniforms.uTime.value += dt;
+  });
+  return (
+    <mesh frustumCulled={false}>
+      <planeGeometry args={[2, 2]} />
+      <shaderMaterial
+        ref={mat}
+        uniforms={uniforms}
+        vertexShader={AURA_VERT}
+        fragmentShader={AURA_FRAG}
+        transparent
+        depthTest={false}
+        depthWrite={false}
+      />
+    </mesh>
+  );
+}
+
+function CardAura({ style, tone }: { style: CardStyle; tone: CardTone }) {
+  const t = THEMES[`${style}-${tone}`];
+  const dark = tone === "dark";
+  const animate =
+    typeof window !== "undefined" &&
+    !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  return (
+    <div
+      className="pointer-events-none absolute inset-0"
+      style={{ mixBlendMode: dark ? "screen" : "overlay", opacity: dark ? 0.55 : 0.4 }}
+    >
+      <Canvas
+        gl={{ alpha: true, antialias: false, powerPreference: "low-power" }}
+        dpr={[1, 1.5]}
+        frameloop={animate ? "always" : "demand"}
+        style={{ width: "100%", height: "100%" }}
+      >
+        <AuraMesh a={t.glow} b={t.accent2} intensity={dark ? 1 : 0.7} animate={animate} />
+      </Canvas>
+    </div>
+  );
+}
+
+// ── Public API ──────────────────────────────────────────────────────────────
+
+/** Serialise the front face to a standalone SVG string (for download). */
 export function tokenCardSVG(props: TokenCardProps): string {
   return buildFrontSVG(props, "x");
 }
 
-/** Rasterise the card SVG to a PNG blob at the given pixel width. */
+/** Rasterise the front face to a PNG blob at the given pixel width. */
 export async function tokenCardPNG(props: TokenCardProps, pxWidth = 1012): Promise<Blob> {
   const svg = buildFrontSVG(props, "x");
   const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
@@ -324,16 +480,29 @@ export async function tokenCardPNG(props: TokenCardProps, pxWidth = 1012): Promi
   });
 }
 
-/** The in-app card renderer: a crisp inline SVG that scales to its container. */
-export function TokenCard(props: TokenCardProps) {
-  const rawId = useId();
-  const svg = useMemo(() => buildFrontSVG(props, rawId), [props, rawId]);
+function Face({ svg, aura }: { svg: string; aura?: React.ReactNode }) {
   return (
     <div
-      className="relative w-full overflow-hidden rounded-[3.3%] shadow-2xl"
+      className="relative w-full overflow-hidden rounded-[3.3%] shadow-2xl ring-1 ring-white/10"
       style={{ aspectRatio: `${W} / ${H}` }}
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: locally-built, escaped SVG string (no user HTML)
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
+    >
+      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: locally-built, escaped SVG (no user HTML) */}
+      <div className="absolute inset-0" dangerouslySetInnerHTML={{ __html: svg }} />
+      {aura}
+    </div>
+  );
+}
+
+/** The in-app card renderer: front face (with the live aurora shader) stacked
+ *  above the back face, both visible at once. */
+export function TokenCard(props: TokenCardProps) {
+  const rawId = useId();
+  const front = useMemo(() => buildFrontSVG(props, rawId), [props, rawId]);
+  const back = useMemo(() => buildBackSVG(props, rawId), [props, rawId]);
+  return (
+    <div className="flex flex-col gap-4">
+      <Face svg={front} aura={<CardAura style={props.style} tone={props.tone} />} />
+      <Face svg={back} />
+    </div>
   );
 }
