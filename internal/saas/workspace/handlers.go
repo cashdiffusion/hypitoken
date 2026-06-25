@@ -84,6 +84,20 @@ func maskToken(tok string) string {
 	return tok[:7] + "…" + tok[len(tok)-4:]
 }
 
+// maskEmail returns a privacy-preserving form like "a***@corp.com" so a landing
+// page can hint which account an invite is for without exposing the full address.
+func maskEmail(email string) string {
+	at := strings.IndexByte(email, '@')
+	if at <= 0 {
+		return "***"
+	}
+	local, domain := email[:at], email[at:]
+	if len(local) <= 1 {
+		return "*" + domain
+	}
+	return local[:1] + strings.Repeat("*", 3) + domain
+}
+
 func (h *Handler) getWorkspace(c *gin.Context) {
 	w, err := h.DB.GetWorkspace(c.Request.Context(), wsID(c))
 	if err != nil {
@@ -335,9 +349,18 @@ func (h *Handler) inviteInfo(c *gin.Context) {
 	if w, werr := h.DB.GetWorkspace(c.Request.Context(), inv.WorkspaceID); werr == nil {
 		wsName = w.Name
 	}
+	// Do NOT leak the raw invitee email to whoever holds the token — return a
+	// masked form plus whether it's addressed to the *current* signed-in user,
+	// so the landing page can say "accept" or "wrong account" without exposing
+	// PII or enabling email enumeration.
+	forYou := false
+	if u := saasauth.CurrentUser(c); u != nil {
+		forYou = strings.EqualFold(u.Email, inv.Email)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"workspace_id": inv.WorkspaceID, "workspace_name": wsName,
-		"email": inv.Email, "role": inv.Role, "status": inv.EffectiveStatus(),
+		"email_masked": maskEmail(inv.Email), "for_you": forYou,
+		"role": inv.Role, "status": inv.EffectiveStatus(),
 	})
 }
 
@@ -357,6 +380,10 @@ func (h *Handler) acceptInvite(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invite is no longer valid", "status": inv.EffectiveStatus()})
 		return
 	}
+	if !u.EmailVerified {
+		c.JSON(http.StatusForbidden, gin.H{"error": "verify your email before accepting an invite"})
+		return
+	}
 	if !strings.EqualFold(inv.Email, u.Email) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "this invite was sent to a different email"})
 		return
@@ -371,7 +398,7 @@ func (h *Handler) acceptInvite(c *gin.Context) {
 // --- helpers ---
 
 func (h *Handler) inviteLink(token string) string {
-	return h.SiteURL + "/invite/" + token
+	return h.SiteURL + "/join/" + token
 }
 
 // sendInviteEmail best-effort emails the invite link. A nil mailer (or a send

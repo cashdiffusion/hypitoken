@@ -13,6 +13,17 @@ export interface User {
   display_name?: string;
   name_is_default?: boolean;
   public_opt_in?: boolean;
+  // Workspaces the user belongs to (personal first, then enterprise) with their
+  // role in each. Drives the token billing-target picker + team-management nav.
+  workspaces?: UserWorkspace[];
+}
+
+// A workspace membership as returned inline on /me.
+export interface UserWorkspace {
+  id: number;
+  name: string;
+  type: "personal" | "enterprise";
+  role: "admin" | "member";
 }
 
 // Leaderboard / arena shapes (GET /arena/leaderboard, SSE /arena/stream).
