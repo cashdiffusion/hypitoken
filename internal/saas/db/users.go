@@ -13,12 +13,14 @@ type User struct {
 	Email         string
 	PWHash        string
 	Role          string
-	BalanceUSD    float64
+	BalanceUSD    float64 // loaded from the personal workspace (see userFrom JOIN)
 	GroupID       int64
 	EmailVerified bool
 	Disabled      bool
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+
+	PersonalWorkspaceID int64
 }
 
 const (
@@ -32,7 +34,7 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	var u User
 	var ev, dis int
 	var createdAt, updatedAt int64
-	if err := row.Scan(&u.ID, &u.Email, &u.PWHash, &u.Role, &u.BalanceUSD, &u.GroupID, &ev, &dis, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Email, &u.PWHash, &u.Role, &u.BalanceUSD, &u.GroupID, &ev, &dis, &createdAt, &updatedAt, &u.PersonalWorkspaceID); err != nil {
 		return nil, err
 	}
 	u.EmailVerified = ev != 0
@@ -42,7 +44,13 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	return &u, nil
 }
 
-const userCols = `id, email, pw_hash, role, balance_usd, group_id, email_verified, disabled, created_at, updated_at`
+// userCols / userFrom load a user joined to their personal workspace so that
+// User.BalanceUSD reflects the live wallet (balance moved to workspaces in v13;
+// users.balance_usd is frozen). COALESCE falls back to the frozen column if the
+// personal workspace pointer isn't set yet (mid-migration / pre-create).
+const userCols = `u.id, u.email, u.pw_hash, u.role, COALESCE(w.balance_usd, u.balance_usd), u.group_id, u.email_verified, u.disabled, u.created_at, u.updated_at, u.personal_workspace_id`
+
+const userFrom = ` FROM users u LEFT JOIN workspaces w ON w.id = u.personal_workspace_id`
 
 func (db *DB) CreateUser(ctx context.Context, email, pwHash, role string, groupID int64, emailVerified bool) (*User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
@@ -65,11 +73,17 @@ func (db *DB) CreateUser(ctx context.Context, email, pwHash, role string, groupI
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
+	// Establish the user's personal workspace (home wallet + billing subject)
+	// so the "every user has a personal workspace" invariant holds for every
+	// creation path (registration, admin bootstrap, tests). Idempotent.
+	if _, err := db.CreatePersonalWorkspace(ctx, id, email, groupID); err != nil {
+		return nil, err
+	}
 	return db.GetUser(ctx, id)
 }
 
 func (db *DB) GetUser(ctx context.Context, id int64) (*User, error) {
-	row := db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = ?`, id)
+	row := db.QueryRowContext(ctx, `SELECT `+userCols+userFrom+` WHERE u.id = ?`, id)
 	u, err := scanUser(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -79,7 +93,7 @@ func (db *DB) GetUser(ctx context.Context, id int64) (*User, error) {
 
 func (db *DB) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	row := db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE email = ?`, email)
+	row := db.QueryRowContext(ctx, `SELECT `+userCols+userFrom+` WHERE u.email = ?`, email)
 	u, err := scanUser(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -125,15 +139,15 @@ func (db *DB) ListUsers(ctx context.Context, search string, limit, offset int) (
 	where := ""
 	search = strings.ToLower(strings.TrimSpace(search))
 	if search != "" {
-		where = " WHERE email LIKE ?"
+		where = " WHERE u.email LIKE ?"
 		args = append(args, "%"+search+"%")
 	}
 	var total int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`+where, args...).Scan(&total); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users u`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	args = append(args, limit, offset)
-	rows, err := db.QueryContext(ctx, `SELECT `+userCols+` FROM users`+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, args...)
+	rows, err := db.QueryContext(ctx, `SELECT `+userCols+userFrom+where+` ORDER BY u.id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, 0, err
 	}

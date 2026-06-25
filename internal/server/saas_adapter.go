@@ -45,18 +45,30 @@ type SaaSTokenInfo struct {
 	UserID        int64
 	Email         string
 	Name          string // token's friendly name
-	GroupID       int64
+	GroupID       int64  // pricing group of the BILLING workspace (drives multiplier)
 	BalanceUSD    float64
 	MaxConcurrent int
 	RPM           int
-	DailyUSDCap   float64
-	MonthlyUSDCap float64
+	DailyUSDCap   float64 // per-token daily cap (self-set)
+	MonthlyUSDCap float64 // per-token monthly cap (self-set)
 	Disabled      bool
 	// Groups is the priority-ordered credential-group list set on the
 	// token itself. When non-empty it overrides the user's pricing-group
 	// credential mapping for dispatch (legacy single-group routing via
 	// CredentialGroup still works as a fallback).
 	Groups []string
+
+	// Workspace billing subject (v13). The token charges WorkspaceID's pool.
+	// BalanceUSD above is the workspace's balance. The caps stack — a request
+	// is allowed only if it's under EVERY applicable cap:
+	//   WorkspaceDailyCap / WorkspaceMonthlyCap — the shared pool's caps
+	//   MemberMonthlyCap                        — this member's cap in the space
+	//   min(MonthlyUSDCap, AdminMonthlyCap>0)   — the per-key cap (self + admin)
+	WorkspaceID         int64
+	WorkspaceDailyCap   float64
+	WorkspaceMonthlyCap float64
+	MemberMonthlyCap    float64
+	AdminMonthlyCap     float64
 }
 
 // PreCheckError is the per-request rejection produced by SaaSAdapter.PreCheck.

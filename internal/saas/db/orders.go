@@ -110,19 +110,13 @@ func (db *DB) CreditPaidOrder(ctx context.Context, outTradeNo, tradeNo string, u
 	// Step 2 — read current balance under the same transaction (so a
 	// concurrent charge can't race the read/write), apply the delta, write
 	// both the balance and the wallet_tx ledger row.
-	var bal float64
-	if err := tx.QueryRowContext(ctx, `SELECT balance_usd FROM users WHERE id = ?`, userID).Scan(&bal); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, ErrNotFound
-		}
+	// Credit the user's PERSONAL workspace (balance moved off users in v13).
+	wsID, err := personalWorkspaceIDTx(ctx, tx, userID)
+	if err != nil {
 		return 0, err
 	}
-	bal += usdCredit
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET balance_usd = ?, updated_at = ? WHERE id = ?`, bal, now, userID); err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx (user_id, kind, amount_usd, ref, note, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		userID, TxKindTopup, usdCredit, ref, note, now); err != nil {
+	bal, err := addWorkspaceBalanceTx(ctx, tx, wsID, userID, TxKindTopup, usdCredit, ref, note, true)
+	if err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -158,19 +152,13 @@ func (db *DB) CreditStripeOrder(ctx context.Context, outTradeNo, tradeNo string,
 		return 0, ErrOrderNotPending
 	}
 
-	var bal float64
-	if err := tx.QueryRowContext(ctx, `SELECT balance_usd FROM users WHERE id = ?`, userID).Scan(&bal); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, ErrNotFound
-		}
+	// Credit the user's PERSONAL workspace (balance moved off users in v13).
+	wsID, err := personalWorkspaceIDTx(ctx, tx, userID)
+	if err != nil {
 		return 0, err
 	}
-	bal += usdCredit
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET balance_usd = ?, updated_at = ? WHERE id = ?`, bal, now, userID); err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx (user_id, kind, amount_usd, ref, note, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		userID, TxKindTopup, usdCredit, ref, note, now); err != nil {
+	bal, err := addWorkspaceBalanceTx(ctx, tx, wsID, userID, TxKindTopup, usdCredit, ref, note, true)
+	if err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {

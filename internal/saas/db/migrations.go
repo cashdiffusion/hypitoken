@@ -460,6 +460,99 @@ SELECT id, 25, 'SIGNATURE', 'openai', 15, 'signature', strftime('%s','now') FROM
 	`
 ALTER TABLE referral_campaigns ADD COLUMN daily_budget_usd REAL NOT NULL DEFAULT 0;
 `,
+
+	// v13 — Workspace model: the billing/quota SUBJECT. Until now the wallet
+	// balance lived on users.balance_usd and every API token billed its owner.
+	// To support B2B (a company sharing one quota pool across staff) without
+	// disrupting the 100+ existing individual users, we introduce Workspaces:
+	//
+	//   Workspace = wallet + bill;  User = person;  membership = role in a space;
+	//   API key   = call credential bound to ONE workspace (bills that pool);
+	//   pricing_group stays purely calc/route (NOT touched here).
+	//
+	// Backward compat is the whole point: every existing user gets a `personal`
+	// workspace whose balance IS their old balance, they become its admin, and
+	// all their tokens + historical ledger rows are attributed to it. The
+	// users.balance_usd column is FROZEN (left in place for rollback safety) —
+	// the live balance now lives on workspaces.balance_usd, and User.BalanceUSD
+	// is loaded via a JOIN on users.personal_workspace_id (so every existing
+	// reader keeps working unchanged). Enterprise workspaces are provisioned by
+	// the platform admin only (no self-service); members join by email invite.
+	`
+CREATE TABLE workspaces (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL DEFAULT '',
+    type            TEXT    NOT NULL DEFAULT 'personal',   -- personal | enterprise
+    balance_usd     REAL    NOT NULL DEFAULT 0,
+    daily_usd_cap   REAL    NOT NULL DEFAULT 0,            -- 0 = no cap
+    monthly_usd_cap REAL    NOT NULL DEFAULT 0,            -- 0 = no cap
+    group_id        INTEGER NOT NULL DEFAULT 0,            -- pricing group; 0 = default
+    created_by      INTEGER NOT NULL DEFAULT 0,            -- user_id of creator (0 = system)
+    disabled        INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_workspaces_type ON workspaces(type);
+CREATE INDEX idx_workspaces_creator ON workspaces(created_by);
+
+CREATE TABLE workspace_members (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id    INTEGER NOT NULL,
+    user_id         INTEGER NOT NULL,
+    role            TEXT    NOT NULL DEFAULT 'member',      -- admin | member
+    monthly_usd_cap REAL    NOT NULL DEFAULT 0,             -- per-member cap in this space; 0 = none
+    created_at      INTEGER NOT NULL,
+    UNIQUE(workspace_id, user_id),
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_workspace_members_ws   ON workspace_members(workspace_id);
+CREATE INDEX idx_workspace_members_user ON workspace_members(user_id);
+
+CREATE TABLE workspace_invites (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id     INTEGER NOT NULL,
+    email            TEXT    NOT NULL,                      -- lowercased invite target
+    role             TEXT    NOT NULL DEFAULT 'member',
+    token            TEXT    NOT NULL UNIQUE,               -- random; in the invite link
+    status           TEXT    NOT NULL DEFAULT 'pending',    -- pending | accepted | revoked | expired
+    invited_by       INTEGER NOT NULL DEFAULT 0,
+    accepted_user_id INTEGER NOT NULL DEFAULT 0,
+    expires_at       INTEGER NOT NULL DEFAULT 0,
+    created_at       INTEGER NOT NULL,
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_workspace_invites_email ON workspace_invites(email, status);
+CREATE INDEX idx_workspace_invites_ws    ON workspace_invites(workspace_id);
+
+ALTER TABLE users       ADD COLUMN personal_workspace_id INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE user_tokens ADD COLUMN workspace_id      INTEGER NOT NULL DEFAULT 0;  -- which space this key bills
+ALTER TABLE user_tokens ADD COLUMN admin_monthly_cap REAL    NOT NULL DEFAULT 0;  -- space-admin imposed cap; 0 = none
+ALTER TABLE wallet_tx   ADD COLUMN workspace_id      INTEGER NOT NULL DEFAULT 0;  -- billing subject; user_id kept for attribution
+
+-- Backfill: one personal workspace per existing user, balance carried over.
+INSERT INTO workspaces (name, type, balance_usd, group_id, created_by, created_at, updated_at)
+SELECT email, 'personal', balance_usd, group_id, id, strftime('%s','now'), strftime('%s','now')
+FROM users;
+
+-- Point each user at their personal workspace (created_by uniquely identifies it
+-- at this moment — only personal workspaces exist so far).
+UPDATE users SET personal_workspace_id =
+    (SELECT w.id FROM workspaces w WHERE w.created_by = users.id AND w.type = 'personal' LIMIT 1);
+
+-- The user is the admin of their own personal workspace.
+INSERT INTO workspace_members (workspace_id, user_id, role, created_at)
+SELECT personal_workspace_id, id, 'admin', strftime('%s','now')
+FROM users WHERE personal_workspace_id > 0;
+
+-- Bind existing tokens + historical ledger rows to the owner's personal space.
+UPDATE user_tokens SET workspace_id =
+    (SELECT personal_workspace_id FROM users WHERE users.id = user_tokens.user_id)
+WHERE workspace_id = 0;
+UPDATE wallet_tx SET workspace_id =
+    (SELECT personal_workspace_id FROM users WHERE users.id = wallet_tx.user_id)
+WHERE workspace_id = 0;
+`,
 }
 
 func (db *DB) migrate() error {

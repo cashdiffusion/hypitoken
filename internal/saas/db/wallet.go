@@ -57,8 +57,20 @@ func (db *DB) AddBalance(ctx context.Context, userID int64, kind string, deltaUS
 // single atomic unit, so we can't end up with money moved but the gift row
 // unrecorded if the process crashes between the two. Returns the new balance.
 func AddBalanceTx(ctx context.Context, tx *sql.Tx, userID int64, kind string, deltaUSD float64, ref, note string, allowNegative bool) (float64, error) {
+	// User-centric money-in (topup / adjust / bonus / gift) always credits the
+	// user's PERSONAL workspace — the home wallet that used to be users.balance_usd.
+	wsID, err := personalWorkspaceIDTx(ctx, tx, userID)
+	if err != nil {
+		return 0, err
+	}
+	return addWorkspaceBalanceTx(ctx, tx, wsID, userID, kind, deltaUSD, ref, note, allowNegative)
+}
+
+// addWorkspaceBalanceTx applies a signed delta to a workspace's balance and
+// records a wallet_tx row (attributed to userID) within the caller's tx.
+func addWorkspaceBalanceTx(ctx context.Context, tx *sql.Tx, workspaceID, userID int64, kind string, deltaUSD float64, ref, note string, allowNegative bool) (float64, error) {
 	var bal float64
-	if err := tx.QueryRowContext(ctx, `SELECT balance_usd FROM users WHERE id = ?`, userID).Scan(&bal); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT balance_usd FROM workspaces WHERE id = ?`, workspaceID).Scan(&bal); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, ErrNotFound
 		}
@@ -69,27 +81,38 @@ func AddBalanceTx(ctx context.Context, tx *sql.Tx, userID int64, kind string, de
 		return 0, ErrInsufficientBalance
 	}
 	now := time.Now().Unix()
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET balance_usd = ?, updated_at = ? WHERE id = ?`, bal, now, userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET balance_usd = ?, updated_at = ? WHERE id = ?`, bal, now, workspaceID); err != nil {
 		return 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx (user_id, kind, amount_usd, ref, note, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		userID, kind, deltaUSD, ref, note, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx (user_id, workspace_id, kind, amount_usd, ref, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		userID, workspaceID, kind, deltaUSD, ref, note, now); err != nil {
 		return 0, err
 	}
 	return bal, nil
 }
 
-// ChargeWithFloor deducts amountUSD (must be >= 0) from the user's wallet in a
-// single transaction, recording a wallet_tx of the given kind with a negative
-// amount. The balance may go negative — a request that has already hit upstream
-// must be billed — but never below -maxOverdraftUSD: if the full charge would
-// breach that floor it is clamped so the balance rests exactly on the floor,
-// and the clamped (actually-charged) amount is returned so the request log
-// stays in lockstep with the ledger. A maxOverdraftUSD <= 0 disables the floor
-// (unbounded negative). Returns (newBalance, chargedUSD).
+// ChargeWithFloor deducts from the USER's personal workspace (the legacy
+// "charge my own wallet" path). The proxy hot path uses ChargeWorkspaceWithFloor
+// with the token's bound workspace instead.
 func (db *DB) ChargeWithFloor(ctx context.Context, userID int64, kind string, amountUSD float64, ref, note string, maxOverdraftUSD float64) (newBal float64, charged float64, err error) {
+	wsID, err := db.PersonalWorkspaceID(ctx, userID)
+	if err != nil {
+		return 0, 0, err
+	}
+	return db.ChargeWorkspaceWithFloor(ctx, wsID, userID, kind, amountUSD, ref, note, maxOverdraftUSD)
+}
+
+// ChargeWorkspaceWithFloor deducts amountUSD (>= 0) from a workspace's balance
+// pool in a single transaction, recording a wallet_tx of the given kind with a
+// negative amount, attributed to userID (the member who triggered the request).
+// The balance may go negative — a request that already hit upstream must be
+// billed — but never below -maxOverdraftUSD: a charge that would breach that
+// floor is clamped so the balance rests exactly on it, and the clamped
+// (actually-charged) amount is returned so the request log stays in lockstep
+// with the ledger. maxOverdraftUSD <= 0 disables the floor.
+func (db *DB) ChargeWorkspaceWithFloor(ctx context.Context, workspaceID, userID int64, kind string, amountUSD float64, ref, note string, maxOverdraftUSD float64) (newBal float64, charged float64, err error) {
 	if amountUSD <= 0 {
-		bal, gerr := db.GetBalance(ctx, userID)
+		bal, gerr := db.GetWorkspaceBalance(ctx, workspaceID)
 		return bal, 0, gerr
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -99,7 +122,7 @@ func (db *DB) ChargeWithFloor(ctx context.Context, userID int64, kind string, am
 	defer tx.Rollback()
 
 	var bal float64
-	if err := tx.QueryRowContext(ctx, `SELECT balance_usd FROM users WHERE id = ?`, userID).Scan(&bal); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT balance_usd FROM workspaces WHERE id = ?`, workspaceID).Scan(&bal); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, 0, ErrNotFound
 		}
@@ -123,11 +146,11 @@ func (db *DB) ChargeWithFloor(ctx context.Context, userID int64, kind string, am
 	}
 
 	now := time.Now().Unix()
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET balance_usd = ?, updated_at = ? WHERE id = ?`, newBal, now, userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET balance_usd = ?, updated_at = ? WHERE id = ?`, newBal, now, workspaceID); err != nil {
 		return 0, 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx (user_id, kind, amount_usd, ref, note, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		userID, kind, -charged, ref, note, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx (user_id, workspace_id, kind, amount_usd, ref, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		userID, workspaceID, kind, -charged, ref, note, now); err != nil {
 		return 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -136,13 +159,42 @@ func (db *DB) ChargeWithFloor(ctx context.Context, userID int64, kind string, am
 	return newBal, charged, nil
 }
 
-func (db *DB) GetBalance(ctx context.Context, userID int64) (float64, error) {
+// PersonalWorkspaceID resolves a user's personal (home) workspace id.
+func (db *DB) PersonalWorkspaceID(ctx context.Context, userID int64) (int64, error) {
+	var ws int64
+	if err := db.QueryRowContext(ctx, `SELECT personal_workspace_id FROM users WHERE id = ?`, userID).Scan(&ws); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
+	if ws == 0 {
+		_ = db.QueryRowContext(ctx, `SELECT id FROM workspaces WHERE created_by = ? AND type = 'personal' ORDER BY id LIMIT 1`, userID).Scan(&ws)
+	}
+	if ws == 0 {
+		return 0, ErrNotFound
+	}
+	return ws, nil
+}
+
+// GetWorkspaceBalance returns a workspace's current balance.
+func (db *DB) GetWorkspaceBalance(ctx context.Context, workspaceID int64) (float64, error) {
 	var bal float64
-	err := db.QueryRowContext(ctx, `SELECT balance_usd FROM users WHERE id = ?`, userID).Scan(&bal)
+	err := db.QueryRowContext(ctx, `SELECT balance_usd FROM workspaces WHERE id = ?`, workspaceID).Scan(&bal)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrNotFound
 	}
 	return bal, err
+}
+
+// GetBalance returns the user's personal-workspace balance (legacy user-centric
+// accessor; unchanged call sites keep working).
+func (db *DB) GetBalance(ctx context.Context, userID int64) (float64, error) {
+	wsID, err := db.PersonalWorkspaceID(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	return db.GetWorkspaceBalance(ctx, wsID)
 }
 
 // ListWalletTx returns a page of the user's transactions plus the matching
@@ -318,12 +370,37 @@ func (db *DB) FleetTotals(ctx context.Context) (*FleetWalletTotals, error) {
 	return &t, nil
 }
 
-// SumChargeSince returns total absolute USD charged from this user's wallet
-// since `since`. Useful for daily/monthly usage caps on tokens.
+// SumChargeSince returns total absolute USD charged attributed to this user
+// since `since` (across whatever workspaces their tokens billed). Used for the
+// user's own spend stats.
 func (db *DB) SumChargeSince(ctx context.Context, userID int64, since time.Time) (float64, error) {
 	var sum sql.NullFloat64
 	err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(-amount_usd), 0) FROM wallet_tx WHERE user_id = ? AND kind = 'charge' AND created_at >= ?`,
 		userID, since.Unix()).Scan(&sum)
+	if err != nil {
+		return 0, err
+	}
+	return sum.Float64, nil
+}
+
+// SumChargeSinceForWorkspace returns total USD charged against a workspace's
+// pool since `since`. Powers the workspace daily/monthly caps.
+func (db *DB) SumChargeSinceForWorkspace(ctx context.Context, workspaceID int64, since time.Time) (float64, error) {
+	var sum sql.NullFloat64
+	err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(-amount_usd), 0) FROM wallet_tx WHERE workspace_id = ? AND kind = 'charge' AND created_at >= ?`,
+		workspaceID, since.Unix()).Scan(&sum)
+	if err != nil {
+		return 0, err
+	}
+	return sum.Float64, nil
+}
+
+// SumChargeSinceForMember returns total USD a member has charged against a
+// specific workspace's pool since `since`. Powers the per-member cap.
+func (db *DB) SumChargeSinceForMember(ctx context.Context, workspaceID, userID int64, since time.Time) (float64, error) {
+	var sum sql.NullFloat64
+	err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(-amount_usd), 0) FROM wallet_tx WHERE workspace_id = ? AND user_id = ? AND kind = 'charge' AND created_at >= ?`,
+		workspaceID, userID, since.Unix()).Scan(&sum)
 	if err != nil {
 		return 0, err
 	}
@@ -347,7 +424,7 @@ func (db *DB) AdminDashboard(ctx context.Context) (*AdminDashboardSnapshot, erro
 			COALESCE(SUM(CASE WHEN email_verified=1 THEN 1 ELSE 0 END),0),
 			COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END),0),
 			COALESCE(SUM(CASE WHEN disabled=1 THEN 1 ELSE 0 END),0),
-			COALESCE(SUM(balance_usd),0)
+			COALESCE((SELECT SUM(balance_usd) FROM workspaces),0)
 		FROM users`, d30).
 		Scan(&snap.UsersTotal, &snap.UsersVerified, &snap.UsersNew30d,
 			&snap.UsersDisabled, &snap.BalanceOutstanding); err != nil {

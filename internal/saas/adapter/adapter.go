@@ -120,19 +120,53 @@ func (a *Adapter) Lookup(token string) (server.SaaSTokenInfo, bool) {
 	if err != nil {
 		return server.SaaSTokenInfo{}, false
 	}
+
+	// Resolve the workspace this token bills (v13). Fall back to the user's
+	// personal workspace for any legacy/unbound token.
+	wsID := t.WorkspaceID
+	if wsID == 0 {
+		wsID, _ = a.DB.PersonalWorkspaceID(ctx, u.ID)
+	}
+	ws, err := a.DB.GetWorkspace(ctx, wsID)
+	if err != nil {
+		return server.SaaSTokenInfo{}, false
+	}
+	groupID := ws.GroupID
+	if groupID == 0 {
+		groupID = u.GroupID
+	}
+	// Membership in the billing workspace gates access + carries the per-member
+	// cap. The owner of a personal workspace is always its admin member; an
+	// enterprise member who has been removed must be denied.
+	memberOK := false
+	var memberCap float64
+	if m, merr := a.DB.GetWorkspaceMember(ctx, wsID, u.ID); merr == nil {
+		memberOK = true
+		memberCap = m.MonthlyUSDCap
+	}
+	disabled := t.Disabled || u.Disabled || ws.Disabled
+	if ws.Type == db.WorkspaceTypeEnterprise && !memberOK {
+		disabled = true // removed from the enterprise space → token can't bill it
+	}
+
 	return server.SaaSTokenInfo{
-		TokenID:       t.ID,
-		UserID:        u.ID,
-		Email:         u.Email,
-		Name:          t.Name,
-		GroupID:       u.GroupID,
-		BalanceUSD:    u.BalanceUSD,
-		MaxConcurrent: t.MaxConcurrent,
-		RPM:           t.RPM,
-		DailyUSDCap:   t.DailyUSDCap,
-		MonthlyUSDCap: t.MonthlyUSDCap,
-		Disabled:      t.Disabled || u.Disabled,
-		Groups:        append([]string(nil), t.Groups...),
+		TokenID:             t.ID,
+		UserID:              u.ID,
+		Email:               u.Email,
+		Name:                t.Name,
+		GroupID:             groupID,
+		BalanceUSD:          ws.BalanceUSD,
+		MaxConcurrent:       t.MaxConcurrent,
+		RPM:                 t.RPM,
+		DailyUSDCap:         t.DailyUSDCap,
+		MonthlyUSDCap:       t.MonthlyUSDCap,
+		Disabled:            disabled,
+		Groups:              append([]string(nil), t.Groups...),
+		WorkspaceID:         wsID,
+		WorkspaceDailyCap:   ws.DailyUSDCap,
+		WorkspaceMonthlyCap: ws.MonthlyUSDCap,
+		MemberMonthlyCap:    memberCap,
+		AdminMonthlyCap:     t.AdminMonthlyCap,
 	}, true
 }
 
@@ -140,25 +174,70 @@ func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *serv
 	if info.Disabled {
 		return &server.PreCheckError{Status: http.StatusForbidden, Body: map[string]any{"error": "token or account disabled"}}
 	}
+	// Balance is the BILLING workspace's pool (personal or enterprise).
 	if info.BalanceUSD <= 0 {
 		return &server.PreCheckError{Status: http.StatusPaymentRequired, Body: map[string]any{"error": "insufficient balance", "balance_usd": info.BalanceUSD}}
 	}
-	// Daily / monthly caps (enforced against wallet_tx ledger).
 	now := time.Now()
+	dayStart := now.Truncate(24 * time.Hour)
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+
+	// Layer 1 — the shared workspace pool's own caps (no-op for personal spaces,
+	// whose caps are 0). Enforced against the workspace-scoped ledger.
+	if info.WorkspaceDailyCap > 0 {
+		spent, err := a.DB.SumChargeSinceForWorkspace(ctx, info.WorkspaceID, dayStart)
+		if err == nil && spent >= info.WorkspaceDailyCap {
+			return &server.PreCheckError{Status: http.StatusTooManyRequests, Body: map[string]any{"error": "workspace daily cap exceeded", "spent_usd": spent, "cap_usd": info.WorkspaceDailyCap}}
+		}
+	}
+	if info.WorkspaceMonthlyCap > 0 {
+		spent, err := a.DB.SumChargeSinceForWorkspace(ctx, info.WorkspaceID, monthStart)
+		if err == nil && spent >= info.WorkspaceMonthlyCap {
+			return &server.PreCheckError{Status: http.StatusTooManyRequests, Body: map[string]any{"error": "workspace monthly cap exceeded", "spent_usd": spent, "cap_usd": info.WorkspaceMonthlyCap}}
+		}
+	}
+
+	// Layer 2 — this member's cap within the workspace (prevents one member
+	// draining the shared pool). Scoped to (workspace, user).
+	if info.MemberMonthlyCap > 0 {
+		spent, err := a.DB.SumChargeSinceForMember(ctx, info.WorkspaceID, info.UserID, monthStart)
+		if err == nil && spent >= info.MemberMonthlyCap {
+			return &server.PreCheckError{Status: http.StatusTooManyRequests, Body: map[string]any{"error": "member monthly cap exceeded", "spent_usd": spent, "cap_usd": info.MemberMonthlyCap}}
+		}
+	}
+
+	// Layer 3 — the per-token caps (self-set; daily + monthly). Attributed to
+	// the member's own spend. The space-admin per-key override (AdminMonthlyCap)
+	// is folded into the effective monthly cap.
 	if info.DailyUSDCap > 0 {
-		spent, err := a.DB.SumChargeSince(ctx, info.UserID, now.Truncate(24*time.Hour))
+		spent, err := a.DB.SumChargeSince(ctx, info.UserID, dayStart)
 		if err == nil && spent >= info.DailyUSDCap {
 			return &server.PreCheckError{Status: http.StatusTooManyRequests, Body: map[string]any{"error": "daily cap exceeded", "spent_usd": spent, "cap_usd": info.DailyUSDCap}}
 		}
 	}
-	if info.MonthlyUSDCap > 0 {
-		monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	if mcap := effectiveMonthlyCap(info.MonthlyUSDCap, info.AdminMonthlyCap); mcap > 0 {
 		spent, err := a.DB.SumChargeSince(ctx, info.UserID, monthStart)
-		if err == nil && spent >= info.MonthlyUSDCap {
-			return &server.PreCheckError{Status: http.StatusTooManyRequests, Body: map[string]any{"error": "monthly cap exceeded", "spent_usd": spent, "cap_usd": info.MonthlyUSDCap}}
+		if err == nil && spent >= mcap {
+			return &server.PreCheckError{Status: http.StatusTooManyRequests, Body: map[string]any{"error": "monthly cap exceeded", "spent_usd": spent, "cap_usd": mcap}}
 		}
 	}
 	return nil
+}
+
+// effectiveMonthlyCap folds the owner's self-set per-token monthly cap with any
+// space-admin-imposed cap, taking the tighter (smaller, non-zero) of the two.
+// 0 on either side means "no cap from that source".
+func effectiveMonthlyCap(self, admin float64) float64 {
+	switch {
+	case self <= 0:
+		return admin
+	case admin <= 0:
+		return self
+	case admin < self:
+		return admin
+	default:
+		return self
+	}
 }
 
 // Charge applies the user's group multiplier to the upstream-side official
@@ -185,16 +264,18 @@ func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provide
 		return 0, nil
 	}
 	ref := fmt.Sprintf("token=%d model=%s", info.TokenID, model)
-	// Deduct with an overdraft floor: a request that already hit upstream must
-	// be billed, but the wallet can never be driven below -MaxOverdraftUSD by a
-	// single huge request or a burst of concurrent ones. The clamped amount is
-	// what we record, so the request log and the wallet ledger stay in lockstep.
-	_, charged, err := a.DB.ChargeWithFloor(ctx, info.UserID, db.TxKindCharge, billed, ref, "", a.MaxOverdraftUSD)
+	// Deduct from the BILLING WORKSPACE's pool with an overdraft floor: a request
+	// that already hit upstream must be billed, but the pool can never be driven
+	// below -MaxOverdraftUSD by a single huge request or a burst of concurrent
+	// ones. The clamped amount is what we record, so the request log and the
+	// wallet ledger stay in lockstep. The charge is attributed to info.UserID
+	// (the member who triggered it) for per-member usage/audit.
+	_, charged, err := a.DB.ChargeWorkspaceWithFloor(ctx, info.WorkspaceID, info.UserID, db.TxKindCharge, billed, ref, "", a.MaxOverdraftUSD)
 	if err != nil {
 		return 0, err
 	}
 	if charged < billed {
-		log.Warnf("saas: overdraft floor hit for user %d — billed %.6f clamped to %.6f (max_overdraft=$%.2f)", info.UserID, billed, charged, a.MaxOverdraftUSD)
+		log.Warnf("saas: overdraft floor hit for workspace %d (user %d) — billed %.6f clamped to %.6f (max_overdraft=$%.2f)", info.WorkspaceID, info.UserID, billed, charged, a.MaxOverdraftUSD)
 	}
 	billed = charged
 	a.DB.TouchUserToken(ctx, info.TokenID)

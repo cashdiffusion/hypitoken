@@ -24,16 +24,21 @@ type UserToken struct {
 	// Groups is the priority-ordered credential-group fallthrough list.
 	// Empty = inherit user.GroupID (legacy single-group routing).
 	Groups []string
+	// WorkspaceID is the billing subject this token charges (personal or
+	// enterprise). AdminMonthlyCap is a space-admin-imposed per-key cap (0 =
+	// none); the effective cap is min(MonthlyUSDCap, AdminMonthlyCap>0).
+	WorkspaceID     int64
+	AdminMonthlyCap float64
 }
 
-const tokenCols = `id, user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at, groups`
+const tokenCols = `id, user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at, groups, workspace_id, admin_monthly_cap`
 
 func scanToken(row interface{ Scan(...any) error }) (*UserToken, error) {
 	var t UserToken
 	var disabled int
 	var lastUsed, created int64
 	var groupsJSON string
-	if err := row.Scan(&t.ID, &t.UserID, &t.Token, &t.Name, &t.DailyUSDCap, &t.MonthlyUSDCap, &t.MaxConcurrent, &t.RPM, &disabled, &lastUsed, &created, &groupsJSON); err != nil {
+	if err := row.Scan(&t.ID, &t.UserID, &t.Token, &t.Name, &t.DailyUSDCap, &t.MonthlyUSDCap, &t.MaxConcurrent, &t.RPM, &disabled, &lastUsed, &created, &groupsJSON, &t.WorkspaceID, &t.AdminMonthlyCap); err != nil {
 		return nil, err
 	}
 	t.Disabled = disabled != 0
@@ -73,6 +78,9 @@ type TokenParams struct {
 	MaxConcurrent int
 	RPM           int
 	Groups        []string
+	// WorkspaceID is the billing target chosen at creation. 0 = bind to the
+	// user's personal workspace (default for individual users).
+	WorkspaceID int64
 }
 
 func (db *DB) CreateUserToken(ctx context.Context, userID int64, p TokenParams) (*UserToken, error) {
@@ -80,11 +88,18 @@ func (db *DB) CreateUserToken(ctx context.Context, userID int64, p TokenParams) 
 	if err != nil {
 		return nil, err
 	}
+	wsID := p.WorkspaceID
+	if wsID == 0 {
+		// Default: bind to the owner's personal workspace.
+		if pw, perr := db.PersonalWorkspaceID(ctx, userID); perr == nil {
+			wsID = pw
+		}
+	}
 	now := time.Now().Unix()
 	res, err := db.ExecContext(ctx, `INSERT INTO user_tokens
-		(user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at, groups)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
-		userID, tok, p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, now, marshalGroupsJSON(p.Groups))
+		(user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at, groups, workspace_id, admin_monthly_cap)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 0)`,
+		userID, tok, p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, now, marshalGroupsJSON(p.Groups), wsID)
 	if err != nil {
 		return nil, err
 	}

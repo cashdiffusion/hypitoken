@@ -152,6 +152,8 @@ func (h *Handler) register(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// CreateUser already established the user's personal workspace (home wallet +
+	// billing subject), so the bonus / gift-claim balance moves below succeed.
 	// Signup bonus + anti-abuse. The growth module records the device
 	// fingerprint/IP for EVERY signup and decides (a) whether it matched a
 	// marketing channel and (b) whether it looks like welcome-bonus farming. A
