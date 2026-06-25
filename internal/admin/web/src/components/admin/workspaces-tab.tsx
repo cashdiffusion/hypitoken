@@ -305,7 +305,8 @@ function MembersDialog({
     }
   };
   const remove = async (m: Member) => {
-    if (!(await confirm({ title: t("admin.workspaces.removeMember"), description: m.email }))) return;
+    if (!(await confirm({ title: t("admin.workspaces.removeMember"), description: m.email })))
+      return;
     try {
       await apiDelete(`/admin/workspaces/${ws.id}/members/${m.user_id}`);
       load();
