@@ -20,6 +20,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/profile"
 	"github.com/wjsoj/CPA-Claude/internal/saas/referral"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
+	"github.com/wjsoj/CPA-Claude/internal/saas/workspace"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/cc-core/requestlog"
@@ -30,7 +31,7 @@ import (
 // /api/v2/admin/credentials/* is exposed. legacyH may be nil — when set, the
 // /api/v2/admin/* group also exposes request-log queries + Anthropic OAuth
 // quota probe (handlers reused from the legacy operator API).
-func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service, arenaH *arena.Service, profileH *profile.Handler, referralH *referral.Service) {
+func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service, arenaH *arena.Service, profileH *profile.Handler, referralH *referral.Service, workspaceH *workspace.Handler) {
 	v2 := engine.Group("/api/v2")
 
 	// Public.
@@ -83,6 +84,16 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			user["name_is_default"] = p.NameIsDefault
 			user["public_opt_in"] = p.PublicOptIn
 		}
+		// Workspaces the user belongs to (personal first, then any enterprise
+		// spaces) with their role — drives the token billing-target picker and
+		// conditional team-management nav.
+		wsOut := []gin.H{}
+		if list, werr := store.ListWorkspacesForUser(c.Request.Context(), u.ID); werr == nil {
+			for _, w := range list {
+				wsOut = append(wsOut, gin.H{"id": w.WorkspaceID, "name": w.Name, "type": w.Type, "role": w.Role})
+			}
+		}
+		user["workspaces"] = wsOut
 		c.JSON(http.StatusOK, gin.H{"user": user, "group": g})
 	})
 	tokensH.Routes(authed.Group("/tokens"))
@@ -649,10 +660,21 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	// is open to all users (per the SSO design). No PII, just sums.
 	authed.GET("/admin/wallet-totals", adminH.WalletTotalsHandler())
 
+	// Workspace (enterprise space) team management. Invite accept is open to any
+	// signed-in user; the team-management subtree is gated per-workspace to that
+	// space's own admins (a customer-facing role — NO fleet/credential access).
+	if workspaceH != nil {
+		workspaceH.AcceptRoutes(authed)
+		teamG := authed.Group("/workspaces/:id")
+		teamG.Use(saasauth.RequireWorkspaceAdmin(store))
+		workspaceH.TeamRoutes(teamG)
+	}
+
 	// Admin (operator-only).
 	adminG := authed.Group("/admin")
 	adminG.Use(saasauth.RequireAdmin())
 	adminH.Routes(adminG)
+	adminH.WorkspaceRoutes(adminG)
 	if credH != nil {
 		credH.Routes(adminG)
 	}

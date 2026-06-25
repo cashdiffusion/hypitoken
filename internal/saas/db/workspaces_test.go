@@ -136,3 +136,54 @@ func TestMemberSpendScopedToWorkspace(t *testing.T) {
 		t.Fatalf("personal member spend = %v, want 3", s)
 	}
 }
+
+// Invite lifecycle: create pending -> accept -> membership created + status flips.
+func TestWorkspaceInviteAcceptCreatesMembership(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+	owner := mkUser(t, d, "owner@corp.com")
+	invitee := mkUser(t, d, "invitee@corp.com")
+
+	now := time.Now().Unix()
+	res, _ := d.ExecContext(ctx, `INSERT INTO workspaces (name, type, balance_usd, created_at, updated_at) VALUES ('Corp','enterprise',0,?,?)`, now, now)
+	entWS, _ := res.LastInsertId()
+	_ = owner
+
+	inv, err := d.CreateWorkspaceInvite(ctx, entWS, "INVITEE@corp.com", WSRoleMember, owner, time.Hour)
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	if inv.Email != "invitee@corp.com" {
+		t.Fatalf("invite email not normalized: %q", inv.Email)
+	}
+	if inv.EffectiveStatus() != InvitePending {
+		t.Fatalf("invite not pending: %s", inv.EffectiveStatus())
+	}
+
+	// Not yet a member.
+	if _, err := d.GetWorkspaceMember(ctx, entWS, invitee); err == nil {
+		t.Fatal("invitee unexpectedly already a member")
+	}
+
+	got, err := d.GetWorkspaceInviteByToken(ctx, inv.Token)
+	if err != nil {
+		t.Fatalf("get by token: %v", err)
+	}
+	if err := d.AcceptWorkspaceInvite(ctx, got, invitee); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	m, err := d.GetWorkspaceMember(ctx, entWS, invitee)
+	if err != nil || m.Role != WSRoleMember {
+		t.Fatalf("membership not created: %v %+v", err, m)
+	}
+	after, _ := d.GetWorkspaceInviteByToken(ctx, inv.Token)
+	if after.Status != InviteAccepted || after.AcceptedUserID != invitee {
+		t.Fatalf("invite not marked accepted: status=%s acceptedBy=%d", after.Status, after.AcceptedUserID)
+	}
+	// Pending list for the email is now empty.
+	pend, _ := d.ListPendingInvitesForEmail(ctx, "invitee@corp.com")
+	if len(pend) != 0 {
+		t.Fatalf("expected no pending invites, got %d", len(pend))
+	}
+}

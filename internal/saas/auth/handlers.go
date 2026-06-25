@@ -202,6 +202,15 @@ func (h *Handler) register(c *gin.Context) {
 	if h.GiftClaimer != nil {
 		giftClaimed, _ = h.GiftClaimer.AutoClaimForEmail(c.Request.Context(), req.Email, u.ID)
 	}
+	// Auto-claim any pending workspace invites addressed to this (now verified)
+	// email, so a user invited before they had an account joins on signup.
+	if invites, ierr := h.DB.ListPendingInvitesForEmail(c.Request.Context(), req.Email); ierr == nil {
+		for _, inv := range invites {
+			if err := h.DB.AcceptWorkspaceInvite(c.Request.Context(), inv, u.ID); err != nil {
+				log.Warnf("register: auto-accept invite %d for user %d failed: %v", inv.ID, u.ID, err)
+			}
+		}
+	}
 	// Re-read so the response reflects the credited balance.
 	if bonusUSD > 0 || giftClaimed > 0 {
 		if fresh, ferr := h.DB.GetUser(c.Request.Context(), u.ID); ferr == nil {

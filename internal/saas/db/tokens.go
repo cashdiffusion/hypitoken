@@ -178,6 +178,40 @@ func (db *DB) TouchUserToken(ctx context.Context, id int64) {
 	_, _ = db.ExecContext(ctx, `UPDATE user_tokens SET last_used_at = ? WHERE id = ?`, time.Now().Unix(), id)
 }
 
+// ListWorkspaceMemberTokens returns a member's tokens that bill a specific
+// workspace (used by the space-admin member view). Secrets are still on the
+// struct — the handler must mask Token before returning to a space admin.
+func (db *DB) ListWorkspaceMemberTokens(ctx context.Context, workspaceID, userID int64) ([]*UserToken, error) {
+	rows, err := db.QueryContext(ctx, `SELECT `+tokenCols+` FROM user_tokens WHERE workspace_id = ? AND user_id = ? ORDER BY id DESC`, workspaceID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*UserToken
+	for rows.Next() {
+		t, err := scanToken(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// SetTokenAdminMonthlyCap sets the space-admin-imposed per-key monthly cap, but
+// only for a token actually bound to the given workspace — so a space admin can
+// never touch a member's personal-space keys.
+func (db *DB) SetTokenAdminMonthlyCap(ctx context.Context, tokenID, workspaceID int64, monthlyCap float64) error {
+	res, err := db.ExecContext(ctx, `UPDATE user_tokens SET admin_monthly_cap = ? WHERE id = ? AND workspace_id = ?`, monthlyCap, tokenID, workspaceID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // GenerateToken returns a fresh token string of form "sk-cpa-<48 chars>".
 func GenerateToken() (string, error) {
 	const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

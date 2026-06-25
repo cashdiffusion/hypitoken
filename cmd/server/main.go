@@ -34,6 +34,7 @@ import (
 	saasprofile "github.com/wjsoj/CPA-Claude/internal/saas/profile"
 	"github.com/wjsoj/CPA-Claude/internal/saas/referral"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
+	saasworkspace "github.com/wjsoj/CPA-Claude/internal/saas/workspace"
 	"github.com/wjsoj/CPA-Claude/internal/server"
 	"github.com/wjsoj/CPA-Claude/internal/shop"
 	"github.com/wjsoj/cc-core/auth"
@@ -286,6 +287,7 @@ func main() {
 		referralSvc.StartSweeper(refresherCtx)
 		authH.Referral = referralSvc
 		authH.GiftClaimer = referralSvc
+		workspaceH := saasworkspace.New(saasDB, mailer, cfg.SaaS.SiteURL, cfg.SaaS.SiteName)
 
 		// Catalog used for pricing computation (same instance as the proxy's
 		// internal billing — the SaaS layer only adds the multiplier on top).
@@ -323,7 +325,7 @@ func main() {
 			return true, claims.Role == "admin"
 		}
 		for _, h := range s.GinEngines() {
-			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH, referralSvc)
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH, referralSvc, workspaceH)
 			if spaFS != nil {
 				saasadapter.MountSPA(h, spaFS)
 			}
