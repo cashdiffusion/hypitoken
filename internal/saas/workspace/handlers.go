@@ -132,12 +132,21 @@ func (h *Handler) usage(c *gin.Context) {
 		})
 	}
 	spentMonth, _ := h.DB.SumChargeSinceForWorkspace(ctx, id, monthStart())
+	cm, xm := w.ClaudeMultiplier, w.CodexMultiplier
+	if cm <= 0 {
+		cm = 0.3
+	}
+	if xm <= 0 {
+		xm = 0.05
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"balance_usd":     w.BalanceUSD,
-		"daily_usd_cap":   w.DailyUSDCap,
-		"monthly_usd_cap": w.MonthlyUSDCap,
-		"spent_month_usd": spentMonth,
-		"members":         mOut,
+		"balance_usd":       w.BalanceUSD,
+		"daily_usd_cap":     w.DailyUSDCap,
+		"monthly_usd_cap":   w.MonthlyUSDCap,
+		"spent_month_usd":   spentMonth,
+		"claude_multiplier": cm,
+		"codex_multiplier":  xm,
+		"members":           mOut,
 	})
 }
 

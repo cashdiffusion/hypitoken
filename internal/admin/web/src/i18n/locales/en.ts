@@ -703,6 +703,11 @@ export default {
       empty: "No enterprise workspaces yet",
       created: "Created",
       initialBalance: "Initial balance ($)",
+      rate: "Rate (Claude/Codex)",
+      claudeMult: "Claude multiplier",
+      codexMult: "Codex multiplier",
+      multHint:
+        "Blank = standard rate (0.3 / 0.05). Set an enterprise discount here (e.g. 0.25 / 0.04).",
       adminEmail: "Space admin email",
       adminEmailHint: "Optional — designate a registered user as space admin",
       delta: "Amount ($, may be negative)",
@@ -1434,5 +1439,11 @@ export default {
       accept: "Accept invite",
       accepted: "Joined the workspace",
     },
+  },
+
+  splash: {
+    eyebrow: "Enterprise Workspace",
+    welcome: "Welcome back to your dedicated enterprise workspace",
+    skip: "Click anywhere to skip",
   },
 } as const;

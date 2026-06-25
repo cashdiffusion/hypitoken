@@ -16,7 +16,6 @@ import {
   ShieldOff,
   ShoppingCart,
   Sparkles,
-  Tag,
   Trash2,
   Users,
 } from "lucide-react";
@@ -57,7 +56,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
-import type { AdminAdjustment, AdminOrder, Credential, PricingGroup, User } from "@/lib/types";
+import type { AdminAdjustment, AdminOrder, Credential, User } from "@/lib/types";
 import { cn, errMsg, fmtInt, fmtUSD } from "@/lib/utils";
 
 const TABS = [
@@ -65,7 +64,6 @@ const TABS = [
   { to: "fleet", labelKey: "admin.tabs.fleet", icon: LayoutDashboard },
   { to: "users", labelKey: "admin.tabs.users", icon: Users },
   { to: "workspaces", labelKey: "admin.tabs.workspaces", icon: Building2 },
-  { to: "groups", labelKey: "admin.tabs.groups", icon: Tag },
   { to: "credentials", labelKey: "admin.tabs.credentials", icon: KeyRound },
   { to: "requests", labelKey: "admin.tabs.requests", icon: ScrollText },
   { to: "payments", labelKey: "admin.tabs.payments", icon: ShoppingCart },
@@ -105,7 +103,6 @@ export default function AdminPage() {
         <Route path="overview" element={<OverviewPanel refreshTick={tick} />} />
         <Route path="users" element={<UsersTab />} />
         <Route path="workspaces" element={<WorkspacesTab />} />
-        <Route path="groups" element={<GroupsTab />} />
         <Route path="credentials" element={<CredentialsTab />} />
         <Route path="requests" element={<RequestsExplorer refreshTick={0} />} />
         <Route path="payments" element={<PaymentsTab />} />
@@ -161,7 +158,6 @@ const USERS_PAGE = 50;
 function UsersTab() {
   const { t } = useTranslation();
   const [users, setUsers] = useState<User[]>([]);
-  const [groups, setGroups] = useState<PricingGroup[]>([]);
   // qInput is the live textbox; q is the debounced value that actually hits
   // the API, so we don't fire one request per keystroke.
   const [qInput, setQInput] = useState("");
@@ -183,15 +179,11 @@ function UsersTab() {
   const reload = async () => {
     setBusy(true);
     try {
-      const [u, g] = await Promise.all([
-        apiGet<{ users: User[]; total?: number }>(
-          `/admin/users?q=${encodeURIComponent(q)}&limit=${USERS_PAGE}&offset=${offset}`,
-        ),
-        apiGet<{ groups: PricingGroup[] }>("/admin/groups"),
-      ]);
+      const u = await apiGet<{ users: User[]; total?: number }>(
+        `/admin/users?q=${encodeURIComponent(q)}&limit=${USERS_PAGE}&offset=${offset}`,
+      );
       setUsers(u.users || []);
       setTotal(u.total);
-      setGroups(g.groups || []);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -237,7 +229,6 @@ function UsersTab() {
             <TableRow>
               <TableHead>{t("admin.users.cols.email")}</TableHead>
               <TableHead>{t("admin.users.cols.role")}</TableHead>
-              <TableHead>{t("admin.users.cols.group")}</TableHead>
               <TableHead className="text-right">{t("admin.users.cols.balance")}</TableHead>
               <TableHead></TableHead>
               <TableHead></TableHead>
@@ -246,7 +237,7 @@ function UsersTab() {
           <TableBody>
             {users.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
+                <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
                   {busy ? t("common.loading") : t("admin.users.empty")}
                 </TableCell>
               </TableRow>
@@ -261,7 +252,6 @@ function UsersTab() {
                     {u.role}
                   </span>
                 </TableCell>
-                <TableCell>{groups.find((g) => g.ID === u.group_id)?.Name || u.group_id}</TableCell>
                 <TableCell className="font-mono tabular-nums text-right">
                   {fmtUSD(u.balance_usd)}
                 </TableCell>
@@ -270,24 +260,6 @@ function UsersTab() {
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1">
-                    <select
-                      className="rounded border border-border bg-card px-2 py-1 text-xs disabled:opacity-50"
-                      value={u.group_id}
-                      disabled={rowBusy === u.id}
-                      onChange={(e) =>
-                        patchUser(
-                          u.id,
-                          { group_id: parseInt(e.target.value, 10) },
-                          t("admin.users.groupUpdated"),
-                        )
-                      }
-                    >
-                      {groups.map((g) => (
-                        <option key={g.ID} value={g.ID}>
-                          {g.Name}
-                        </option>
-                      ))}
-                    </select>
                     <Button
                       size="sm"
                       variant="ghost"
@@ -390,184 +362,6 @@ function AdjustBalanceButton({ userID, onDone }: { userID: number; onDone: () =>
               }}
             >
               {t("admin.users.apply")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-function GroupsTab() {
-  const { t } = useTranslation();
-  const confirm = useConfirm();
-  const [groups, setGroups] = useState<PricingGroup[]>([]);
-  const reload = async () => {
-    const r = await apiGet<{ groups: PricingGroup[] }>("/admin/groups");
-    setGroups(r.groups || []);
-  };
-  // biome-ignore lint/correctness/useExhaustiveDependencies: load once on mount; reload runs imperatively after mutations.
-  useEffect(() => {
-    reload();
-  }, []);
-  return (
-    <Reveal>
-      <GlassPanel
-        title={t("admin.groups.heading")}
-        action={<GroupDialog onDone={reload} />}
-        bodyClassName="p-0"
-      >
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("admin.groups.cols.name")}</TableHead>
-              <TableHead className="text-right">{t("admin.groups.cols.claudeMult")}</TableHead>
-              <TableHead className="text-right">{t("admin.groups.cols.codexMult")}</TableHead>
-              <TableHead>{t("admin.groups.cols.credGroup")}</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {groups.map((g) => (
-              <TableRow key={g.ID}>
-                <TableCell>
-                  <div className="font-medium">{g.Name}</div>
-                  <div className="text-xs text-muted-foreground">{g.Description}</div>
-                </TableCell>
-                <TableCell className="font-mono tabular-nums text-right">
-                  {g.ClaudeMultiplier.toFixed(2)}×
-                </TableCell>
-                <TableCell className="font-mono tabular-nums text-right">
-                  {g.CodexMultiplier.toFixed(2)}×
-                </TableCell>
-                <TableCell className="font-mono text-xs">{g.CredentialGroup || "—"}</TableCell>
-                <TableCell className="text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <GroupDialog group={g} onDone={reload} />
-                    {!g.IsDefault && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive"
-                        onClick={async () => {
-                          if (
-                            !(await confirm({
-                              title: t("common.delete"),
-                              description: t("admin.groups.confirmDelete", { name: g.Name }),
-                              confirmLabel: t("common.delete"),
-                              destructive: true,
-                            }))
-                          )
-                            return;
-                          await apiDelete(`/admin/groups/${g.ID}`);
-                          toast.success(t("admin.groups.deleted"));
-                          reload();
-                        }}
-                      >
-                        {t("common.delete")}
-                      </Button>
-                    )}
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </GlassPanel>
-    </Reveal>
-  );
-}
-
-// GroupDialog drives both create (no `group`) and edit (`group` provided)
-// of a pricing tier. Edit posts to PATCH /admin/groups/:id (full-field
-// update). The user-facing dashboard reads each user's multipliers live
-// from /me, so a multiplier change here surfaces on the user's next page
-// load with no extra wiring.
-function GroupDialog({ group, onDone }: { group?: PricingGroup; onDone: () => void }) {
-  const { t } = useTranslation();
-  const editing = !!group;
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [desc, setDesc] = useState("");
-  const [claudeMult, setClaudeMult] = useState("0.3");
-  const [codexMult, setCodexMult] = useState("0.05");
-  const [credGroup, setCredGroup] = useState("");
-  // Seed the form from the latest group values every time the dialog opens,
-  // so a reload between edits is reflected (useState initialisers don't re-run).
-  const openDialog = () => {
-    setName(group?.Name ?? "");
-    setDesc(group?.Description ?? "");
-    setClaudeMult(group ? String(group.ClaudeMultiplier) : "0.3");
-    setCodexMult(group ? String(group.CodexMultiplier) : "0.05");
-    setCredGroup(group?.CredentialGroup ?? "");
-    setOpen(true);
-  };
-  return (
-    <>
-      {editing ? (
-        <Button size="sm" variant="ghost" onClick={openDialog}>
-          {t("common.edit")}
-        </Button>
-      ) : (
-        <Button onClick={openDialog}>{t("admin.groups.newBtn")}</Button>
-      )}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editing ? t("admin.groups.editTitle") : t("admin.groups.newTitle")}
-            </DialogTitle>
-          </DialogHeader>
-          <p className="text-xs text-muted-foreground">{t("admin.groups.newSub")}</p>
-          <div className="grid gap-3 py-2">
-            <div className="space-y-2">
-              <Label>{t("admin.groups.labels.name")}</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>{t("admin.groups.labels.desc")}</Label>
-              <Input value={desc} onChange={(e) => setDesc(e.target.value)} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>{t("admin.groups.labels.claudeMult")}</Label>
-                <Input value={claudeMult} onChange={(e) => setClaudeMult(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>{t("admin.groups.labels.codexMult")}</Label>
-                <Input value={codexMult} onChange={(e) => setCodexMult(e.target.value)} />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>{t("admin.groups.labels.credGroup")}</Label>
-              <Input value={credGroup} onChange={(e) => setCredGroup(e.target.value)} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              onClick={async () => {
-                const body = {
-                  name,
-                  description: desc,
-                  claude_multiplier: parseFloat(claudeMult),
-                  codex_multiplier: parseFloat(codexMult),
-                  credential_group: credGroup,
-                };
-                if (editing && group) {
-                  await apiPatch(`/admin/groups/${group.ID}`, body);
-                  toast.success(t("admin.groups.updated"));
-                } else {
-                  await apiPost("/admin/groups", body);
-                  toast.success(t("admin.groups.created"));
-                }
-                onDone();
-                setOpen(false);
-              }}
-            >
-              {editing ? t("common.save") : t("common.create")}
             </Button>
           </DialogFooter>
         </DialogContent>

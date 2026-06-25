@@ -32,6 +32,8 @@ interface AdminWorkspace {
   balance_usd: number;
   daily_usd_cap: number;
   monthly_usd_cap: number;
+  claude_multiplier: number;
+  codex_multiplier: number;
   member_count: number;
   created_at: number;
 }
@@ -76,6 +78,7 @@ export function WorkspacesTab() {
             <TableRow>
               <TableHead>{t("admin.workspaces.name")}</TableHead>
               <TableHead>{t("admin.workspaces.balance")}</TableHead>
+              <TableHead>{t("admin.workspaces.rate")}</TableHead>
               <TableHead>{t("admin.workspaces.monthlyCap")}</TableHead>
               <TableHead>{t("admin.workspaces.members")}</TableHead>
               <TableHead className="text-right">{t("common.actions")}</TableHead>
@@ -86,6 +89,10 @@ export function WorkspacesTab() {
               <TableRow key={w.id}>
                 <TableCell className="font-medium">{w.name}</TableCell>
                 <TableCell>{fmtUSD(w.balance_usd)}</TableCell>
+                <TableCell className="font-mono text-xs tabular-nums">
+                  {(w.claude_multiplier || 0.3).toFixed(2)}× /{" "}
+                  {(w.codex_multiplier || 0.05).toFixed(2)}×
+                </TableCell>
                 <TableCell>{w.monthly_usd_cap > 0 ? fmtUSD(w.monthly_usd_cap) : "—"}</TableCell>
                 <TableCell>{w.member_count}</TableCell>
                 <TableCell className="space-x-2 text-right">
@@ -102,7 +109,7 @@ export function WorkspacesTab() {
             ))}
             {list.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                   {t("admin.workspaces.empty")}
                 </TableCell>
               </TableRow>
@@ -142,6 +149,8 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
   const [name, setName] = useState("");
   const [balance, setBalance] = useState("");
   const [monthlyCap, setMonthlyCap] = useState("");
+  const [claudeMult, setClaudeMult] = useState("");
+  const [codexMult, setCodexMult] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -153,6 +162,8 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
         name: name.trim(),
         balance_usd: Number(balance) || 0,
         monthly_usd_cap: Number(monthlyCap) || 0,
+        claude_multiplier: Number(claudeMult) || 0,
+        codex_multiplier: Number(codexMult) || 0,
         admin_email: adminEmail.trim(),
       });
       toast.success(t("admin.workspaces.created"));
@@ -189,6 +200,29 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
               />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>{t("admin.workspaces.claudeMult")}</Label>
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0.3"
+                value={claudeMult}
+                onChange={(e) => setClaudeMult(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label>{t("admin.workspaces.codexMult")}</Label>
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0.05"
+                value={codexMult}
+                onChange={(e) => setCodexMult(e.target.value)}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">{t("admin.workspaces.multHint")}</p>
           <div>
             <Label>{t("admin.workspaces.adminEmail")}</Label>
             <Input

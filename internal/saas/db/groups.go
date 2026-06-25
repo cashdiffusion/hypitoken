@@ -81,75 +81,7 @@ func (db *DB) ListGroups(ctx context.Context) ([]*PricingGroup, error) {
 	return out, rows.Err()
 }
 
-type GroupParams struct {
-	Name             string
-	Description      string
-	CodexMultiplier  float64
-	ClaudeMultiplier float64
-	CredentialGroup  string
-}
-
-// applyMultiplierDefaults backfills zero multipliers with the package
-// defaults so a freshly-created group never starts at 0× (which would
-// silently zero out billing).
-func (p *GroupParams) applyMultiplierDefaults() {
-	if p.ClaudeMultiplier <= 0 {
-		p.ClaudeMultiplier = DefaultClaudeMultiplier
-	}
-	if p.CodexMultiplier <= 0 {
-		p.CodexMultiplier = DefaultCodexMultiplier
-	}
-}
-
-func (db *DB) CreateGroup(ctx context.Context, p GroupParams) (*PricingGroup, error) {
-	p.applyMultiplierDefaults()
-	now := time.Now().Unix()
-	res, err := db.ExecContext(ctx, `INSERT INTO pricing_groups
-		(name, description, codex_multiplier, claude_multiplier, credential_group, is_default, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
-		p.Name, p.Description, p.CodexMultiplier, p.ClaudeMultiplier, p.CredentialGroup, now, now)
-	if err != nil {
-		return nil, err
-	}
-	id, _ := res.LastInsertId()
-	return db.GetGroup(ctx, id)
-}
-
-func (db *DB) UpdateGroup(ctx context.Context, id int64, p GroupParams) (*PricingGroup, error) {
-	p.applyMultiplierDefaults()
-	_, err := db.ExecContext(ctx, `UPDATE pricing_groups SET
-		name = ?, description = ?, codex_multiplier = ?, claude_multiplier = ?,
-		credential_group = ?, updated_at = ?
-		WHERE id = ?`,
-		p.Name, p.Description, p.CodexMultiplier, p.ClaudeMultiplier, p.CredentialGroup, time.Now().Unix(), id)
-	if err != nil {
-		return nil, err
-	}
-	return db.GetGroup(ctx, id)
-}
-
-func (db *DB) DeleteGroup(ctx context.Context, id int64) error {
-	g, err := db.GetGroup(ctx, id)
-	if err != nil {
-		return err
-	}
-	if g.IsDefault {
-		return errors.New("cannot delete default group")
-	}
-	def, err := db.DefaultGroup(ctx)
-	if err != nil {
-		return err
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET group_id = ? WHERE group_id = ?`, def.ID, id); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM pricing_groups WHERE id = ?`, id); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
+// NOTE: pricing-group multiplier management (CreateGroup/UpdateGroup/DeleteGroup)
+// was removed when billing multipliers moved onto the workspace. The remaining
+// readers (GetGroup, ListGroups, DefaultGroup) only support the frozen
+// users.group_id FK + registration default; nothing here drives billing.

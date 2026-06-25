@@ -29,7 +29,8 @@ func workspaceJSON(w *db.WorkspaceWithMeta) gin.H {
 	return gin.H{
 		"id": w.ID, "name": w.Name, "type": w.Type,
 		"balance_usd": w.BalanceUSD, "daily_usd_cap": w.DailyUSDCap,
-		"monthly_usd_cap": w.MonthlyUSDCap, "group_id": w.GroupID,
+		"monthly_usd_cap":   w.MonthlyUSDCap,
+		"claude_multiplier": w.ClaudeMultiplier, "codex_multiplier": w.CodexMultiplier,
 		"created_by": w.CreatedBy, "disabled": w.Disabled,
 		"member_count": w.MemberCount, "created_at": w.CreatedAt.Unix(),
 	}
@@ -50,12 +51,13 @@ func (h *Handler) listWorkspaces(c *gin.Context) {
 }
 
 type createWorkspaceReq struct {
-	Name          string  `json:"name"`
-	BalanceUSD    float64 `json:"balance_usd"`
-	DailyUSDCap   float64 `json:"daily_usd_cap"`
-	MonthlyUSDCap float64 `json:"monthly_usd_cap"`
-	GroupID       int64   `json:"group_id"`
-	AdminEmail    string  `json:"admin_email"` // optional: designate the first space admin
+	Name             string  `json:"name"`
+	BalanceUSD       float64 `json:"balance_usd"`
+	DailyUSDCap      float64 `json:"daily_usd_cap"`
+	MonthlyUSDCap    float64 `json:"monthly_usd_cap"`
+	ClaudeMultiplier float64 `json:"claude_multiplier"` // 0 = standard default (0.3)
+	CodexMultiplier  float64 `json:"codex_multiplier"`  // 0 = standard default (0.05)
+	AdminEmail       string  `json:"admin_email"`       // optional: designate the first space admin
 }
 
 func (h *Handler) createWorkspace(c *gin.Context) {
@@ -70,15 +72,10 @@ func (h *Handler) createWorkspace(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	op := saasauth.CurrentUser(c)
-	groupID := req.GroupID
-	if groupID == 0 {
-		if g, err := h.DB.DefaultGroup(ctx); err == nil {
-			groupID = g.ID
-		}
-	}
 	// Create with 0 balance, then book the initial grant as a ledger adjustment
-	// so the provisioning shows up in the audit trail.
-	ws, err := h.DB.CreateEnterpriseWorkspace(ctx, req.Name, 0, req.DailyUSDCap, req.MonthlyUSDCap, groupID, op.ID)
+	// so the provisioning shows up in the audit trail. Multipliers are per-
+	// workspace (0 = standard default rate).
+	ws, err := h.DB.CreateEnterpriseWorkspace(ctx, req.Name, 0, req.DailyUSDCap, req.MonthlyUSDCap, req.ClaudeMultiplier, req.CodexMultiplier, op.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -106,11 +103,12 @@ func (h *Handler) createWorkspace(c *gin.Context) {
 }
 
 type updateWorkspaceReq struct {
-	Name          *string  `json:"name"`
-	DailyUSDCap   *float64 `json:"daily_usd_cap"`
-	MonthlyUSDCap *float64 `json:"monthly_usd_cap"`
-	GroupID       *int64   `json:"group_id"`
-	Disabled      *bool    `json:"disabled"`
+	Name             *string  `json:"name"`
+	DailyUSDCap      *float64 `json:"daily_usd_cap"`
+	MonthlyUSDCap    *float64 `json:"monthly_usd_cap"`
+	ClaudeMultiplier *float64 `json:"claude_multiplier"`
+	CodexMultiplier  *float64 `json:"codex_multiplier"`
+	Disabled         *bool    `json:"disabled"`
 }
 
 func (h *Handler) updateWorkspace(c *gin.Context) {
@@ -126,7 +124,7 @@ func (h *Handler) updateWorkspace(c *gin.Context) {
 	}
 	if err := h.DB.UpdateWorkspace(c.Request.Context(), id, db.WorkspaceUpdate{
 		Name: req.Name, DailyUSDCap: req.DailyUSDCap, MonthlyUSDCap: req.MonthlyUSDCap,
-		GroupID: req.GroupID, Disabled: req.Disabled,
+		ClaudeMultiplier: req.ClaudeMultiplier, CodexMultiplier: req.CodexMultiplier, Disabled: req.Disabled,
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

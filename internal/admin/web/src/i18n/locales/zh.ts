@@ -683,6 +683,10 @@ export default {
       empty: "暂无企业空间",
       created: "已创建",
       initialBalance: "初始余额($)",
+      rate: "费率(Claude/Codex)",
+      claudeMult: "Claude 倍率",
+      codexMult: "Codex 倍率",
+      multHint: "留空=标准价(0.3 / 0.05)。企业专属折扣在此设置(如 0.25 / 0.04)。",
       adminEmail: "空间管理员邮箱",
       adminEmailHint: "可选,指定一位已注册用户为空间管理员",
       delta: "增减额($,可为负)",
@@ -1400,5 +1404,11 @@ export default {
       accept: "接受邀请",
       accepted: "已加入团队空间",
     },
+  },
+
+  splash: {
+    eyebrow: "企业空间",
+    welcome: "欢迎回到你的专属企业工作区",
+    skip: "点击任意处跳过",
   },
 } as const;

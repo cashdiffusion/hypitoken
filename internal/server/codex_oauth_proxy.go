@@ -286,7 +286,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			} else {
 				costUSD = billed
 				userID = info.UserID
-				multiplier = s.saas.MultiplierFor(c.Request.Context(), info.GroupID, auth.ProviderOpenAI)
+				multiplier = s.saas.MultiplierFor(info, auth.ProviderOpenAI)
 			}
 		}
 		s.usage.RecordClient(clientToken, clientName, counts, costUSD)

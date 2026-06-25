@@ -553,6 +553,29 @@ UPDATE wallet_tx SET workspace_id =
     (SELECT personal_workspace_id FROM users WHERE users.id = wallet_tx.user_id)
 WHERE workspace_id = 0;
 `,
+
+	// v14 — pricing multiplier moves ONTO the workspace. The billing rate is no
+	// longer resolved via the per-user pricing group; it's a direct property of
+	// the BILLING workspace. New rule: personal workspaces always bill at the
+	// standard default (0=sentinel → 0.3 claude / 0.05 codex); only enterprise
+	// workspaces carry a custom (discounted) rate, set by the platform admin per
+	// workspace. The old pricing_groups / users.group_id machinery is frozen
+	// (kept for the NOT-NULL FK + DefaultGroup plumbing) but no longer drives
+	// billing. credential_group routing is unaffected (it runs off token.groups).
+	//
+	// Backfill: existing ENTERPRISE workspaces inherit their old pricing group's
+	// multipliers so nobody's enterprise rate changes; PERSONAL workspaces are
+	// left at 0 (= standard) — any individual who had a discounted personal group
+	// is handled out-of-band by moving them into an enterprise workspace.
+	`
+ALTER TABLE workspaces ADD COLUMN claude_multiplier REAL NOT NULL DEFAULT 0;  -- 0 = standard default
+ALTER TABLE workspaces ADD COLUMN codex_multiplier  REAL NOT NULL DEFAULT 0;  -- 0 = standard default
+
+UPDATE workspaces SET
+    claude_multiplier = COALESCE((SELECT g.claude_multiplier FROM pricing_groups g WHERE g.id = workspaces.group_id), 0),
+    codex_multiplier  = COALESCE((SELECT g.codex_multiplier  FROM pricing_groups g WHERE g.id = workspaces.group_id), 0)
+WHERE type = 'enterprise';
+`,
 }
 
 func (db *DB) migrate() error {

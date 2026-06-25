@@ -843,7 +843,7 @@ recoveredFromSignature:
 			} else {
 				costUSD = billed
 				userID = info.UserID
-				multiplier = s.saas.MultiplierFor(c.Request.Context(), info.GroupID, auth.NormalizeProvider(a.Provider))
+				multiplier = s.saas.MultiplierFor(info, auth.NormalizeProvider(a.Provider))
 			}
 		}
 	}
@@ -1103,7 +1103,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 				} else {
 					costUSD = billed
 					userID = info.UserID
-					multiplier = s.saas.MultiplierFor(c.Request.Context(), info.GroupID, auth.NormalizeProvider(a.Provider))
+					multiplier = s.saas.MultiplierFor(info, auth.NormalizeProvider(a.Provider))
 				}
 			}
 		}
@@ -1343,7 +1343,7 @@ func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientTo
 	var subMultiplier float64
 	if hasSaaS && s.saas != nil {
 		subUserID = info.UserID
-		subMultiplier = s.saas.MultiplierFor(c.Request.Context(), info.GroupID, provider)
+		subMultiplier = s.saas.MultiplierFor(info, provider)
 	}
 	for subModel, sc := range sub.Snapshot() {
 		// Sub-calls bump the auth's daily/hourly bucket and WeightedTotal so

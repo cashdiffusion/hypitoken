@@ -90,7 +90,17 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 		wsOut := []gin.H{}
 		if list, werr := store.ListWorkspacesForUser(c.Request.Context(), u.ID); werr == nil {
 			for _, w := range list {
-				wsOut = append(wsOut, gin.H{"id": w.WorkspaceID, "name": w.Name, "type": w.Type, "role": w.Role})
+				cm, xm := w.ClaudeMultiplier, w.CodexMultiplier
+				if cm <= 0 {
+					cm = defaultClaudeMultiplier
+				}
+				if xm <= 0 {
+					xm = defaultCodexMultiplier
+				}
+				wsOut = append(wsOut, gin.H{
+					"id": w.WorkspaceID, "name": w.Name, "type": w.Type, "role": w.Role,
+					"claude_multiplier": cm, "codex_multiplier": xm,
+				})
 			}
 		}
 		user["workspaces"] = wsOut

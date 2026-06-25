@@ -27,11 +27,9 @@ func (h *Handler) Routes(g *gin.RouterGroup) {
 	g.POST("/users/:id/balance", h.adjustBalance)
 	g.GET("/users/:id/transactions", h.userTx)
 
-	// pricing groups
-	g.GET("/groups", h.listGroups)
-	g.POST("/groups", h.createGroup)
-	g.PATCH("/groups/:id", h.updateGroup)
-	g.DELETE("/groups/:id", h.deleteGroup)
+	// pricing groups removed — billing multiplier is now a per-workspace
+	// property (see admin WorkspaceRoutes). The pricing_groups table is frozen
+	// (kept only for DefaultGroup plumbing + the users.group_id FK).
 
 	// orders / payments
 	g.GET("/orders", h.listOrders)
@@ -258,82 +256,6 @@ func (h *Handler) userTx(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"transactions": out, "total": total})
-}
-
-func (h *Handler) listGroups(c *gin.Context) {
-	gs, err := h.DB.ListGroups(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"groups": gs})
-}
-
-// groupReq is the JSON shape for creating/updating a pricing group.
-// Billing semantics: final_charge_USD = official_USD × multiplier.
-// Defaults (when nothing is sent): claude=0.3, codex=0.05.
-type groupReq struct {
-	Name             string  `json:"name"`
-	Description      string  `json:"description"`
-	CodexMultiplier  float64 `json:"codex_multiplier"`
-	ClaudeMultiplier float64 `json:"claude_multiplier"`
-	CredentialGroup  string  `json:"credential_group"`
-}
-
-func (r groupReq) toParams() db.GroupParams {
-	return db.GroupParams{
-		Name:             r.Name,
-		Description:      r.Description,
-		CodexMultiplier:  r.CodexMultiplier,
-		ClaudeMultiplier: r.ClaudeMultiplier,
-		CredentialGroup:  r.CredentialGroup,
-	}
-}
-
-func (h *Handler) createGroup(c *gin.Context) {
-	var req groupReq
-	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
-		return
-	}
-	g, err := h.DB.CreateGroup(c.Request.Context(), req.toParams())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, g)
-}
-
-func (h *Handler) updateGroup(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad id"})
-		return
-	}
-	var req groupReq
-	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
-		return
-	}
-	g, err := h.DB.UpdateGroup(c.Request.Context(), id, req.toParams())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, g)
-}
-
-func (h *Handler) deleteGroup(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad id"})
-		return
-	}
-	if err := h.DB.DeleteGroup(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
 // Reconciler is set by main.go after the billing handler is constructed.

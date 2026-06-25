@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -54,13 +53,6 @@ type Adapter struct {
 	// bonus the first time an invited user actually spends. Optional / nil-safe;
 	// invoked fire-and-forget off the request goroutine.
 	Referral ReferralReleaser
-
-	// groupCache memoizes pricing groups for the request hot path. Groups
-	// change rarely (admin action) so a 30s TTL is plenty.
-	groupMu   sync.RWMutex
-	groups    map[int64]*db.PricingGroup
-	groupsAt  time.Time
-	groupsTTL time.Duration
 }
 
 // ReferralReleaser releases a deferred inviter reward when an invited user first
@@ -71,42 +63,7 @@ type ReferralReleaser interface {
 }
 
 func NewAdapter(store *db.DB, catalog *pricing.Catalog, rate *billing.Rate) *Adapter {
-	return &Adapter{DB: store, Catalog: catalog, Rate: rate, MaxOverdraftUSD: DefaultMaxOverdraftUSD, groups: map[int64]*db.PricingGroup{}, groupsTTL: 30 * time.Second}
-}
-
-func (a *Adapter) refreshGroups(ctx context.Context) {
-	a.groupMu.RLock()
-	fresh := time.Since(a.groupsAt) < a.groupsTTL && len(a.groups) > 0
-	a.groupMu.RUnlock()
-	if fresh {
-		return
-	}
-	gs, err := a.DB.ListGroups(ctx)
-	if err != nil {
-		return
-	}
-	a.groupMu.Lock()
-	a.groups = map[int64]*db.PricingGroup{}
-	for _, g := range gs {
-		a.groups[g.ID] = g
-	}
-	a.groupsAt = time.Now()
-	a.groupMu.Unlock()
-}
-
-func (a *Adapter) group(ctx context.Context, id int64) *db.PricingGroup {
-	a.refreshGroups(ctx)
-	a.groupMu.RLock()
-	defer a.groupMu.RUnlock()
-	if g, ok := a.groups[id]; ok {
-		return g
-	}
-	for _, g := range a.groups {
-		if g.IsDefault {
-			return g
-		}
-	}
-	return nil
+	return &Adapter{DB: store, Catalog: catalog, Rate: rate, MaxOverdraftUSD: DefaultMaxOverdraftUSD}
 }
 
 func (a *Adapter) Lookup(token string) (server.SaaSTokenInfo, bool) {
@@ -167,6 +124,8 @@ func (a *Adapter) Lookup(token string) (server.SaaSTokenInfo, bool) {
 		WorkspaceMonthlyCap: ws.MonthlyUSDCap,
 		MemberMonthlyCap:    memberCap,
 		AdminMonthlyCap:     t.AdminMonthlyCap,
+		ClaudeMultiplier:    ws.ClaudeMultiplier,
+		CodexMultiplier:     ws.CodexMultiplier,
 	}, true
 }
 
@@ -258,7 +217,7 @@ func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provide
 	if officialCostUSD <= 0 {
 		return 0, nil
 	}
-	mult := a.MultiplierFor(ctx, info.GroupID, provider)
+	mult := a.MultiplierFor(info, provider)
 	billed := billing.ChargeFromOfficial(officialCostUSD, mult)
 	if billed <= 0 {
 		return 0, nil
@@ -295,32 +254,24 @@ func totalTokens(c usage.Counts) int64 {
 	return c.InputTokens + c.OutputTokens + c.CacheCreateTokens + c.CacheReadTokens
 }
 
-// MultiplierFor resolves the multiplier for (group, provider). Falls back
-// to the package defaults (claude=0.3, codex=0.05) when the group is missing
-// or its value is unset.
-func (a *Adapter) MultiplierFor(ctx context.Context, groupID int64, provider string) float64 {
-	if g := a.group(ctx, groupID); g != nil {
-		switch auth.NormalizeProvider(provider) {
-		case auth.ProviderOpenAI:
-			if g.CodexMultiplier > 0 {
-				return g.CodexMultiplier
-			}
-		default:
-			if g.ClaudeMultiplier > 0 {
-				return g.ClaudeMultiplier
-			}
-		}
-	}
+// MultiplierFor resolves the billing multiplier from the token's BILLING
+// workspace (carried on info). 0 on the workspace means "standard default"
+// (claude=0.3, codex=0.05) — personal workspaces always use the default; only
+// enterprise workspaces carry a custom (discounted) rate.
+func (a *Adapter) MultiplierFor(info server.SaaSTokenInfo, provider string) float64 {
 	if auth.NormalizeProvider(provider) == auth.ProviderOpenAI {
+		if info.CodexMultiplier > 0 {
+			return info.CodexMultiplier
+		}
 		return defaultCodexMultiplier
+	}
+	if info.ClaudeMultiplier > 0 {
+		return info.ClaudeMultiplier
 	}
 	return defaultClaudeMultiplier
 }
 
-func (a *Adapter) CredentialGroup(info server.SaaSTokenInfo) string {
-	g := a.group(context.Background(), info.GroupID)
-	if g == nil {
-		return ""
-	}
-	return g.CredentialGroup
-}
+// CredentialGroup is retained for the SaaSAdapter interface but no longer
+// resolves via pricing groups (their credential_group mapping is unused —
+// upstream routing runs off the per-token groups list). Always "" = public.
+func (a *Adapter) CredentialGroup(_ server.SaaSTokenInfo) string { return "" }

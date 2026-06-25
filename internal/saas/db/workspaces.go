@@ -19,11 +19,15 @@ type Workspace struct {
 	BalanceUSD    float64
 	DailyUSDCap   float64
 	MonthlyUSDCap float64
-	GroupID       int64 // pricing group; 0 = default
-	CreatedBy     int64
-	Disabled      bool
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	GroupID       int64 // legacy pricing group (frozen; no longer drives billing)
+	// Per-workspace billing multipliers. 0 = use the standard default
+	// (0.3 claude / 0.05 codex). Only enterprise workspaces set custom rates.
+	ClaudeMultiplier float64
+	CodexMultiplier  float64
+	CreatedBy        int64
+	Disabled         bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // WorkspaceMember is a user's membership + role in a workspace.
@@ -44,14 +48,14 @@ const (
 	WSRoleMember = "member"
 )
 
-const workspaceCols = `id, name, type, balance_usd, daily_usd_cap, monthly_usd_cap, group_id, created_by, disabled, created_at, updated_at`
+const workspaceCols = `id, name, type, balance_usd, daily_usd_cap, monthly_usd_cap, group_id, claude_multiplier, codex_multiplier, created_by, disabled, created_at, updated_at`
 
 func scanWorkspace(row interface{ Scan(...any) error }) (*Workspace, error) {
 	var w Workspace
 	var dis int
 	var createdAt, updatedAt int64
 	if err := row.Scan(&w.ID, &w.Name, &w.Type, &w.BalanceUSD, &w.DailyUSDCap, &w.MonthlyUSDCap,
-		&w.GroupID, &w.CreatedBy, &dis, &createdAt, &updatedAt); err != nil {
+		&w.GroupID, &w.ClaudeMultiplier, &w.CodexMultiplier, &w.CreatedBy, &dis, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	w.Disabled = dis != 0
@@ -112,13 +116,14 @@ func (db *DB) CreatePersonalWorkspace(ctx context.Context, userID int64, email s
 }
 
 // CreateEnterpriseWorkspace provisions a shared enterprise workspace (platform
-// admin only). createdBy is the operator's user id.
-func (db *DB) CreateEnterpriseWorkspace(ctx context.Context, name string, balanceUSD, dailyCap, monthlyCap float64, groupID, createdBy int64) (*Workspace, error) {
+// admin only). createdBy is the operator's user id. claudeMult/codexMult are the
+// per-workspace billing multipliers (0 = standard default).
+func (db *DB) CreateEnterpriseWorkspace(ctx context.Context, name string, balanceUSD, dailyCap, monthlyCap, claudeMult, codexMult float64, createdBy int64) (*Workspace, error) {
 	now := time.Now().Unix()
 	res, err := db.ExecContext(ctx,
-		`INSERT INTO workspaces (name, type, balance_usd, daily_usd_cap, monthly_usd_cap, group_id, created_by, created_at, updated_at)
-		 VALUES (?, 'enterprise', ?, ?, ?, ?, ?, ?, ?)`,
-		strings.TrimSpace(name), balanceUSD, dailyCap, monthlyCap, groupID, createdBy, now, now)
+		`INSERT INTO workspaces (name, type, balance_usd, daily_usd_cap, monthly_usd_cap, claude_multiplier, codex_multiplier, created_by, created_at, updated_at)
+		 VALUES (?, 'enterprise', ?, ?, ?, ?, ?, ?, ?, ?)`,
+		strings.TrimSpace(name), balanceUSD, dailyCap, monthlyCap, claudeMult, codexMult, createdBy, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +171,7 @@ func (db *DB) ListWorkspaces(ctx context.Context, typ string, limit, offset int)
 		var createdAt, updatedAt int64
 		var memberCount int
 		if err := rows.Scan(&w.ID, &w.Name, &w.Type, &w.BalanceUSD, &w.DailyUSDCap, &w.MonthlyUSDCap,
-			&w.GroupID, &w.CreatedBy, &dis, &createdAt, &updatedAt, &memberCount); err != nil {
+			&w.GroupID, &w.ClaudeMultiplier, &w.CodexMultiplier, &w.CreatedBy, &dis, &createdAt, &updatedAt, &memberCount); err != nil {
 			return nil, 0, err
 		}
 		w.Disabled = dis != 0
@@ -179,11 +184,12 @@ func (db *DB) ListWorkspaces(ctx context.Context, typ string, limit, offset int)
 
 // WorkspaceUpdate carries optional workspace field changes from the admin panel.
 type WorkspaceUpdate struct {
-	Name          *string
-	DailyUSDCap   *float64
-	MonthlyUSDCap *float64
-	GroupID       *int64
-	Disabled      *bool
+	Name             *string
+	DailyUSDCap      *float64
+	MonthlyUSDCap    *float64
+	ClaudeMultiplier *float64
+	CodexMultiplier  *float64
+	Disabled         *bool
 }
 
 // UpdateWorkspace applies the non-nil fields of u to a workspace.
@@ -202,9 +208,13 @@ func (db *DB) UpdateWorkspace(ctx context.Context, id int64, u WorkspaceUpdate) 
 		sets = append(sets, "monthly_usd_cap = ?")
 		args = append(args, *u.MonthlyUSDCap)
 	}
-	if u.GroupID != nil {
-		sets = append(sets, "group_id = ?")
-		args = append(args, *u.GroupID)
+	if u.ClaudeMultiplier != nil {
+		sets = append(sets, "claude_multiplier = ?")
+		args = append(args, *u.ClaudeMultiplier)
+	}
+	if u.CodexMultiplier != nil {
+		sets = append(sets, "codex_multiplier = ?")
+		args = append(args, *u.CodexMultiplier)
 	}
 	if u.Disabled != nil {
 		d := 0
@@ -298,19 +308,23 @@ func (db *DB) ListWorkspaceMembers(ctx context.Context, workspaceID int64) ([]*W
 	return out, rows.Err()
 }
 
-// MemberWorkspace is an enterprise workspace a user belongs to, with their role.
+// MemberWorkspace is an enterprise workspace a user belongs to, with their role
+// and the workspace's effective billing multipliers (0 = standard default).
 type MemberWorkspace struct {
-	WorkspaceID int64
-	Name        string
-	Type        string
-	Role        string
+	WorkspaceID      int64
+	Name             string
+	Type             string
+	Role             string
+	ClaudeMultiplier float64
+	CodexMultiplier  float64
 }
 
 // ListWorkspacesForUser returns the workspaces a user is a member of (with their
-// role), personal first. Powers /api/v2/me and the token billing-target picker.
+// role + billing rate), personal first. Powers /api/v2/me, the token
+// billing-target picker, and the dashboard pricing card.
 func (db *DB) ListWorkspacesForUser(ctx context.Context, userID int64) ([]*MemberWorkspace, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT w.id, w.name, w.type, m.role
+		`SELECT w.id, w.name, w.type, m.role, w.claude_multiplier, w.codex_multiplier
 		   FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
 		  WHERE m.user_id = ? AND w.disabled = 0
 		  ORDER BY CASE w.type WHEN 'personal' THEN 0 ELSE 1 END, w.id`, userID)
@@ -321,7 +335,7 @@ func (db *DB) ListWorkspacesForUser(ctx context.Context, userID int64) ([]*Membe
 	var out []*MemberWorkspace
 	for rows.Next() {
 		var m MemberWorkspace
-		if err := rows.Scan(&m.WorkspaceID, &m.Name, &m.Type, &m.Role); err != nil {
+		if err := rows.Scan(&m.WorkspaceID, &m.Name, &m.Type, &m.Role, &m.ClaudeMultiplier, &m.CodexMultiplier); err != nil {
 			return nil, err
 		}
 		out = append(out, &m)
