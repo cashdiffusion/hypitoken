@@ -447,6 +447,8 @@ export default {
     nActive: "{{n}} active",
     manage: "Manage",
     pricingTier: "Pricing tier",
+    enterpriseRate: "Enterprise rate",
+    standardRate: "Standard rate",
     multiplierExplanation: "final = upstream USD × multiplier",
     recentActivity: "Recent activity",
     lastNTransactions: "Last {{n}} transactions",

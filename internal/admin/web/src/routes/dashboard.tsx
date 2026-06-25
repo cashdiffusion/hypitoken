@@ -15,8 +15,16 @@ import type { Greeting, UserToken, WalletTx } from "@/lib/types";
 import { fmtUSD } from "@/lib/utils";
 
 export default function DashboardPage() {
-  const { user, group } = useAuth();
+  const { user } = useAuth();
   const { t } = useTranslation();
+  // Pricing card reflects the user's BILLING workspace rate (not the legacy
+  // pricing group). Prefer the enterprise space (its discounted rate is the
+  // headline for company members); fall back to the personal/standard space.
+  const wsList = user?.workspaces ?? [];
+  const billingWs =
+    wsList.find((w) => w.type === "enterprise") ??
+    wsList.find((w) => w.type === "personal") ??
+    wsList[0];
   const location = useLocation();
   const [tx, setTx] = useState<WalletTx[]>([]);
   const [tokens, setTokens] = useState<UserToken[]>([]);
@@ -160,17 +168,21 @@ export default function DashboardPage() {
               {t("dashboard.pricingTier")}
             </span>
           }
-          description={`${group?.Name ?? "default"}${group?.Description ? ` — ${group.Description}` : ""}`}
+          description={
+            billingWs
+              ? `${billingWs.name}${billingWs.type === "enterprise" ? ` · ${t("dashboard.enterpriseRate")}` : ` · ${t("dashboard.standardRate")}`}`
+              : t("dashboard.standardRate")
+          }
         >
           <div className="grid gap-4 md:grid-cols-2">
             <MultiplierCard
               label="Claude"
-              value={group?.ClaudeMultiplier}
+              value={billingWs?.claude_multiplier ?? 0.3}
               hint={t("dashboard.multiplierExplanation")}
             />
             <MultiplierCard
               label="Codex"
-              value={group?.CodexMultiplier}
+              value={billingWs?.codex_multiplier ?? 0.05}
               hint={t("dashboard.multiplierExplanation")}
             />
           </div>

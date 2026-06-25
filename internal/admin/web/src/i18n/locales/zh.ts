@@ -429,6 +429,8 @@ export default {
     nActive: "{{n}} 个启用",
     manage: "管理",
     pricingTier: "价格方案",
+    enterpriseRate: "企业专属费率",
+    standardRate: "标准费率",
     multiplierExplanation: "实际计费 = 上游 USD × 倍率",
     recentActivity: "最近动账",
     lastNTransactions: "最近 {{n}} 条流水",

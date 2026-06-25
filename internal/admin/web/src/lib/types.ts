@@ -24,6 +24,10 @@ export interface UserWorkspace {
   name: string;
   type: "personal" | "enterprise";
   role: "admin" | "member";
+  // Effective billing multipliers (0-sentinel already resolved to the standard
+  // default 0.3/0.05 by the server).
+  claude_multiplier: number;
+  codex_multiplier: number;
 }
 
 // Leaderboard / arena shapes (GET /arena/leaderboard, SSE /arena/stream).

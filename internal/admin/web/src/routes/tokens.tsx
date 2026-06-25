@@ -649,10 +649,21 @@ function CreateTokenDialog({
   const { t } = useTranslation();
   const { user } = useAuth();
   const spaces = user?.workspaces || [];
+  // Enterprise members default to billing their enterprise space (the discounted
+  // company pool); personal-only users default to "0" = personal.
+  const enterpriseSpace = spaces.find((w) => w.type === "enterprise");
+  const defaultWsId = enterpriseSpace ? String(enterpriseSpace.id) : "0";
   const [name, setName] = useState("");
   const [cap, setCap] = useState("");
   const [groups, setGroups] = useState<string[]>([]);
-  const [workspaceId, setWorkspaceId] = useState("0"); // "0" = personal
+  const [workspaceId, setWorkspaceId] = useState(defaultWsId); // "0" = personal
+
+  // Seed the billing-space default each time the dialog opens (user/workspaces
+  // may load after first mount).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on open transition
+  useEffect(() => {
+    if (open) setWorkspaceId(defaultWsId);
+  }, [open]);
 
   const submit = async () => {
     try {
@@ -668,7 +679,7 @@ function CreateTokenDialog({
       setName("");
       setCap("");
       setGroups([]);
-      setWorkspaceId("0");
+      setWorkspaceId(defaultWsId);
     } catch (e) {
       toast.error(errMsg(e));
     }
