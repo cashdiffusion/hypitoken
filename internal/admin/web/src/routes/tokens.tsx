@@ -45,6 +45,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAuth } from "@/hooks/use-auth";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import type { Channel, UserToken } from "@/lib/types";
 import { copyToClipboard, errMsg, fmtUSD } from "@/lib/utils";
@@ -646,9 +647,12 @@ function CreateTokenDialog({
   onCreated: () => void;
 }) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const spaces = user?.workspaces || [];
   const [name, setName] = useState("");
   const [cap, setCap] = useState("");
   const [groups, setGroups] = useState<string[]>([]);
+  const [workspaceId, setWorkspaceId] = useState("0"); // "0" = personal
 
   const submit = async () => {
     try {
@@ -656,6 +660,7 @@ function CreateTokenDialog({
         name,
         monthly_usd_cap: parseFloat(cap) || 0,
         groups,
+        workspace_id: Number(workspaceId) || 0,
       });
       toast.success(t("tokens.dialog.created"));
       onCreated();
@@ -663,6 +668,7 @@ function CreateTokenDialog({
       setName("");
       setCap("");
       setGroups([]);
+      setWorkspaceId("0");
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -697,6 +703,27 @@ function CreateTokenDialog({
             />
             <p className="text-xs text-muted-foreground">{t("tokens.dialog.capHint")}</p>
           </div>
+          {spaces.length > 1 && (
+            <div className="space-y-2">
+              <Label htmlFor="ws">{t("tokens.dialog.billingSpace")}</Label>
+              <select
+                id="ws"
+                className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                value={workspaceId}
+                onChange={(e) => setWorkspaceId(e.target.value)}
+              >
+                <option value="0">{t("tokens.dialog.personalSpace")}</option>
+                {spaces
+                  .filter((w) => w.type === "enterprise")
+                  .map((w) => (
+                    <option key={w.id} value={String(w.id)}>
+                      {w.name}
+                    </option>
+                  ))}
+              </select>
+              <p className="text-xs text-muted-foreground">{t("tokens.dialog.billingSpaceHint")}</p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label>渠道（可选，按优先级排列）</Label>
             <ChannelPicker value={groups} onChange={setGroups} />

@@ -24,6 +24,7 @@ const LeaderboardPage = lazy(() => import("@/routes/leaderboard"));
 
 // Invite page renders the SVG token-card + offline QR — lazy-load it too.
 const InvitePage = lazy(() => import("@/routes/invite"));
+const JoinPage = lazy(() => import("@/routes/join"));
 
 import PricingPage from "@/routes/pricing";
 import PrivacyPage from "@/routes/privacy";
@@ -31,6 +32,7 @@ import RegisterPage from "@/routes/register";
 import StatusPage from "@/routes/status";
 import TermsPage from "@/routes/terms";
 import TokensPage from "@/routes/tokens";
+import WorkspacePage from "@/routes/workspace";
 
 export default function App() {
   // Capture marketing attribution (?ref=) and start site-wide visitor-behaviour
@@ -54,6 +56,14 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route
+              path="/join/:token"
+              element={
+                <Suspense fallback={null}>
+                  <JoinPage />
+                </Suspense>
+              }
+            />
 
             {/* marketing pages — share one persistent PublicLayout header so the
                 nav never remounts (no flicker) and stays consistent */}
@@ -93,6 +103,7 @@ export default function App() {
                 }
               />
               <Route path="tokens" element={<TokensPage />} />
+              <Route path="workspace" element={<WorkspacePage />} />
               <Route path="billing" element={<BillingPage />} />
               <Route path="logs" element={<LogsPage />} />
               <Route path="console" element={<ConsolePage />} />

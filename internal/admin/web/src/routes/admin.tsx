@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Ban,
+  Building2,
   CheckCircle2,
   ChevronRight,
   Gauge,
@@ -31,6 +32,7 @@ import { ReferralTab } from "@/components/admin/referral-tab";
 import { RequestsExplorer } from "@/components/admin/requests-explorer";
 import { Sparkline as MiniSpark } from "@/components/admin/sparkline";
 import { UpstreamUsageDialog } from "@/components/admin/upstream-usage-dialog";
+import { WorkspacesTab } from "@/components/admin/workspaces-tab";
 import { GlassPanel, PageHeader } from "@/components/app/page-primitives";
 import { Pager } from "@/components/app/pager";
 import { Reveal } from "@/components/landing/reveal";
@@ -62,6 +64,7 @@ const TABS = [
   { to: "dashboard", labelKey: "admin.tabs.dashboard", icon: Sparkles },
   { to: "fleet", labelKey: "admin.tabs.fleet", icon: LayoutDashboard },
   { to: "users", labelKey: "admin.tabs.users", icon: Users },
+  { to: "workspaces", labelKey: "admin.tabs.workspaces", icon: Building2 },
   { to: "groups", labelKey: "admin.tabs.groups", icon: Tag },
   { to: "credentials", labelKey: "admin.tabs.credentials", icon: KeyRound },
   { to: "requests", labelKey: "admin.tabs.requests", icon: ScrollText },
@@ -101,6 +104,7 @@ export default function AdminPage() {
         {/* legacy alias — earlier deeplinks pointed at /overview */}
         <Route path="overview" element={<OverviewPanel refreshTick={tick} />} />
         <Route path="users" element={<UsersTab />} />
+        <Route path="workspaces" element={<WorkspacesTab />} />
         <Route path="groups" element={<GroupsTab />} />
         <Route path="credentials" element={<CredentialsTab />} />
         <Route path="requests" element={<RequestsExplorer refreshTick={0} />} />

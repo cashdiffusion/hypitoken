@@ -1,4 +1,5 @@
 import {
+  Building2,
   Gift,
   KeyRound,
   LayoutDashboard,
@@ -100,6 +101,9 @@ export function AppShell() {
             {NAV_ITEMS.map((n) => (
               <SideNavLink key={n.to} to={n.to} end={n.end} icon={n.icon} label={t(n.labelKey)} />
             ))}
+            {user?.workspaces?.some((w) => w.type === "enterprise" && w.role === "admin") && (
+              <SideNavLink to="/app/workspace" icon={Building2} label={t("nav.workspace")} />
+            )}
             {user?.role === "admin" && (
               <>
                 <div className="mt-6 mb-1 px-3 text-xs uppercase tracking-wider text-muted-foreground">
