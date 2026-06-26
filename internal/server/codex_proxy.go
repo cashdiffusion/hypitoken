@@ -24,10 +24,11 @@ import (
 // lives in forward() (proxy.go); this file supplies the provider-specific
 // upstream call (doForwardCodex) plus the Codex-native route handlers.
 //
-// This phase implements the API-key path — requests are forwarded to
+// This file implements the API-key path — requests are forwarded to
 // api.openai.com (or an overridden base URL) with the credential's bearer
-// key swapped in. The OAuth path lands in phase 5 via a separate helper so
-// the request-transformation complexity doesn't clutter the BYOK flow.
+// key swapped in. The OAuth path lives in doForwardCodexOAuth
+// (codex_oauth_proxy.go) so the request-transformation complexity doesn't
+// clutter the BYOK flow.
 
 func (s *Server) handleCodexChatCompletions(c *gin.Context) {
 	s.forward(c, auth.ProviderOpenAI, "/v1/chat/completions")
@@ -158,8 +159,9 @@ func (s *Server) fetchCodexAPIKeyModels(ctx context.Context, a *auth.Auth) ([]co
 //	retry=true  → caller should exclude this credential and retry
 //	done=true   → response was delivered (success or non-retryable error)
 //
-// Only API-key credentials are handled in this phase; OAuth credentials
-// bypass to doForwardCodexOAuth (phase 5 — currently a 501 shim).
+// Only API-key credentials are handled here; OAuth credentials are
+// delegated to doForwardCodexOAuth (codex_oauth_proxy.go), a full
+// implementation that forwards to the ChatGPT Codex backend.
 func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, clientName string, start time.Time, attempts int) (retry, done bool) {
 	if a.Kind == auth.KindOAuth {
 		return s.doForwardCodexOAuth(c, a, path, body, stream, model, clientToken, clientName, start, attempts)

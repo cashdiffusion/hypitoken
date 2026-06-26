@@ -21,22 +21,11 @@ import (
 	"github.com/wjsoj/cc-core/usage"
 )
 
-// The ChatGPT Codex backend expects the OpenAI /v1/responses schema with a
-// handful of upstream-private fields stripped. The upstream request headers
-// below mimic the Codex CLI fingerprint, pinned to codex-tui/0.135.0 and
-// verified against a live ChatGPT Pro capture (cc-core/crack/codex/SPEC.md).
-// We forward over the legacy HTTP POST /codex/responses path (OpenAI-Beta:
-// responses=experimental); real 0.135.0 streams over a WebSocket, but the HTTP
-// path still works and is what an HTTP-API proxy needs. We mimic the 0.135.0
-// identity (Originator codex-tui / UA / Version) over it. (These Codex
-// constants stay inline because this fork's Codex OAuth body/transport path
-// diverged from cc-core's mimicry.ApplyCodexCLIHeaders; the Claude path now
-// imports cc-core/mimicry directly — see applyAnthropicHeaders in proxy.go.)
-const (
-	codexCLIVersion        = "0.135.0"
-	codexBackendUserAgent  = "codex-tui/0.135.0 (Arch Linux Rolling Release; x86_64) Konsole/260401 (codex-tui; 0.135.0)"
-	codexBackendOriginator = "codex-tui"
-)
+// The Codex CLI fingerprint (codex-tui/0.135.0 identity over the legacy HTTP
+// POST /codex/responses path) is now centralized in cc-core's mimicry package
+// (mimicry.ApplyCodexCLIHeaders), shared with CPA-Claude so every relay stays
+// in lockstep when the version target is bumped. See cc-core/mimicry/codex.go
+// and cc-core/crack/codex/SPEC.md.
 
 // The Codex backend request-shaping logic (path mapping + body sanitization)
 // now lives in cc-core's mimicry package (mimicry.CodexOAuthPath /
@@ -81,36 +70,16 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		return false, true
 	}
 	copyForwardableHeaders(c.Request.Header, upReq.Header)
+	stripIngressHeaders(upReq.Header)
 
 	accessToken, _ := a.Credentials()
-	upReq.Header.Set("Authorization", "Bearer "+accessToken)
-	upReq.Header.Set("Content-Type", "application/json")
+	accountID, _ := a.CodexIdentity()
 	isCompactPath := path == "/v1/responses/compact"
-	// /codex/responses streams SSE; /codex/responses/compact returns JSON.
-	if isCompactPath {
-		upReq.Header.Set("Accept", "application/json")
-	} else {
-		upReq.Header.Set("Accept", "text/event-stream")
-	}
-	// Version is part of the 0.135.0 identity — sent on every request now,
-	// not just the compact endpoint.
-	upReq.Header.Set("Version", codexCLIVersion)
-	upReq.Header.Set("OpenAI-Beta", "responses=experimental")
-	// Force plaintext upstream bodies. Otherwise CF may respond with br/gzip
-	// which (a) breaks SSE streaming and (b) makes 4xx error bodies unreadable
-	// in our logs. Identity keeps everything human-readable end-to-end.
-	upReq.Header.Set("Accept-Encoding", "identity")
-	upReq.Header.Set("Connection", "Keep-Alive")
-	upReq.Header.Set("Session_id", mimicry.NewRequestUUID())
-	upReq.Header.Set("Originator", codexBackendOriginator)
-	// Always overwrite UA — forwarding client's UA (e.g. "curl/X.Y") makes
-	// Cloudflare's edge rules 403 the request before it reaches the OpenAI
-	// backend. We must look like the Codex CLI.
-	upReq.Header.Set("User-Agent", codexBackendUserAgent)
-	stripIngressHeaders(upReq.Header)
-	if accountID, _ := a.CodexIdentity(); accountID != "" {
-		upReq.Header.Set("Chatgpt-Account-Id", accountID)
-	}
+	// Apply the Codex CLI fingerprint — codex-tui/0.135.0 identity (Originator /
+	// User-Agent / Version) over the legacy HTTP POST /codex/responses{,/compact}
+	// path. Centralized in cc-core (mimicry.ApplyCodexCLIHeaders) so every relay
+	// stays in lockstep when the version target is bumped. See cc-core/crack/codex/SPEC.md.
+	mimicry.ApplyCodexCLIHeaders(upReq, accessToken, accountID, isCompactPath)
 
 	// Shared pooled transport (per proxyURL). Reusing HTTP/2 connections is
 	// critical here: chatgpt.com's CF edge rate-limits new TCP/TLS connections
