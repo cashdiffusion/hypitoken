@@ -274,15 +274,24 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		_, _ = c.Writer.Write(errBody)
 		errSnippet = truncate(errBody, 500)
 		log.Warnf("codex proxy(apikey): %s returned %d — body=%s", a.ID, resp.StatusCode, errSnippet)
-	case stream && strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream"):
-		streamSSEOpenAI(c, resp, &counts, rewriteClientModel)
 	default:
-		respBody, _ := io.ReadAll(resp.Body)
-		if rewriteClientModel != "" {
-			respBody = rewriteResponseModel(respBody, rewriteClientModel)
+		// Decide SSE-vs-JSON from the client's stream flag + the actual bytes,
+		// NOT the upstream Content-Type alone: relays (e.g. New-API gateways)
+		// stream the /v1/responses SSE back as `text/plain`, which used to fall
+		// through to the whole-body JSON parse and silently lose usage (billing
+		// = $0). Mirrors the OAuth path and sub2api, which both dispatch on the
+		// requested stream rather than the response header.
+		br := bufio.NewReaderSize(resp.Body, 64*1024)
+		if stream && responseIsSSE(resp.Header, br) {
+			streamSSEOpenAI(c, br, &counts, rewriteClientModel)
+		} else {
+			respBody, _ := io.ReadAll(br)
+			if rewriteClientModel != "" {
+				respBody = rewriteResponseModel(respBody, rewriteClientModel)
+			}
+			_, _ = c.Writer.Write(respBody)
+			counts.Add(extractOpenAIUsageFromJSON(respBody))
 		}
-		_, _ = c.Writer.Write(respBody)
-		counts.Add(extractOpenAIUsageFromJSON(respBody))
 	}
 	_ = resp.Body.Close()
 
@@ -405,13 +414,49 @@ func ensureStreamOptionsIncludeUsage(body []byte) ([]byte, error) {
 	return out, nil
 }
 
+// responseIsSSE reports whether a <400 response should be parsed as an SSE
+// stream. It trusts the Content-Type when it advertises `text/event-stream`,
+// but also peeks the buffered body for a `data:`/`event:` line — some relays
+// stream the Codex /v1/responses SSE back as `text/plain` (no event-stream
+// header), and a header-only check would lose their usage. Peek does not
+// consume, so the same reader is safe to hand to streamSSEOpenAI afterward.
+func responseIsSSE(h http.Header, br *bufio.Reader) bool {
+	if strings.Contains(h.Get("Content-Type"), "text/event-stream") {
+		return true
+	}
+	return looksLikeSSE(br)
+}
+
+// looksLikeSSE peeks the first chunk of a buffered reader and reports whether
+// it begins with an SSE field line (`data:` / `event:`), tolerating leading
+// blank lines. Non-consuming.
+func looksLikeSSE(br *bufio.Reader) bool {
+	peek, _ := br.Peek(512)
+	for len(peek) > 0 {
+		nl := bytes.IndexByte(peek, '\n')
+		var line []byte
+		if nl < 0 {
+			line = peek
+			peek = nil
+		} else {
+			line = peek[:nl]
+			peek = peek[nl+1:]
+		}
+		line = bytes.TrimRight(line, "\r")
+		if len(line) == 0 {
+			continue // skip leading blank lines
+		}
+		return bytes.HasPrefix(line, []byte("data:")) || bytes.HasPrefix(line, []byte("event:"))
+	}
+	return false
+}
+
 // streamSSEOpenAI is the OpenAI SSE passthrough. The wire format is `data:
 // <json>\n\n` with a terminal `data: [DONE]`. Usage arrives in the final
 // chunk when stream_options.include_usage is on (we always ensure that);
 // parsing it here keeps billing correct for streaming clients.
-func streamSSEOpenAI(c *gin.Context, resp *http.Response, counts *usage.Counts, rewriteClientModel string) {
+func streamSSEOpenAI(c *gin.Context, reader *bufio.Reader, counts *usage.Counts, rewriteClientModel string) {
 	flusher, _ := c.Writer.(http.Flusher)
-	reader := bufio.NewReaderSize(resp.Body, 64*1024)
 	for {
 		line, err := reader.ReadBytes('\n')
 		if len(line) > 0 {
