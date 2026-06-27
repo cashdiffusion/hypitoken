@@ -86,7 +86,10 @@ interface CodexUsageResponse {
       reached?: boolean;
       individual_limit?: number | null;
     };
-    rate_limit_reached_type?: string | null;
+    // The wham/usage backend returns this as a bare string ("primary"),
+    // null, or (newer) an object — keep it permissive so a shape change
+    // can't break rendering.
+    rate_limit_reached_type?: string | Record<string, unknown> | null;
   };
 }
 
@@ -407,7 +410,10 @@ function CodexUsageBody({
           )}
           {rl?.limit_reached && (
             <span className="rounded border border-destructive/30 bg-destructive/15 px-1.5 py-0.5 font-mono text-[10px] uppercase text-destructive">
-              limit reached{u?.rate_limit_reached_type ? ` (${u.rate_limit_reached_type})` : ""}
+              limit reached
+              {typeof u?.rate_limit_reached_type === "string" && u.rate_limit_reached_type
+                ? ` (${u.rate_limit_reached_type})`
+                : ""}
             </span>
           )}
           {spend?.reached && (
