@@ -16,6 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/usage"
 )
@@ -117,10 +118,10 @@ func (s *Server) fetchCodexAPIKeyModels(ctx context.Context, a *auth.Auth) ([]co
 	if baseURL == "" {
 		baseURL = strings.TrimRight(s.cfg.OpenAIBaseURL, "/")
 	}
-	// Same authoritative-BaseURL rule as the chat/completions forwarder —
-	// see the comment there. /models is the bare endpoint; the user's
-	// BaseURL decides whether /v1/ comes before it.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/models", nil)
+	// Shared join rule (see mimicry.JoinCodexAPIKeyUpstreamURL): a bare-origin
+	// relay BaseURL keeps /v1 (new-api/one-api serve /v1/models); a BaseURL
+	// that already carries a path is authoritative.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mimicry.JoinCodexAPIKeyUpstreamURL(baseURL, "/v1/models"), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -187,16 +188,15 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	if baseURL == "" {
 		baseURL = strings.TrimRight(s.cfg.OpenAIBaseURL, "/")
 	}
-	// BaseURL is authoritative for the API version prefix. We treat the
-	// inbound path's `/v1/` as canonical-OpenAI-routing only — we strip it
-	// before joining so the upstream URL is exactly
-	// `<configured BaseURL>/<endpoint>`. This means:
+	// Join BaseURL with the inbound endpoint via the shared rule
+	// (mimicry.JoinCodexAPIKeyUpstreamURL):
 	//   BaseURL=https://api.openai.com/v1 + /v1/responses → .../v1/responses ✓
-	//   BaseURL=https://tcdmx.com         + /v1/responses → .../responses    ✓
-	//   BaseURL=https://gateway.io/codex  + /v1/responses → .../codex/responses
-	// If a user wants /v1/ in the upstream URL, they must include it in
-	// the BaseURL field on the credential — no auto-injection, no auto-stripping.
-	upURL := baseURL + strings.TrimPrefix(path, "/v1")
+	//   BaseURL=https://relay.example     + /v1/responses → .../v1/responses ✓ (bare origin keeps /v1)
+	//   BaseURL=https://gateway.io/codex  + /v1/responses → .../codex/responses ✓
+	// A bare-origin relay (new-api/one-api) serves under /v1, so we no longer
+	// strip it into a /responses request that hit the gateway HTML homepage and
+	// surfaced as "stream disconnected before completion".
+	upURL := mimicry.JoinCodexAPIKeyUpstreamURL(baseURL, path)
 
 	upstreamBody := body
 	rewriteClientModel := ""
