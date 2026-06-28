@@ -200,6 +200,13 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 
 	upstreamBody := body
 	rewriteClientModel := ""
+	if stream {
+		if rewritten, err := usage.EnsureOpenAIStreamUsage(upstreamBody); err == nil {
+			upstreamBody = rewritten
+		} else {
+			log.Warnf("codex proxy(apikey): stream usage injection skipped for non-JSON body via %s: %v", a.ID, err)
+		}
+	}
 	if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
 		if rewritten, err := rewriteModelField(upstreamBody, upstreamModel); err == nil {
 			upstreamBody = rewritten
@@ -267,11 +274,12 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		return true, false
 	}
 
-	writeResponseHeaders(c, resp)
 	var counts usage.Counts
 	var errSnippet string
+	var missingUsage bool
 	switch {
 	case resp.StatusCode >= 400:
+		writeResponseHeaders(c, resp)
 		errBody, _ := io.ReadAll(resp.Body)
 		_, _ = c.Writer.Write(errBody)
 		errSnippet = truncate(errBody, 500)
@@ -285,20 +293,42 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		// requested stream rather than the response header.
 		br := bufio.NewReaderSize(resp.Body, 64*1024)
 		if stream && responseIsSSE(resp.Header, br) {
+			writeResponseHeaders(c, resp)
 			streamSSEOpenAI(c, br, &counts, rewriteClientModel)
+			if usage.MissingUsage(counts) {
+				missingUsage = true
+				counts = usage.MissingUsageFallbackCounts(body)
+				log.Warnf("codex proxy(apikey): %s streamed success without usage; applying fallback charge and cooling credential", a.ID)
+				s.cooldownCodexAPIKey(a, http.StatusBadGateway, time.Time{})
+			}
 		} else {
 			respBody, _ := io.ReadAll(br)
 			if rewriteClientModel != "" {
 				respBody = rewriteResponseModel(respBody, rewriteClientModel)
 			}
+			parsed := extractOpenAIUsageFromJSON(respBody)
+			if usage.MissingUsage(parsed) {
+				_ = resp.Body.Close()
+				log.Warnf("codex proxy(apikey): %s returned success without usage on non-stream response; failing closed", a.ID)
+				s.cooldownCodexAPIKey(a, http.StatusBadGateway, time.Time{})
+				c.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": "upstream response missing usage; billing cannot be computed"})
+				s.emitLog(requestlog.Record{
+					Client: clientName, ClientToken: maskClientToken(clientToken),
+					Provider: auth.ProviderOpenAI, AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
+					Model: model, Stream: stream, Path: path, Status: http.StatusBadGateway,
+					DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: usage.MissingUsageError,
+				})
+				return false, true
+			}
+			writeResponseHeaders(c, resp)
 			_, _ = c.Writer.Write(respBody)
-			counts.Add(extractOpenAIUsageFromJSON(respBody))
+			counts.Add(parsed)
 		}
 	}
 	_ = resp.Body.Close()
 
 	switch {
-	case resp.StatusCode < 400:
+	case resp.StatusCode < 400 && !missingUsage:
 		a.MarkSuccess()
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		a.MarkHardFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
@@ -331,6 +361,8 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	errField := ""
 	if resp.StatusCode >= 400 {
 		errField = fmt.Sprintf("upstream %d: %s", resp.StatusCode, truncate([]byte(errSnippet), 200))
+	} else if missingUsage {
+		errField = usage.MissingUsageError
 	}
 	s.emitLog(requestlog.Record{
 		Client:      clientName,
@@ -389,31 +421,6 @@ func (s *Server) cooldownCodexAPIKey(a *auth.Auth, status int, resetAt time.Time
 	}
 	a.MarkFailure(fmt.Sprintf("upstream %d", status))
 	a.MarkQuotaExceeded(time.Now().Add(codexAPIKey5xxCooldown))
-}
-
-// ensureStreamOptionsIncludeUsage rewrites the JSON request body so that
-// `stream_options.include_usage` is true unless the client already set it.
-// Leaves non-JSON bodies untouched. No-op when the field is already present.
-//
-//nolint:unused // retained helper: re-enabled when usage backfill for non-stream-options clients is turned on.
-func ensureStreamOptionsIncludeUsage(body []byte) ([]byte, error) {
-	var raw map[string]any
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return body, err
-	}
-	opts, _ := raw["stream_options"].(map[string]any)
-	if opts == nil {
-		opts = map[string]any{}
-	}
-	if _, set := opts["include_usage"]; !set {
-		opts["include_usage"] = true
-	}
-	raw["stream_options"] = opts
-	out, err := json.Marshal(raw)
-	if err != nil {
-		return body, err
-	}
-	return out, nil
 }
 
 // responseIsSSE reports whether a <400 response should be parsed as an SSE
