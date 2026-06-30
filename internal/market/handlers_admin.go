@@ -284,7 +284,13 @@ func (m *Market) pageAdminOrders(c *gin.Context) {
 		m.renderError(c, http.StatusInternalServerError, "无法加载订单", err)
 		return
 	}
-	m.render(c, "admin_orders.html", gin.H{"Orders": orders, "Filter": status})
+	tabs := []gin.H{
+		{"Label": "全部", "Q": ""},
+		{"Label": "已付定金", "Q": OrderPaid},
+		{"Label": "已完成", "Q": OrderFulfilled},
+		{"Label": "待支付", "Q": OrderPending},
+	}
+	m.render(c, "admin_orders.html", gin.H{"Orders": orders, "Filter": status, "Tabs": tabs})
 }
 
 func (m *Market) pageAdminOrderDetail(c *gin.Context) {

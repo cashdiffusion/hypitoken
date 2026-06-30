@@ -73,7 +73,7 @@ func TestAdminGateRedirects(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: adminCookie, Value: "secret-admin"}) //nolint:gosec // test-only cookie, attributes irrelevant
 	rec = httptest.NewRecorder()
 	eng.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "管理后台") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "后台总览") {
 		t.Fatalf("admin dashboard bad: %d", rec.Code)
 	}
 }

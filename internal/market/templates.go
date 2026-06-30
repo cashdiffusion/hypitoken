@@ -64,6 +64,21 @@ var tplFuncs = template.FuncMap{
 	"pct":  func(v float64) string { return fmt.Sprintf("%g%%", v*100) },
 	"sub":  func(a, b float64) float64 { return roundYuan(a - b) },
 	"mul":  func(a, b float64) float64 { return a * b },
+	"mod": func(a, b int) int {
+		if b == 0 {
+			return 0
+		}
+		return a % b
+	},
+	// dict2 builds a map from alternating key/value args, for passing named
+	// params to sub-templates: {{template "row" dict2 "k" "标签" "v" "值"}}.
+	"dict2": func(kv ...any) map[string]any {
+		m := make(map[string]any, len(kv)/2)
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[fmt.Sprint(kv[i])] = kv[i+1]
+		}
+		return m
+	},
 	"fmtTime": func(t time.Time) string {
 		if t.IsZero() {
 			return "—"
@@ -88,15 +103,15 @@ var tplFuncs = template.FuncMap{
 	"statusColor": func(s string) string {
 		switch s {
 		case OrderPaid:
-			return "bg-info-soft text-info"
+			return "pill-navy"
 		case OrderFulfilled:
-			return "bg-success-soft text-success"
+			return "pill-ink"
 		case OrderPending:
-			return "bg-warning-soft text-warning"
+			return "pill-vermilion"
 		case OrderExpired, OrderCancelled:
-			return "bg-muted text-muted-fg"
+			return "pill-muted"
 		}
-		return "bg-muted text-muted-fg"
+		return "pill-muted"
 	},
 	"fulfilLabel": func(s string) string {
 		switch s {

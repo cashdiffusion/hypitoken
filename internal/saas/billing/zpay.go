@@ -147,6 +147,37 @@ func (g *ZPayGateway) CreatePayment(ctx context.Context, p PayParams) (*PayResul
 	return out, nil
 }
 
+// PageJumpURL builds a signed 页面跳转支付 (submit.php) URL. Navigating a browser
+// straight to it lands on the Z-Pay cashier, which **on mobile opens the Alipay
+// app directly** (no QR scan) — the right flow when the buyer is already on
+// their phone. method defaults to alipay. The signature is computed over the
+// raw (un-encoded) values per the 易支付 spec; the URL itself is then encoded.
+func (g *ZPayGateway) PageJumpURL(outTradeNo, subject string, amountCNY float64, method string) string {
+	method = strings.ToLower(strings.TrimSpace(method))
+	if method != "wxpay" {
+		method = "alipay"
+	}
+	params := map[string]string{
+		"pid":          g.PID,
+		"type":         method,
+		"out_trade_no": outTradeNo,
+		"notify_url":   g.NotifyURL,
+		"name":         subject,
+		"money":        fmt.Sprintf("%.2f", amountCNY),
+	}
+	if g.ReturnURL != "" {
+		params["return_url"] = g.ReturnURL
+	}
+	params["sign"] = SignZPay(params, g.Key)
+	params["sign_type"] = "MD5"
+
+	form := url.Values{}
+	for k, v := range params {
+		form.Set(k, v)
+	}
+	return g.BaseURL + "/submit.php?" + form.Encode()
+}
+
 // VerifyNotify checks an incoming notify (GET) — verifies signature and
 // extracts the canonical Notification fields. Caller still validates the
 // amount, trade_status and pid against the on-disk order.

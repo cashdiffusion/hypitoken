@@ -1,31 +1,28 @@
-{{define "title"}}订单管理 · {{.SiteName}}{{end}}
+{{define "title"}}订单 · {{.SiteName}}{{end}}
 {{define "content"}}
-<a href="/admin" class="inline-flex items-center gap-1.5 text-sm text-muted-fg hover:text-foreground mb-4 transition-colors">
-  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>返回后台
+<a href="/admin" class="inline-flex items-center gap-1.5 eyebrow hover:text-ink transition-colors mb-5">
+  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>后台
 </a>
-<h1 class="font-display text-2xl font-semibold mb-4">订单管理</h1>
+<h1 class="font-display text-3xl font-semibold tracking-tight mb-5 reveal">订单管理</h1>
 
-<div class="flex gap-2 overflow-x-auto pb-1 mb-4 text-sm">
-  {{$f := .Filter}}
-  <a href="/admin/orders" class="px-3 py-1.5 rounded-full hairline whitespace-nowrap {{if eq $f ""}}bg-primary-soft{{end}}" {{if eq $f ""}}style="color: var(--primary); border-color: var(--primary);"{{end}}>全部</a>
-  <a href="/admin/orders?status=paid" class="px-3 py-1.5 rounded-full hairline whitespace-nowrap {{if eq $f "paid"}}bg-primary-soft{{end}}" {{if eq $f "paid"}}style="color: var(--primary); border-color: var(--primary);"{{end}}>已付定金</a>
-  <a href="/admin/orders?status=fulfilled" class="px-3 py-1.5 rounded-full hairline whitespace-nowrap {{if eq $f "fulfilled"}}bg-primary-soft{{end}}" {{if eq $f "fulfilled"}}style="color: var(--primary); border-color: var(--primary);"{{end}}>已完成</a>
-  <a href="/admin/orders?status=pending" class="px-3 py-1.5 rounded-full hairline whitespace-nowrap {{if eq $f "pending"}}bg-primary-soft{{end}}" {{if eq $f "pending"}}style="color: var(--primary); border-color: var(--primary);"{{end}}>待支付</a>
+{{$f := .Filter}}
+<div class="flex gap-2 overflow-x-auto pb-1 mb-5 reveal">
+  {{range $tab := .Tabs}}
+  <a href="/admin/orders{{if $tab.Q}}?status={{$tab.Q}}{{end}}" class="px-3.5 py-1.5 rounded-full text-[13px] whitespace-nowrap transition-all border {{if eq $f $tab.Q}}btn-ink{{else}}btn-ghost{{end}}" style="{{if eq $f $tab.Q}}{{else}}padding:6px 14px;{{end}}">{{$tab.Label}}</a>
+  {{end}}
 </div>
 
-<div class="space-y-2">
+<div class="space-y-2 stagger">
   {{range .Orders}}
-  <a href="/admin/orders/{{.OutTradeNo}}" class="card px-3.5 py-3 flex items-center justify-between gap-3 reveal">
+  <a href="/admin/orders/{{.OutTradeNo}}" class="card shadow-soft px-4 py-3 flex items-center justify-between gap-3 hover:shadow-lift transition-all">
     <div class="min-w-0">
       <div class="text-sm font-medium truncate">{{.ProductName}}</div>
-      <div class="text-xs text-muted-fg mt-1 flex items-center gap-1.5 flex-wrap">
-        <span>{{fulfilLabel .FulfilMethod}}</span>·<span class="num">定金{{yuan .DepositAmount}}</span>·<span class="num">余{{yuan .Balance}}</span>·<span>{{fmtTime .CreatedAt}}</span>
-      </div>
+      <div class="num text-xs text-ink-soft mt-1 flex items-center gap-1.5 flex-wrap"><span>{{fulfilLabel .FulfilMethod}}</span>·<span class="serif-num" style="color:var(--vermilion);">定金¥{{printf "%.0f" .DepositAmount}}</span>·<span>余¥{{printf "%.0f" .Balance}}</span>·<span>{{fmtTime .CreatedAt}}</span></div>
     </div>
     <span class="pill {{statusColor .Status}} shrink-0">{{statusLabel .Status}}</span>
   </a>
   {{else}}
-  <div class="card p-8 text-center text-sm text-muted-fg">没有符合条件的订单。</div>
+  <div class="card shadow-soft p-10 text-center text-sm text-ink-soft">没有符合条件的订单。</div>
   {{end}}
 </div>
 {{end}}

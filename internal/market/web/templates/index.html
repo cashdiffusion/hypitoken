@@ -1,43 +1,56 @@
 {{define "title"}}{{.SiteName}} · 校园集市{{end}}
 {{define "content"}}
-<section class="mb-7">
-  <div class="eyebrow mb-2">campus market</div>
-  <h1 class="font-display text-[28px] sm:text-3xl font-semibold leading-tight">{{.SiteName}}</h1>
-  <p class="text-muted-fg text-sm mt-2 leading-relaxed">拍下心仪好物,支付小额定金锁定,自提或配送到楼。下单后请保留订单链接。</p>
+<!-- Hero -->
+<section class="reveal mb-9 sm:mb-12">
+  <div class="rule eyebrow mb-4"><span>campus market · 北大</span></div>
+  <h1 class="font-display font-semibold tracking-tight leading-[0.98] text-[clamp(2.4rem,9vw,4.2rem)]" style="font-optical-sizing:auto;">
+    好物流转<span style="color:var(--vermilion);">,</span><br>
+    付个<span class="italic" style="color:var(--vermilion);">定金</span>就安心。
+  </h1>
+  <p class="text-ink-soft text-[15px] sm:text-base mt-5 max-w-xl leading-relaxed">
+    支付小额定金即可锁定心仪好物,余款在<span class="text-ink font-medium">自提或配送到楼</span>时当面付清。手机端一键支付宝,无需扫码。
+  </p>
 </section>
 
 {{if .Products}}
-<div class="grid grid-cols-2 gap-3 sm:gap-4 stagger">
-  {{range .Products}}
-  <a href="/p/{{.ID}}" class="card overflow-hidden group reveal flex flex-col">
-    <div class="relative aspect-square bg-muted overflow-hidden">
-      {{if .PrimaryImage}}
-      <img src="/img/{{.ID}}/{{.PrimaryImage}}" alt="{{.Name}}" loading="lazy" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105 {{if .SoldOut}}grayscale opacity-60{{end}}">
+<div class="rule eyebrow mb-4"><span>在售 · {{len .Products}}</span></div>
+<div class="grid grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-5 stagger">
+  {{range $i, $p := .Products}}
+  <a href="/p/{{$p.ID}}" class="group card overflow-hidden shadow-soft hover:shadow-lift transition-all duration-300 flex flex-col {{if and (eq (mod $i 5) 0) (gt (len $.Products) 2)}}lg:col-span-2 lg:flex-row{{end}}">
+    <div class="relative overflow-hidden bg-paper {{if and (eq (mod $i 5) 0) (gt (len $.Products) 2)}}aspect-square lg:aspect-auto lg:w-1/2{{else}}aspect-[4/5]{{end}}">
+      {{if $p.PrimaryImage}}
+      <img src="/img/{{$p.ID}}/{{$p.PrimaryImage}}" alt="{{$p.Name}}" loading="lazy" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.04] {{if $p.SoldOut}}grayscale opacity-55{{end}}">
       {{else}}
-      <div class="w-full h-full flex items-center justify-center text-3xl opacity-30">🪧</div>
+      <div class="w-full h-full flex items-center justify-center"><span class="font-display text-5xl italic" style="color:var(--line-strong);">物</span></div>
       {{end}}
-      {{if .SoldOut}}
+      {{if $p.SoldOut}}
       <div class="absolute inset-0 flex items-center justify-center">
-        <span class="pill bg-destructive-soft text-destructive-fg" style="color: var(--destructive); border:1px solid currentColor; backdrop-filter: blur(2px);">SOLD OUT</span>
+        <span class="font-display italic text-2xl px-4 py-1.5 rounded-full glass" style="color:var(--ink);">已售罄</span>
       </div>
-      {{else if le .Available 2}}
-      <span class="absolute top-2 left-2 pill bg-warning-soft text-warning" style="border:1px solid currentColor;">仅剩 {{.Available}}</span>
+      {{else if le $p.Available 2}}
+      <span class="absolute top-2.5 left-2.5 pill pill-vermilion glass">仅剩 {{$p.Available}}</span>
       {{end}}
     </div>
-    <div class="p-3 flex-1 flex flex-col">
-      <div class="font-medium text-[14px] leading-snug line-clamp-2 min-h-[2.6em]">{{.Name}}</div>
-      <div class="mt-auto pt-2 flex items-baseline justify-between">
-        <span class="font-display text-lg font-semibold num" style="color: var(--primary);">{{yuan .Price}}</span>
-        <span class="eyebrow">定金 {{yuan .DepositAmount}}</span>
+    <div class="p-3.5 sm:p-4 flex-1 flex flex-col {{if and (eq (mod $i 5) 0) (gt (len $.Products) 2)}}lg:justify-center{{end}}">
+      <div class="font-medium text-[14.5px] leading-snug line-clamp-2">{{$p.Name}}</div>
+      <div class="mt-auto pt-3 flex items-end justify-between">
+        <div>
+          <div class="eyebrow mb-0.5" style="font-size:9px;">定金</div>
+          <div class="serif-num text-xl font-semibold leading-none" style="color:var(--vermilion);">¥{{printf "%.2f" $p.DepositAmount}}</div>
+        </div>
+        <div class="text-right">
+          <div class="eyebrow mb-0.5" style="font-size:9px;">总价</div>
+          <div class="num text-sm text-ink-soft leading-none">¥{{printf "%.0f" $p.Price}}</div>
+        </div>
       </div>
     </div>
   </a>
   {{end}}
 </div>
 {{else}}
-<div class="card p-10 text-center text-muted-fg">
-  <div class="text-4xl mb-3 opacity-40">🗂️</div>
-  <p class="text-sm">暂时还没有上架的商品,过会儿再来看看~</p>
+<div class="card shadow-soft p-12 sm:p-16 text-center reveal">
+  <div class="font-display italic text-5xl mb-4" style="color:var(--line-strong);">空</div>
+  <p class="text-ink-soft text-[15px]">集市暂时空着,过会儿再来逛逛~</p>
 </div>
 {{end}}
 {{end}}

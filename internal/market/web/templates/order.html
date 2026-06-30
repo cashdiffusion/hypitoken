@@ -1,61 +1,59 @@
 {{define "title"}}订单 · {{.SiteName}}{{end}}
 {{define "content"}}
 {{$o := .O}}
-<div class="mb-5">
-  <div class="eyebrow mb-1.5">order · {{$o.OutTradeNo}}</div>
-  <h1 class="font-display text-2xl font-semibold leading-tight">{{$o.ProductName}}</h1>
-</div>
+<div class="max-w-lg mx-auto">
+  <div class="rule eyebrow mb-3"><span>order · {{$o.OutTradeNo}}</span></div>
+  <h1 class="font-display text-2xl sm:text-3xl font-semibold leading-tight tracking-tight mb-6">{{$o.ProductName}}</h1>
 
-<div id="status-card" class="card p-5 mb-5 text-center reveal" data-status="{{$o.Status}}">
-  {{if eq $o.Status "pending"}}
-  <div class="pill bg-warning-soft text-warning mx-auto mb-3" style="border:1px solid currentColor;">待支付定金</div>
-  <div class="text-sm text-muted-fg mb-4">扫码或点击下方按钮完成定金支付,页面会自动更新状态。</div>
-  {{if $o.QRCode}}
-  <div class="inline-block p-3 bg-white rounded-xl mb-4">
-    <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={{$o.QRCode}}" alt="支付二维码" class="w-44 h-44">
+  <div id="status" class="card shadow-soft p-6 sm:p-7 text-center reveal mb-5">
+    {{if eq $o.Status "pending"}}
+    <span class="pill pill-vermilion mx-auto mb-4">待支付定金</span>
+    <div class="serif-num text-5xl font-semibold mb-1" style="color:var(--vermilion);">¥{{printf "%.2f" $o.DepositAmount}}</div>
+    <div class="text-[13.5px] text-ink-soft mb-6">点击下方按钮,手机将直接打开支付宝完成定金支付。</div>
+    {{if $o.PayURL}}<a href="{{$o.PayURL}}" class="btn">
+      <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5.6 13.9c-.3.5-1 .6-1.8.3-1.4-.6-2.9-1-4.5-1.2-1.2 1.5-2.8 2.5-4.7 2.5-1.6 0-2.7-.7-2.8-1.9-.1-1.4 1.3-2.2 3.5-2.2 1 0 2.1.2 3.3.5.3-.6.6-1.3.8-2H6.8v-.6h3v-1.1H6v-.6h3.8V8.2h1.3v1.3h3.1v.6h-3.1v1.1h2.5c-.2.9-.5 1.7-.9 2.4 1 .2 1.9.5 2.6.7.7.3 1 .8.7 1.6z"/></svg>
+      打开支付宝支付
+    </a>{{end}}
+    <div class="eyebrow mt-4" style="letter-spacing:0.16em;">支付完成后本页自动更新</div>
+    {{else if or (eq $o.Status "paid") (eq $o.Status "fulfilled")}}
+    <div class="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center" style="background:color-mix(in oklch,var(--navy) 14%,transparent);">
+      <svg class="w-7 h-7" style="color:var(--navy);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+    </div>
+    <span class="pill pill-navy mx-auto mb-2">定金已支付</span>
+    <div class="text-[13.5px] text-ink-soft">卖家会尽快与你联系交付,请保持联系方式畅通。</div>
+    {{else if eq $o.Status "expired"}}
+    <span class="pill pill-muted mx-auto mb-2">订单已过期</span>
+    <div class="text-[13.5px] text-ink-soft">未在时限内支付,锁定已释放。可返回重新下单。</div>
+    {{else if eq $o.Status "cancelled"}}
+    <span class="pill pill-muted mx-auto mb-2">订单已取消</span>
+    {{end}}
   </div>
-  {{end}}
-  {{if $o.PayURL}}<a href="{{$o.PayURL}}" class="btn-primary">打开支付页 · {{yuan $o.DepositAmount}}</a>{{end}}
-  {{else if or (eq $o.Status "paid") (eq $o.Status "fulfilled")}}
-  <div class="text-4xl mb-2">✅</div>
-  <div class="pill bg-success-soft text-success mx-auto mb-2" style="border:1px solid currentColor;">定金已支付</div>
-  <div class="text-sm text-muted-fg">卖家会尽快与你联系交付,请保持联系方式畅通。</div>
-  {{else if eq $o.Status "expired"}}
-  <div class="text-3xl mb-2 opacity-50">⌛</div>
-  <div class="pill bg-muted text-muted-fg mx-auto mb-2">订单已过期</div>
-  <div class="text-sm text-muted-fg">未在时限内支付,锁定已释放。可返回重新下单。</div>
-  {{else if eq $o.Status "cancelled"}}
-  <div class="pill bg-muted text-muted-fg mx-auto mb-2">订单已取消</div>
-  {{end}}
-</div>
 
-<div class="card divide-y" style="border-color: var(--border);">
-  <div class="flex items-center justify-between px-4 py-3"><span class="text-sm text-muted-fg">商品总价</span><span class="num font-medium">{{yuan $o.Price}}</span></div>
-  <div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">已付定金 ({{pct $o.DepositRatio}})</span><span class="num font-semibold" style="color: var(--primary);">{{yuan $o.DepositAmount}}</span></div>
-  <div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">交付时应付余款</span><span class="num font-medium">{{yuan $o.Balance}}</span></div>
-  <div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">交付方式</span><span class="font-medium text-sm">{{fulfilLabel $o.FulfilMethod}}</span></div>
-  {{if eq $o.FulfilMethod "delivery"}}
-  <div class="flex items-center justify-between px-4 py-3 gap-4" style="border-color: var(--border);"><span class="text-sm text-muted-fg shrink-0">宿舍地址</span><span class="text-sm text-right">{{$o.DormAddress}}</span></div>
-  {{else}}
-  <div class="flex items-center justify-between px-4 py-3 gap-4" style="border-color: var(--border);"><span class="text-sm text-muted-fg shrink-0">自提点</span><span class="text-sm text-right">{{.PickupLocation}}</span></div>
-  {{end}}
+  <div class="card shadow-soft overflow-hidden reveal">
+    {{template "orderRow" dict2 "k" "商品总价" "v" (printf "¥%.2f" $o.Price)}}
+    {{template "orderRowAccent" dict2 "k" (printf "已付定金 · %s" (pct $o.DepositRatio)) "v" (printf "¥%.2f" $o.DepositAmount)}}
+    {{template "orderRow" dict2 "k" "交付时应付余款" "v" (printf "¥%.2f" $o.Balance)}}
+    {{template "orderRow" dict2 "k" "交付方式" "v" (fulfilLabel $o.FulfilMethod)}}
+    {{if eq $o.FulfilMethod "delivery"}}{{template "orderRow" dict2 "k" "宿舍地址" "v" $o.DormAddress}}{{else}}{{template "orderRow" dict2 "k" "自提点" "v" .PickupLocation}}{{end}}
+  </div>
+  <p class="eyebrow text-center mt-6" style="letter-spacing:0.14em;">请收藏本页链接以随时查看订单</p>
 </div>
-
-<p class="eyebrow text-center mt-6">请收藏本页链接以便随时查看订单状态</p>
 
 {{if eq $o.Status "pending"}}
 <script>
-  (function(){
-    var tradeNo = {{$o.OutTradeNo}};
-    var tries = 0;
-    var timer = setInterval(function(){
-      tries++;
-      if (tries > 120) { clearInterval(timer); return; } // ~10 min
-      fetch('/api/order/' + encodeURIComponent(tradeNo)).then(function(r){return r.json();}).then(function(d){
-        if (d && d.paid) { clearInterval(timer); location.reload(); }
-      }).catch(function(){});
-    }, 5000);
-  })();
+  (function(){ var t=0; var iv=setInterval(function(){ if(++t>120){clearInterval(iv);return;}
+    fetch('/api/order/'+encodeURIComponent({{$o.OutTradeNo}})).then(r=>r.json()).then(d=>{ if(d&&d.paid){clearInterval(iv);location.reload();} }).catch(()=>{}); },5000); })();
 </script>
 {{end}}
+{{end}}
+
+{{define "orderRow"}}
+<div class="flex items-center justify-between gap-4 px-5 py-3.5 border-b last:border-0" style="border-color:var(--line);">
+  <span class="text-[13.5px] text-ink-soft shrink-0">{{.k}}</span><span class="num text-[14px] font-medium text-right">{{.v}}</span>
+</div>
+{{end}}
+{{define "orderRowAccent"}}
+<div class="flex items-center justify-between gap-4 px-5 py-3.5 border-b" style="border-color:var(--line); background:color-mix(in oklch,var(--vermilion) 4%,transparent);">
+  <span class="text-[13.5px] text-ink-soft shrink-0">{{.k}}</span><span class="serif-num text-lg font-semibold text-right" style="color:var(--vermilion);">{{.v}}</span>
+</div>
 {{end}}

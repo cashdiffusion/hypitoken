@@ -10,8 +10,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
-
-	"github.com/wjsoj/CPA-Claude/internal/saas/billing"
 )
 
 // pageIndex — storefront homepage listing active products.
@@ -76,10 +74,9 @@ func (m *Market) handleCreateOrder(c *gin.Context) {
 	contact := strings.TrimSpace(c.PostForm("contact"))
 	dorm := strings.TrimSpace(c.PostForm("dorm_address"))
 	note := strings.TrimSpace(c.PostForm("buyer_note"))
-	payMethod := strings.ToLower(strings.TrimSpace(c.PostForm("pay_method")))
-	if payMethod != "wxpay" {
-		payMethod = "alipay"
-	}
+	// Deposits are Alipay-only via Z-Pay's page-jump cashier (opens the Alipay
+	// app directly on mobile — no QR).
+	const payMethod = "alipay"
 
 	if fulfil != FulfilPickup && fulfil != FulfilDelivery {
 		m.renderError(c, http.StatusBadRequest, "请选择自提或配送到楼", nil)
@@ -134,25 +131,9 @@ func (m *Market) handleCreateOrder(c *gin.Context) {
 		return
 	}
 
-	// Mint the Z-Pay payment surface.
-	res, err := m.zpay.CreatePayment(ctx, billing.PayParams{
-		OutTradeNo: order.OutTradeNo,
-		Subject:    truncateRunes(m.cfg.SiteName+" 定金 · "+p.Name, 60),
-		TotalCNY:   order.DepositAmount,
-		Method:     payMethod,
-		ClientIP:   order.RemoteIP,
-	})
-	if err != nil {
-		// Free the just-reserved unit so a gateway hiccup doesn't pin stock.
-		_ = m.db.SetStatus(ctx, order.OutTradeNo, OrderCancelled)
-		m.renderError(c, http.StatusBadGateway, "支付下单失败,请稍后重试", err)
-		return
-	}
-	payURL := res.PayURL
-	if payURL == "" {
-		payURL = res.Img
-	}
-	if err := m.db.SetPayInfo(ctx, order.OutTradeNo, payURL, res.QRCode, payMethod); err != nil {
+	// Build the Z-Pay page-jump cashier URL (mobile → Alipay app directly).
+	payURL := m.zpay.PageJumpURL(order.OutTradeNo, truncateRunes(m.cfg.SiteName+" 定金 · "+p.Name, 60), order.DepositAmount, payMethod)
+	if err := m.db.SetPayInfo(ctx, order.OutTradeNo, payURL, "", payMethod); err != nil {
 		log.Warnf("market: SetPayInfo: %v", err)
 	}
 	c.Redirect(http.StatusFound, "/order/"+order.OutTradeNo)

@@ -1,41 +1,40 @@
 {{define "title"}}订单详情 · {{.SiteName}}{{end}}
 {{define "content"}}
 {{$o := .O}}
-<a href="/admin/orders" class="inline-flex items-center gap-1.5 text-sm text-muted-fg hover:text-foreground mb-4 transition-colors">
-  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>返回订单
-</a>
+<div class="max-w-lg mx-auto">
+  <a href="/admin/orders" class="inline-flex items-center gap-1.5 eyebrow hover:text-ink transition-colors mb-5">
+    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>订单
+  </a>
 
-<div class="flex items-start justify-between gap-3 mb-4">
-  <div class="min-w-0">
-    <div class="eyebrow mb-1">{{$o.OutTradeNo}}</div>
-    <h1 class="font-display text-xl font-semibold leading-tight">{{$o.ProductName}}</h1>
+  <div class="flex items-start justify-between gap-3 mb-5 reveal">
+    <div class="min-w-0">
+      <div class="eyebrow mb-1.5">{{$o.OutTradeNo}}</div>
+      <h1 class="font-display text-2xl font-semibold leading-tight tracking-tight">{{$o.ProductName}}</h1>
+    </div>
+    <span class="pill {{statusColor $o.Status}} shrink-0">{{statusLabel $o.Status}}</span>
   </div>
-  <span class="pill {{statusColor $o.Status}} shrink-0">{{statusLabel $o.Status}}</span>
-</div>
 
-<div class="card divide-y mb-5" style="border-color: var(--border);">
-  <div class="flex items-center justify-between px-4 py-3"><span class="text-sm text-muted-fg">商品总价</span><span class="num font-medium">{{yuan $o.Price}}</span></div>
-  <div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">已付定金 ({{pct $o.DepositRatio}})</span><span class="num font-semibold" style="color: var(--primary);">{{yuan $o.DepositAmount}}</span></div>
-  <div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">交付应收余款</span><span class="num font-semibold">{{yuan $o.Balance}}</span></div>
-  <div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">交付方式</span><span class="font-medium text-sm">{{fulfilLabel $o.FulfilMethod}}</span></div>
-  <div class="flex items-center justify-between px-4 py-3 gap-4" style="border-color: var(--border);"><span class="text-sm text-muted-fg shrink-0">联系方式</span><span class="text-sm text-right font-medium select-all">{{$o.Contact}}</span></div>
-  {{if eq $o.FulfilMethod "delivery"}}
-  <div class="flex items-center justify-between px-4 py-3 gap-4" style="border-color: var(--border);"><span class="text-sm text-muted-fg shrink-0">宿舍地址</span><span class="text-sm text-right select-all">{{$o.DormAddress}}</span></div>
-  {{end}}
-  {{if $o.BuyerNote}}<div class="flex items-center justify-between px-4 py-3 gap-4" style="border-color: var(--border);"><span class="text-sm text-muted-fg shrink-0">买家备注</span><span class="text-sm text-right">{{$o.BuyerNote}}</span></div>{{end}}
-  <div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">支付方式</span><span class="text-sm">{{$o.PayMethod}}</span></div>
-  <div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">下单时间</span><span class="text-sm num">{{fmtTime $o.CreatedAt}}</span></div>
-  {{if not $o.PaidAt.IsZero}}<div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">付款时间</span><span class="text-sm num">{{fmtTime $o.PaidAt}}</span></div>{{end}}
-</div>
+  <div class="card shadow-soft overflow-hidden mb-5 reveal">
+    {{template "aRow" dict2 "k" "商品总价" "v" (printf "¥%.2f" $o.Price)}}
+    {{template "aRowA" dict2 "k" (printf "已付定金 · %s" (pct $o.DepositRatio)) "v" (printf "¥%.2f" $o.DepositAmount)}}
+    {{template "aRow" dict2 "k" "交付应收余款" "v" (printf "¥%.2f" $o.Balance)}}
+    {{template "aRow" dict2 "k" "交付方式" "v" (fulfilLabel $o.FulfilMethod)}}
+    {{template "aRowSel" dict2 "k" "联系方式" "v" $o.Contact}}
+    {{if eq $o.FulfilMethod "delivery"}}{{template "aRowSel" dict2 "k" "宿舍地址" "v" $o.DormAddress}}{{end}}
+    {{if $o.BuyerNote}}{{template "aRow" dict2 "k" "买家备注" "v" $o.BuyerNote}}{{end}}
+    {{template "aRow" dict2 "k" "下单时间" "v" (fmtTime $o.CreatedAt)}}
+    {{if not $o.PaidAt.IsZero}}{{template "aRow" dict2 "k" "付款时间" "v" (fmtTime $o.PaidAt)}}{{end}}
+  </div>
 
-{{if or (eq $o.Status "paid") (eq $o.Status "pending")}}
-<div class="grid grid-cols-2 gap-2.5">
-  {{if eq $o.Status "paid"}}
-  <form method="POST" action="/admin/orders/{{$o.OutTradeNo}}/fulfil"><button type="submit" class="btn-primary">✓ 标记已交付</button></form>
-  {{else}}
-  <div></div>
+  {{if or (eq $o.Status "paid") (eq $o.Status "pending")}}
+  <div class="grid grid-cols-2 gap-2.5 reveal">
+    {{if eq $o.Status "paid"}}<form method="POST" action="/admin/orders/{{$o.OutTradeNo}}/fulfil"><button type="submit" class="btn">标记已交付</button></form>{{else}}<div></div>{{end}}
+    <form method="POST" action="/admin/orders/{{$o.OutTradeNo}}/cancel" onsubmit="return confirm('取消该订单?将释放库存。')"><button type="submit" class="btn-danger w-full">取消订单</button></form>
+  </div>
   {{end}}
-  <form method="POST" action="/admin/orders/{{$o.OutTradeNo}}/cancel" onsubmit="return confirm('取消该订单?将释放库存。')"><button type="submit" class="btn-danger w-full">取消订单</button></form>
 </div>
 {{end}}
-{{end}}
+
+{{define "aRow"}}<div class="flex items-center justify-between gap-4 px-5 py-3 border-b last:border-0" style="border-color:var(--line);"><span class="text-[13.5px] text-ink-soft shrink-0">{{.k}}</span><span class="num text-[14px] text-right">{{.v}}</span></div>{{end}}
+{{define "aRowSel"}}<div class="flex items-center justify-between gap-4 px-5 py-3 border-b" style="border-color:var(--line);"><span class="text-[13.5px] text-ink-soft shrink-0">{{.k}}</span><span class="text-[14px] font-medium text-right select-all">{{.v}}</span></div>{{end}}
+{{define "aRowA"}}<div class="flex items-center justify-between gap-4 px-5 py-3 border-b" style="border-color:var(--line); background:color-mix(in oklch,var(--vermilion) 4%,transparent);"><span class="text-[13.5px] text-ink-soft shrink-0">{{.k}}</span><span class="serif-num text-lg font-semibold text-right" style="color:var(--vermilion);">{{.v}}</span></div>{{end}}

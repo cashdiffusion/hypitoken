@@ -1,15 +1,15 @@
 {{define "title"}}管理登录 · {{.SiteName}}{{end}}
 {{define "content"}}
-<div class="max-w-sm mx-auto card p-6 sm:p-8 reveal">
-  <div class="eyebrow mb-2">admin access</div>
-  <h1 class="font-display text-xl font-semibold mb-5">管理后台登录</h1>
-  {{if .Error}}<div class="card bg-destructive-soft text-sm px-4 py-3 mb-4" style="color: var(--destructive); border-color: color-mix(in oklch, var(--destructive) 35%, transparent);">{{.Error}}</div>{{end}}
+<div class="max-w-sm mx-auto card shadow-lift p-7 sm:p-8 reveal mt-6">
+  <div class="rule eyebrow mb-3"><span>admin access</span></div>
+  <h1 class="font-display text-2xl font-semibold mb-6 tracking-tight">后台登录</h1>
+  {{if .Error}}<div class="card px-4 py-3 mb-5 text-[13.5px]" style="color:var(--vermilion-deep); background:color-mix(in oklch,var(--vermilion) 7%,var(--card)); border-color:color-mix(in oklch,var(--vermilion) 30%,transparent);">{{.Error}}</div>{{end}}
   <form method="POST" action="/admin/login" class="space-y-4">
     <div>
       <label class="lbl">管理口令</label>
       <input type="password" name="token" class="field" placeholder="admin_token" required autofocus>
     </div>
-    <button type="submit" class="btn-primary">登录</button>
+    <button type="submit" class="btn">进入后台</button>
   </form>
 </div>
 {{end}}

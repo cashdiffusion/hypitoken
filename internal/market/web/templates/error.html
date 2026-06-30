@@ -1,9 +1,9 @@
 {{define "title"}}出错了 · {{.SiteName}}{{end}}
 {{define "content"}}
-<div class="card p-8 sm:p-10 text-center max-w-md mx-auto reveal">
-  <div class="text-5xl mb-4 opacity-50">😵</div>
-  <div class="eyebrow mb-2">error {{.Status}}</div>
-  <h1 class="font-display text-xl font-semibold mb-2">{{.Message}}</h1>
-  <a href="/" class="btn-ghost mt-5 inline-flex">返回集市</a>
+<div class="card shadow-soft p-10 sm:p-14 text-center max-w-md mx-auto reveal">
+  <div class="font-display italic text-6xl mb-4" style="color:var(--vermilion);">{{.Status}}</div>
+  <div class="rule eyebrow justify-center mb-4" style="justify-content:center;"></div>
+  <h1 class="font-display text-xl font-semibold mb-6 leading-snug">{{.Message}}</h1>
+  <a href="/" class="btn-ghost inline-flex">返回集市</a>
 </div>
 {{end}}
