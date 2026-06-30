@@ -199,7 +199,10 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 			}
 		}
 		if derr != nil {
-			log.Warnf("codex ws: upstream dial via %s failed (status=%d): %v", cand.ID, status, derr)
+			// derr may embed an unparsed upstream response (e.g. an HTTP/2 SETTINGS
+			// frame when ALPN mis-negotiates), which gorilla renders as a long
+			// \x-escaped string. Cap it so a binary reply can't dump a screenful.
+			log.Warnf("codex ws: upstream dial via %s failed (status=%d): %s", cand.ID, status, truncate([]byte(derr.Error()), 200))
 			switch status {
 			case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
 				s.pool.ReportUpstreamError(cand, status, retryAfter)
