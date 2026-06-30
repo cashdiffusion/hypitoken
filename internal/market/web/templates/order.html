@@ -1,0 +1,61 @@
+{{define "title"}}订单 · {{.SiteName}}{{end}}
+{{define "content"}}
+{{$o := .O}}
+<div class="mb-5">
+  <div class="eyebrow mb-1.5">order · {{$o.OutTradeNo}}</div>
+  <h1 class="font-display text-2xl font-semibold leading-tight">{{$o.ProductName}}</h1>
+</div>
+
+<div id="status-card" class="card p-5 mb-5 text-center reveal" data-status="{{$o.Status}}">
+  {{if eq $o.Status "pending"}}
+  <div class="pill bg-warning-soft text-warning mx-auto mb-3" style="border:1px solid currentColor;">待支付定金</div>
+  <div class="text-sm text-muted-fg mb-4">扫码或点击下方按钮完成定金支付,页面会自动更新状态。</div>
+  {{if $o.QRCode}}
+  <div class="inline-block p-3 bg-white rounded-xl mb-4">
+    <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={{$o.QRCode}}" alt="支付二维码" class="w-44 h-44">
+  </div>
+  {{end}}
+  {{if $o.PayURL}}<a href="{{$o.PayURL}}" class="btn-primary">打开支付页 · {{yuan $o.DepositAmount}}</a>{{end}}
+  {{else if or (eq $o.Status "paid") (eq $o.Status "fulfilled")}}
+  <div class="text-4xl mb-2">✅</div>
+  <div class="pill bg-success-soft text-success mx-auto mb-2" style="border:1px solid currentColor;">定金已支付</div>
+  <div class="text-sm text-muted-fg">卖家会尽快与你联系交付,请保持联系方式畅通。</div>
+  {{else if eq $o.Status "expired"}}
+  <div class="text-3xl mb-2 opacity-50">⌛</div>
+  <div class="pill bg-muted text-muted-fg mx-auto mb-2">订单已过期</div>
+  <div class="text-sm text-muted-fg">未在时限内支付,锁定已释放。可返回重新下单。</div>
+  {{else if eq $o.Status "cancelled"}}
+  <div class="pill bg-muted text-muted-fg mx-auto mb-2">订单已取消</div>
+  {{end}}
+</div>
+
+<div class="card divide-y" style="border-color: var(--border);">
+  <div class="flex items-center justify-between px-4 py-3"><span class="text-sm text-muted-fg">商品总价</span><span class="num font-medium">{{yuan $o.Price}}</span></div>
+  <div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">已付定金 ({{pct $o.DepositRatio}})</span><span class="num font-semibold" style="color: var(--primary);">{{yuan $o.DepositAmount}}</span></div>
+  <div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">交付时应付余款</span><span class="num font-medium">{{yuan $o.Balance}}</span></div>
+  <div class="flex items-center justify-between px-4 py-3" style="border-color: var(--border);"><span class="text-sm text-muted-fg">交付方式</span><span class="font-medium text-sm">{{fulfilLabel $o.FulfilMethod}}</span></div>
+  {{if eq $o.FulfilMethod "delivery"}}
+  <div class="flex items-center justify-between px-4 py-3 gap-4" style="border-color: var(--border);"><span class="text-sm text-muted-fg shrink-0">宿舍地址</span><span class="text-sm text-right">{{$o.DormAddress}}</span></div>
+  {{else}}
+  <div class="flex items-center justify-between px-4 py-3 gap-4" style="border-color: var(--border);"><span class="text-sm text-muted-fg shrink-0">自提点</span><span class="text-sm text-right">{{.PickupLocation}}</span></div>
+  {{end}}
+</div>
+
+<p class="eyebrow text-center mt-6">请收藏本页链接以便随时查看订单状态</p>
+
+{{if eq $o.Status "pending"}}
+<script>
+  (function(){
+    var tradeNo = {{$o.OutTradeNo}};
+    var tries = 0;
+    var timer = setInterval(function(){
+      tries++;
+      if (tries > 120) { clearInterval(timer); return; } // ~10 min
+      fetch('/api/order/' + encodeURIComponent(tradeNo)).then(function(r){return r.json();}).then(function(d){
+        if (d && d.paid) { clearInterval(timer); location.reload(); }
+      }).catch(function(){});
+    }, 5000);
+  })();
+</script>
+{{end}}
+{{end}}

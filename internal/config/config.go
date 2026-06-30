@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/wjsoj/CPA-Claude/internal/market"
 	"github.com/wjsoj/CPA-Claude/internal/saas"
 	"github.com/wjsoj/CPA-Claude/internal/shop"
 	"github.com/wjsoj/cc-core/pricing"
@@ -47,6 +48,7 @@ type EndpointsConfig struct {
 	Claude EndpointConfig `yaml:"claude"`
 	Codex  EndpointConfig `yaml:"codex"`
 	Shop   EndpointConfig `yaml:"shop"`
+	Market EndpointConfig `yaml:"market"`
 }
 
 type Config struct {
@@ -150,6 +152,11 @@ type Config struct {
 	// Shop.Enabled is false and endpoints.shop is disabled, no shop code
 	// runs and no extra listener binds.
 	Shop shop.Config `yaml:"shop"`
+
+	// Market is the standalone campus marketplace (摆摊/二手/预订) — a sibling
+	// of Shop reusing the same SQLite file + Z-Pay gateway. When Market.Enabled
+	// is false and endpoints.market is disabled, no market code runs.
+	Market market.Config `yaml:"market"`
 }
 
 // CodexWSConfig configures the Codex WebSocket transport. WebSocket carries
@@ -260,6 +267,15 @@ func applyDefaults(c *Config, path string) {
 	if c.Endpoints.Shop.Host == "" {
 		c.Endpoints.Shop.Host = "0.0.0.0"
 	}
+	if c.Endpoints.Market.Port == 0 {
+		// Market defaults to configured-but-disabled, same posture as Shop —
+		// enable explicitly via endpoints.market.disabled=false + market.enabled=true.
+		c.Endpoints.Market.Port = 8320
+		c.Endpoints.Market.Disabled = true
+	}
+	if c.Endpoints.Market.Host == "" {
+		c.Endpoints.Market.Host = "0.0.0.0"
+	}
 	if c.LogLevel == "" {
 		c.LogLevel = "info"
 	}
@@ -308,6 +324,13 @@ func applyDefaults(c *Config, path string) {
 	c.Shop.ApplyDefaults(filepath.Dir(path))
 	if c.Shop.DBPath != "" && !filepath.IsAbs(c.Shop.DBPath) {
 		c.Shop.DBPath = filepath.Join(filepath.Dir(path), c.Shop.DBPath)
+	}
+	c.Market.ApplyDefaults(filepath.Dir(path))
+	if c.Market.DBPath != "" && !filepath.IsAbs(c.Market.DBPath) {
+		c.Market.DBPath = filepath.Join(filepath.Dir(path), c.Market.DBPath)
+	}
+	if c.Market.ImageDir != "" && !filepath.IsAbs(c.Market.ImageDir) {
+		c.Market.ImageDir = filepath.Join(filepath.Dir(path), c.Market.ImageDir)
 	}
 
 	if c.KiroAuthDir == "" {

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>{{block "title" .}}{{.SiteName}}{{end}}</title>
+
+<script>
+  (function(){
+    try {
+      var stored = localStorage.getItem('hypimarket.theme');
+      var sys = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var dark = stored ? stored === 'dark' : sys;
+      if (dark) document.documentElement.classList.add('dark');
+    } catch(e) {}
+  })();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,500;12..96,600;12..96,700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          background:'var(--background)', foreground:'var(--foreground)',
+          card:'var(--card)', 'card-fg':'var(--card-foreground)',
+          popover:'var(--popover)', primary:'var(--primary)', 'primary-fg':'var(--primary-foreground)',
+          secondary:'var(--secondary)', 'secondary-fg':'var(--secondary-foreground)',
+          muted:'var(--muted)', 'muted-fg':'var(--muted-foreground)',
+          accent:'var(--accent)', 'accent-fg':'var(--accent-foreground)',
+          destructive:'var(--destructive)', 'destructive-fg':'var(--destructive-foreground)',
+          success:'var(--success)', warning:'var(--warning)', info:'var(--info)',
+          border:'var(--border)', 'border-strong':'var(--border-strong)', ring:'var(--ring)',
+        },
+        fontFamily: {
+          display: ['"Bricolage Grotesque"', 'ui-sans-serif', 'system-ui'],
+          sans:    ['"Bricolage Grotesque"', 'ui-sans-serif', 'system-ui'],
+          mono:    ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        },
+      }
+    }
+  }
+</script>
+
+<style>
+  :root {
+    --background: oklch(0.985 0.006 160); --foreground: oklch(0.16 0.018 60);
+    --card: oklch(1 0 0); --card-foreground: oklch(0.16 0.018 60);
+    --popover: oklch(1 0 0); --popover-foreground: oklch(0.16 0.018 60);
+    --primary: oklch(0.55 0.16 150); --primary-foreground: oklch(0.99 0.005 85);
+    --secondary: oklch(0.96 0.008 85); --secondary-foreground: oklch(0.22 0.018 60);
+    --muted: oklch(0.955 0.008 85); --muted-foreground: oklch(0.4 0.014 70);
+    --accent: oklch(0.94 0.012 85); --accent-foreground: oklch(0.22 0.018 60);
+    --destructive: oklch(0.52 0.18 25); --destructive-foreground: oklch(0.99 0.005 85);
+    --success: oklch(0.58 0.13 150); --warning: oklch(0.68 0.15 70); --info: oklch(0.5 0.13 240);
+    --border: oklch(0.9 0.008 85); --border-strong: oklch(0.82 0.01 85); --ring: oklch(0.55 0.16 150);
+  }
+  .dark {
+    --background: oklch(0.17 0.02 160); --foreground: oklch(0.94 0.008 85);
+    --card: oklch(0.2 0.013 200); --card-foreground: oklch(0.94 0.008 85);
+    --popover: oklch(0.21 0.013 200); --popover-foreground: oklch(0.94 0.008 85);
+    --primary: oklch(0.78 0.16 150); --primary-foreground: oklch(0.14 0.012 200);
+    --secondary: oklch(0.25 0.014 200); --secondary-foreground: oklch(0.94 0.008 85);
+    --muted: oklch(0.24 0.014 200); --muted-foreground: oklch(0.74 0.014 80);
+    --accent: oklch(0.27 0.02 200); --accent-foreground: oklch(0.94 0.008 85);
+    --destructive: oklch(0.68 0.2 25); --destructive-foreground: oklch(0.14 0.012 200);
+    --success: oklch(0.78 0.16 150); --warning: oklch(0.82 0.16 72); --info: oklch(0.72 0.14 240);
+    --border: oklch(0.27 0.015 200); --border-strong: oklch(0.37 0.02 200); --ring: oklch(0.78 0.16 150);
+  }
+  html { color-scheme: light; } html.dark { color-scheme: dark; }
+  body {
+    background-color: var(--background); color: var(--foreground);
+    font-feature-settings: "ss01","cv11","tnum"; min-height: 100dvh;
+    background-attachment: fixed;
+    font-family: 'Bricolage Grotesque', ui-sans-serif, system-ui;
+    -webkit-tap-highlight-color: transparent;
+  }
+  html.dark body { background-image: radial-gradient(ellipse 70% 45% at 10% 0%, color-mix(in oklch, var(--primary) 16%, transparent) 0%, transparent 60%), radial-gradient(ellipse 60% 45% at 95% 100%, color-mix(in oklch, var(--info) 12%, transparent) 0%, transparent 70%); }
+  html:not(.dark) body { background-image: radial-gradient(ellipse 60% 45% at 8% 0%, color-mix(in oklch, var(--success) 12%, transparent) 0%, transparent 65%), radial-gradient(ellipse 55% 45% at 95% 100%, color-mix(in oklch, var(--success) 8%, transparent) 0%, transparent 70%); }
+  ::selection { background-color: color-mix(in oklch, var(--primary) 25%, transparent); }
+  h1,h2,h3,h4 { letter-spacing: -0.02em; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: "zero","ss01"; }
+  .num  { font-variant-numeric: tabular-nums; }
+  .eyebrow { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted-foreground); }
+  .hairline-b { border-bottom: 1px solid var(--border); } .hairline-t { border-top: 1px solid var(--border); } .hairline { border: 1px solid var(--border); }
+  @keyframes riseIn { from { opacity:0; transform: translateY(8px);} to { opacity:1; transform: translateY(0);} }
+  .reveal { animation: riseIn .5s cubic-bezier(0.22,1,0.36,1) backwards; }
+  .stagger > * { animation: riseIn .5s cubic-bezier(0.22,1,0.36,1) backwards; }
+  .stagger > *:nth-child(2){animation-delay:.06s} .stagger > *:nth-child(3){animation-delay:.12s}
+  .stagger > *:nth-child(4){animation-delay:.18s} .stagger > *:nth-child(5){animation-delay:.24s}
+  .stagger > *:nth-child(n+6){animation-delay:.30s}
+  .field { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 16px; color: var(--foreground); width: 100%; transition: border-color .2s, box-shadow .2s; }
+  .field:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 16%, transparent); }
+  .field::placeholder { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+  label.lbl { display:block; font-size: 13px; font-weight: 500; margin-bottom: 7px; color: var(--foreground); }
+  .btn-primary { display:inline-flex; align-items:center; justify-content:center; gap:8px; background: var(--primary); color: var(--primary-foreground); padding: 13px 22px; border-radius: 10px; font-weight: 600; font-size: 15px; width:100%; border: 1px solid color-mix(in oklch, var(--primary) 90%, black); box-shadow: 0 4px 14px -6px color-mix(in oklch, var(--primary) 60%, transparent); transition: filter .2s, transform .15s; }
+  .btn-primary:hover { filter: brightness(1.06); } .btn-primary:active { transform: translateY(1px); }
+  .btn-primary:disabled { filter: grayscale(0.7) opacity(0.6); pointer-events: none; }
+  .btn-ghost { display:inline-flex; align-items:center; justify-content:center; gap:6px; background: transparent; color: var(--foreground); border: 1px solid var(--border-strong); padding: 11px 16px; border-radius: 10px; font-size: 14px; font-weight: 500; transition: all .2s; }
+  .btn-ghost:hover { border-color: var(--primary); color: var(--primary); }
+  .btn-danger { display:inline-flex; align-items:center; justify-content:center; gap:6px; background: transparent; color: var(--destructive); border: 1px solid color-mix(in oklch, var(--destructive) 40%, transparent); padding: 11px 16px; border-radius: 10px; font-size: 14px; transition: all .2s; }
+  .btn-danger:hover { background: var(--destructive); color: var(--destructive-foreground); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; }
+  .pill { display:inline-flex; align-items:center; gap:6px; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.12em; padding: 4px 10px; border-radius: 999px; }
+  .bg-primary-soft { background: color-mix(in oklch, var(--primary) 12%, transparent); }
+  .bg-success-soft { background: color-mix(in oklch, var(--success) 14%, transparent); }
+  .bg-warning-soft { background: color-mix(in oklch, var(--warning) 18%, transparent); }
+  .bg-info-soft { background: color-mix(in oklch, var(--info) 14%, transparent); }
+  .bg-destructive-soft { background: color-mix(in oklch, var(--destructive) 12%, transparent); }
+  .text-info { color: var(--info); } .text-success { color: var(--success); } .text-warning { color: var(--warning); }
+  .choice { cursor:pointer; display:flex; align-items:center; gap:10px; padding: 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--card); transition: all .2s; }
+  .choice:has(:checked) { border-color: var(--primary); background: color-mix(in oklch, var(--primary) 7%, var(--card)); box-shadow: 0 0 0 1px var(--primary); }
+  .choice input { accent-color: var(--primary); width: 18px; height: 18px; }
+</style>
+</head>
+<body class="font-sans antialiased">
+
+<header class="hairline-b backdrop-blur sticky top-0 z-20" style="background: color-mix(in oklch, var(--background) 86%, transparent); padding-top: env(safe-area-inset-top);">
+  <div class="mx-auto max-w-3xl px-4 sm:px-6 py-3.5 flex items-center justify-between">
+    <a href="/" class="flex items-center gap-2.5 group">
+      <span class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg overflow-hidden" style="background: color-mix(in oklch, var(--primary) 14%, var(--card)); border: 1px solid var(--border);">
+        <span class="text-base relative">🛒</span>
+      </span>
+      <span class="font-display text-[19px] leading-none font-semibold text-foreground">{{.SiteName}}</span>
+    </a>
+    <nav class="flex items-center gap-1.5 text-[13px]">
+      {{if .IsAdmin}}
+      <a href="/admin" class="px-2.5 py-1.5 rounded-md text-muted-fg hover:text-foreground transition-colors flex items-center gap-1.5">
+        <span class="inline-block w-1.5 h-1.5 rounded-full" style="background: var(--primary);"></span>管理
+      </a>
+      {{end}}
+      <button type="button" id="theme-toggle" class="inline-flex items-center justify-center w-9 h-9 rounded-md hairline hover:border-primary transition-colors" title="切换主题" aria-label="切换主题">
+        <svg class="w-4 h-4 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="w-4 h-4 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main class="mx-auto max-w-3xl px-4 sm:px-6 py-6 sm:py-10" style="padding-bottom: calc(env(safe-area-inset-bottom) + 40px);">
+{{block "content" .}}{{end}}
+</main>
+
+<footer class="hairline-t mt-12">
+  <div class="mx-auto max-w-3xl px-4 sm:px-6 py-6 flex items-center justify-between">
+    <div class="eyebrow">© {{.SiteName}}</div>
+    <div class="eyebrow flex items-center gap-2"><span class="inline-block w-1.5 h-1.5 rounded-full" style="background: var(--success);"></span>校园直交</div>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('theme-toggle').addEventListener('click', function() {
+    var dark = document.documentElement.classList.toggle('dark');
+    try { localStorage.setItem('hypimarket.theme', dark ? 'dark' : 'light'); } catch(e) {}
+  });
+</script>
+</body>
+</html>

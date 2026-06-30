@@ -10,6 +10,10 @@
 /shop.db
 /shop.db-wal
 /shop.db-shm
+/market.db
+/market.db-wal
+/market.db-shm
+/market_images/
 /kiro_auths/
 /logs/
 /bin/

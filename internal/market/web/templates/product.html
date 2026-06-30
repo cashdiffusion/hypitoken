@@ -1,0 +1,107 @@
+{{define "title"}}{{.P.Name}} · {{.SiteName}}{{end}}
+{{define "content"}}
+{{$p := .P}}
+<a href="/" class="inline-flex items-center gap-1.5 text-sm text-muted-fg hover:text-foreground mb-4 transition-colors">
+  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>返回集市
+</a>
+
+<!-- Image gallery -->
+{{if $p.Images}}
+<div class="card overflow-hidden mb-5 reveal">
+  <div id="gallery" class="aspect-square bg-muted">
+    <img id="gallery-main" src="/img/{{$p.ID}}/{{$p.PrimaryImage}}" alt="{{$p.Name}}" class="w-full h-full object-cover">
+  </div>
+  {{if gt (len $p.Images) 1}}
+  <div class="flex gap-2 p-2.5 overflow-x-auto">
+    {{range $p.Images}}
+    <button type="button" onclick="document.getElementById('gallery-main').src='/img/{{$p.ID}}/{{.}}'" class="shrink-0 w-14 h-14 rounded-lg overflow-hidden hairline">
+      <img src="/img/{{$p.ID}}/{{.}}" class="w-full h-full object-cover" loading="lazy">
+    </button>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+<div class="reveal">
+  <h1 class="font-display text-2xl font-semibold leading-tight">{{$p.Name}}</h1>
+  <div class="flex items-baseline gap-3 mt-3">
+    <span class="font-display text-3xl font-bold num" style="color: var(--primary);">{{yuan $p.Price}}</span>
+    {{if $p.SoldOut}}
+    <span class="pill bg-destructive-soft" style="color: var(--destructive);">已售罄</span>
+    {{else}}
+    <span class="pill bg-success-soft text-success">现货 {{$p.Available}} 件</span>
+    {{end}}
+  </div>
+  {{if $p.Description}}
+  <p class="text-[14.5px] text-foreground/85 mt-4 leading-relaxed whitespace-pre-wrap">{{$p.Description}}</p>
+  {{end}}
+</div>
+
+<!-- Deposit notice -->
+<div class="card bg-primary-soft p-4 my-5 reveal" style="border-color: color-mix(in oklch, var(--primary) 30%, transparent);">
+  <div class="flex items-start gap-3">
+    <span class="text-xl">💰</span>
+    <div class="text-sm leading-relaxed">
+      <div class="font-semibold">现在只需支付 <span class="num" style="color: var(--primary);">{{yuan $p.DepositAmount}}</span> 定金({{pct $p.DepositRatio}})</div>
+      <div class="text-muted-fg mt-1">余款 <span class="num">{{yuan (sub $p.Price $p.DepositAmount)}}</span> 在自提/收货时当面付清。支付定金后该件即被锁定。</div>
+    </div>
+  </div>
+</div>
+
+{{if $p.SoldOut}}
+<button disabled class="btn-primary">已售罄</button>
+{{else}}
+<form method="POST" action="/p/{{$p.ID}}/buy" class="space-y-5 card p-4 sm:p-5 reveal">
+  <div>
+    <label class="lbl">交付方式</label>
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="choice">
+        <input type="radio" name="fulfil_method" value="pickup" checked onchange="toggleDorm()">
+        <div><div class="font-medium text-sm">自提</div><div class="text-xs text-muted-fg mt-0.5">{{.PickupLocation}}</div></div>
+      </label>
+      <label class="choice">
+        <input type="radio" name="fulfil_method" value="delivery" onchange="toggleDorm()">
+        <div><div class="font-medium text-sm">配送到楼</div><div class="text-xs text-muted-fg mt-0.5">送到宿舍楼下</div></div>
+      </label>
+    </div>
+  </div>
+
+  <div id="dorm-wrap" class="hidden">
+    <label class="lbl">宿舍楼地址</label>
+    <input type="text" name="dorm_address" class="field" placeholder="例如:45楼 / 畅春园 X 号楼" autocomplete="off">
+  </div>
+
+  <div>
+    <label class="lbl">联系方式 <span class="text-muted-fg font-normal">(微信/手机,请备注「来自{{.SiteName}}」)</span></label>
+    <input type="text" name="contact" class="field" placeholder="微信号或手机号" required autocomplete="off">
+  </div>
+
+  <div>
+    <label class="lbl">备注 <span class="text-muted-fg font-normal">(选填)</span></label>
+    <input type="text" name="buyer_note" class="field" placeholder="想说的话、期望交付时间等" autocomplete="off">
+  </div>
+
+  <div>
+    <label class="lbl">定金支付方式</label>
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="choice"><input type="radio" name="pay_method" value="alipay" checked><span class="font-medium text-sm">支付宝</span></label>
+      <label class="choice"><input type="radio" name="pay_method" value="wxpay"><span class="font-medium text-sm">微信支付</span></label>
+    </div>
+  </div>
+
+  <button type="submit" class="btn-primary">支付定金 {{yuan $p.DepositAmount}} 锁定</button>
+  <p class="eyebrow text-center">secure · zpay deposit</p>
+</form>
+{{end}}
+
+<script>
+  function toggleDorm() {
+    var delivery = document.querySelector('input[name=fulfil_method]:checked').value === 'delivery';
+    var wrap = document.getElementById('dorm-wrap');
+    wrap.classList.toggle('hidden', !delivery);
+    wrap.querySelector('input').required = delivery;
+  }
+  toggleDorm();
+</script>
+{{end}}

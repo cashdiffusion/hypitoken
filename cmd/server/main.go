@@ -20,6 +20,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/admin"
 	"github.com/wjsoj/CPA-Claude/internal/config"
 	"github.com/wjsoj/CPA-Claude/internal/logging"
+	"github.com/wjsoj/CPA-Claude/internal/market"
 	"github.com/wjsoj/CPA-Claude/internal/saas"
 	saasadapter "github.com/wjsoj/CPA-Claude/internal/saas/adapter"
 	saasadmin "github.com/wjsoj/CPA-Claude/internal/saas/admin"
@@ -374,6 +375,36 @@ func main() {
 		log.Infof("shop: enabled at %s (site=%q stripe currency=%s webhook=%t)", addr, cfg.Shop.SiteName, shopGw.Currency(), shopGw.HasWebhookSecret())
 	}
 
+	// Market (校园集市) standalone storefront. Sibling of Shop — reuses the
+	// same SQLite file + Z-Pay gateway but models deposit-based physical goods
+	// with self-pickup/dorm-delivery fulfilment. Independent listener.
+	if cfg.Market.Enabled && cfg.Endpoints.Market.IsEnabled() {
+		marketGw, err := buildMarketZPayGateway(cfg.Market)
+		if err != nil {
+			log.Fatalf("market zpay: %v", err)
+		}
+		marketDB, err := market.Open(cfg.Market.DBPath)
+		if err != nil {
+			log.Fatalf("market db: %v", err)
+		}
+		marketInst, err := market.New(cfg.Market, marketDB, marketGw, cfg.AdminToken)
+		if err != nil {
+			log.Fatalf("market init: %v", err)
+		}
+		marketEng := gin.New()
+		marketEng.Use(gin.Recovery())
+		marketEng.Use(func(c *gin.Context) {
+			start := time.Now()
+			c.Next()
+			log.Infof("[market] %s %s %d %s", c.Request.Method, c.Request.URL.Path, c.Writer.Status(), time.Since(start))
+		})
+		marketInst.RegisterRoutes(marketEng)
+		addr := fmt.Sprintf("%s:%d", cfg.Endpoints.Market.Host, cfg.Endpoints.Market.Port)
+		s.AttachExtraEndpoint("market", addr, marketEng)
+		saasShutdown = append(saasShutdown, func() { _ = marketDB.Close() })
+		log.Infof("market: enabled at %s (site=%q deposit=%.0f%% images=%q)", addr, cfg.Market.SiteName, cfg.Market.DepositRatio*100, cfg.Market.ImageDir)
+	}
+
 	for _, ep := range s.Endpoints() {
 		primary := ""
 		if ep.Primary {
@@ -596,6 +627,28 @@ func buildShopStripeGateway(c shop.Config) (*billing.StripeGateway, error) {
 		SecretKey:     secret,
 		WebhookSecret: whsec,
 		Currency:      sc.Currency,
+	})
+}
+
+// buildMarketZPayGateway constructs the marketplace's Z-Pay gateway. The
+// merchant key supports the @path indirection so it stays out of committed
+// YAML. NotifyURL is where Z-Pay posts payment confirmations; ReturnURL is the
+// browser landing that bounces to the per-order page.
+func buildMarketZPayGateway(c market.Config) (*billing.ZPayGateway, error) {
+	key, err := loadKeyFile(c.ZPay.Key)
+	if err != nil {
+		return nil, fmt.Errorf("zpay key: %w", err)
+	}
+	returnURL := strings.TrimRight(c.SiteURL, "/")
+	if returnURL != "" {
+		returnURL += "/pay/return"
+	}
+	return billing.NewZPayGateway(billing.ZPayParams{
+		BaseURL:   c.ZPay.BaseURL,
+		PID:       strings.TrimSpace(c.ZPay.PID),
+		Key:       key,
+		NotifyURL: strings.TrimSpace(c.NotifyURL),
+		ReturnURL: returnURL,
 	})
 }
 

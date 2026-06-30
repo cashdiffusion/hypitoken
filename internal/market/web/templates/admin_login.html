@@ -1,0 +1,15 @@
+{{define "title"}}管理登录 · {{.SiteName}}{{end}}
+{{define "content"}}
+<div class="max-w-sm mx-auto card p-6 sm:p-8 reveal">
+  <div class="eyebrow mb-2">admin access</div>
+  <h1 class="font-display text-xl font-semibold mb-5">管理后台登录</h1>
+  {{if .Error}}<div class="card bg-destructive-soft text-sm px-4 py-3 mb-4" style="color: var(--destructive); border-color: color-mix(in oklch, var(--destructive) 35%, transparent);">{{.Error}}</div>{{end}}
+  <form method="POST" action="/admin/login" class="space-y-4">
+    <div>
+      <label class="lbl">管理口令</label>
+      <input type="password" name="token" class="field" placeholder="admin_token" required autofocus>
+    </div>
+    <button type="submit" class="btn-primary">登录</button>
+  </form>
+</div>
+{{end}}

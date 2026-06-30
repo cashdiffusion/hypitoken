@@ -1,0 +1,68 @@
+{{define "title"}}管理后台 · {{.SiteName}}{{end}}
+{{define "content"}}
+<div class="flex items-center justify-between mb-5">
+  <div>
+    <div class="eyebrow mb-1">dashboard</div>
+    <h1 class="font-display text-2xl font-semibold">管理后台</h1>
+  </div>
+  <a href="/admin/logout" class="btn-ghost text-xs px-3 py-2">退出</a>
+</div>
+
+<!-- KPI -->
+<div class="grid grid-cols-3 gap-2.5 mb-6">
+  <div class="card p-3.5"><div class="eyebrow mb-1">商品</div><div class="font-display text-2xl font-bold num">{{len .Products}}</div></div>
+  <div class="card p-3.5"><div class="eyebrow mb-1">已付定金单</div><div class="font-display text-2xl font-bold num" style="color: var(--primary);">{{.PaidCount}}</div></div>
+  <div class="card p-3.5"><div class="eyebrow mb-1">定金收入</div><div class="font-display text-xl font-bold num">{{yuan .DepositSum}}</div></div>
+</div>
+
+<div class="flex items-center gap-2.5 mb-4">
+  <a href="/admin/products/new" class="btn-primary" style="width:auto;">+ 上架商品</a>
+  <a href="/admin/orders" class="btn-ghost">全部订单</a>
+</div>
+
+<!-- Products -->
+<div class="eyebrow mb-2.5">商品列表</div>
+<div class="space-y-2.5 mb-8">
+  {{range .Products}}
+  <a href="/admin/products/{{.ID}}" class="card p-3 flex items-center gap-3 reveal">
+    <div class="w-14 h-14 rounded-lg bg-muted overflow-hidden shrink-0">
+      {{if .PrimaryImage}}<img src="/img/{{.ID}}/{{.PrimaryImage}}" class="w-full h-full object-cover">{{else}}<div class="w-full h-full flex items-center justify-center opacity-30">🪧</div>{{end}}
+    </div>
+    <div class="flex-1 min-w-0">
+      <div class="font-medium text-sm truncate">{{.Name}}</div>
+      <div class="flex items-center gap-2 mt-1 text-xs text-muted-fg">
+        <span class="num">{{yuan .Price}}</span>·<span>定金 {{yuan .DepositAmount}}</span>
+      </div>
+    </div>
+    <div class="text-right shrink-0">
+      {{if not .Active}}<div class="pill bg-muted text-muted-fg mb-1">已下架</div>
+      {{else if .SoldOut}}<div class="pill bg-destructive-soft mb-1" style="color: var(--destructive);">售罄</div>
+      {{else}}<div class="pill bg-success-soft text-success mb-1">余 {{.Available}}/{{.Quantity}}</div>{{end}}
+    </div>
+  </a>
+  {{else}}
+  <div class="card p-6 text-center text-sm text-muted-fg">还没有商品,点上方「上架商品」开始。</div>
+  {{end}}
+</div>
+
+<!-- Recent orders -->
+<div class="flex items-center justify-between mb-2.5">
+  <div class="eyebrow">最近订单</div>
+  <a href="/admin/orders" class="text-xs text-muted-fg hover:text-foreground">查看全部 →</a>
+</div>
+<div class="space-y-2">
+  {{range .Orders}}
+  <a href="/admin/orders/{{.OutTradeNo}}" class="card px-3.5 py-3 flex items-center justify-between gap-3 reveal">
+    <div class="min-w-0">
+      <div class="text-sm font-medium truncate">{{.ProductName}}</div>
+      <div class="text-xs text-muted-fg mt-0.5 flex items-center gap-2">
+        <span>{{fulfilLabel .FulfilMethod}}</span>·<span class="num">{{yuan .DepositAmount}}</span>·<span>{{fmtTime .CreatedAt}}</span>
+      </div>
+    </div>
+    <span class="pill {{statusColor .Status}} shrink-0">{{statusLabel .Status}}</span>
+  </a>
+  {{else}}
+  <div class="card p-6 text-center text-sm text-muted-fg">暂无订单。</div>
+  {{end}}
+</div>
+{{end}}

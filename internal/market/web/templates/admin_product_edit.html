@@ -1,0 +1,74 @@
+{{define "title"}}{{if .IsNew}}上架商品{{else}}编辑商品{{end}} · {{.SiteName}}{{end}}
+{{define "content"}}
+{{$p := .P}}
+<a href="/admin" class="inline-flex items-center gap-1.5 text-sm text-muted-fg hover:text-foreground mb-4 transition-colors">
+  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>返回后台
+</a>
+<h1 class="font-display text-2xl font-semibold mb-5">{{if .IsNew}}上架新商品{{else}}编辑商品{{end}}</h1>
+
+<!-- Images (only after the product exists, so uploads have an id) -->
+{{if not .IsNew}}
+<div class="card p-4 mb-5">
+  <div class="eyebrow mb-3">商品图片 · 最多 8 张</div>
+  <div class="grid grid-cols-4 gap-2 mb-3">
+    {{range $p.Images}}
+    <div class="relative aspect-square rounded-lg overflow-hidden hairline group">
+      <img src="/img/{{$p.ID}}/{{.}}" class="w-full h-full object-cover">
+      <form method="POST" action="/admin/products/{{$p.ID}}/images/delete" class="absolute top-1 right-1">
+        <input type="hidden" name="file" value="{{.}}">
+        <button type="submit" class="w-6 h-6 rounded-full bg-destructive text-white text-xs flex items-center justify-center shadow" style="background: var(--destructive);" title="删除" onclick="return confirm('删除这张图片?')">✕</button>
+      </form>
+    </div>
+    {{end}}
+  </div>
+  <form method="POST" action="/admin/products/{{$p.ID}}/images" enctype="multipart/form-data" id="img-form">
+    <label class="btn-ghost cursor-pointer w-full">
+      📷 拍照 / 选图上传
+      <input type="file" name="images" accept="image/*" capture="environment" multiple class="hidden" onchange="document.getElementById('img-form').submit()">
+    </label>
+  </form>
+</div>
+{{end}}
+
+<form method="POST" action="{{if .IsNew}}/admin/products{{else}}/admin/products/{{$p.ID}}{{end}}" class="space-y-4 card p-4 sm:p-5">
+  <div>
+    <label class="lbl">商品名称</label>
+    <input type="text" name="name" class="field" value="{{$p.Name}}" placeholder="例如:九成新台灯" required>
+  </div>
+  <div>
+    <label class="lbl">商品介绍</label>
+    <textarea name="description" rows="5" class="field" placeholder="成色、规格、购买时间、议价空间等">{{$p.Description}}</textarea>
+  </div>
+  <div class="grid grid-cols-2 gap-3">
+    <div>
+      <label class="lbl">价格 (元)</label>
+      <input type="number" step="0.01" min="0.01" name="price" class="field" value="{{if $p.Price}}{{printf "%.2f" $p.Price}}{{end}}" placeholder="0.00" required>
+    </div>
+    <div>
+      <label class="lbl">数量</label>
+      <input type="number" step="1" min="1" name="quantity" class="field" value="{{if $p.Quantity}}{{$p.Quantity}}{{else}}1{{end}}">
+    </div>
+  </div>
+  <div class="grid grid-cols-2 gap-3">
+    <div>
+      <label class="lbl">定金比例 (%)</label>
+      <input type="number" step="0.1" min="0.1" max="100" name="deposit_pct" class="field" value="{{printf "%g" (mul $p.DepositRatio 100)}}" placeholder="10">
+    </div>
+    <div>
+      <label class="lbl">排序 (小在前)</label>
+      <input type="number" step="1" name="sort_order" class="field" value="{{$p.SortOrder}}">
+    </div>
+  </div>
+  <label class="choice">
+    <input type="checkbox" name="active" {{if $p.Active}}checked{{end}}>
+    <span class="font-medium text-sm">上架展示(取消勾选则下架隐藏)</span>
+  </label>
+  <button type="submit" class="btn-primary">{{if .IsNew}}创建并继续添加图片{{else}}保存修改{{end}}</button>
+</form>
+
+{{if not .IsNew}}
+<form method="POST" action="/admin/products/{{$p.ID}}/delete" class="mt-4" onsubmit="return confirm('确定删除该商品?此操作不可撤销。')">
+  <button type="submit" class="btn-danger w-full">删除该商品</button>
+</form>
+{{end}}
+{{end}}
