@@ -387,7 +387,14 @@ func main() {
 		if err != nil {
 			log.Fatalf("market db: %v", err)
 		}
-		marketInst, err := market.New(cfg.Market, marketDB, marketGw, cfg.AdminToken)
+		// Market can carry its own admin token; fall back to the global one so
+		// existing deployments keep working. A dedicated token keeps the weak,
+		// memorable marketplace password from ever gating the main console.
+		marketAdminToken := strings.TrimSpace(cfg.Market.AdminToken)
+		if marketAdminToken == "" {
+			marketAdminToken = cfg.AdminToken
+		}
+		marketInst, err := market.New(cfg.Market, marketDB, marketGw, marketAdminToken)
 		if err != nil {
 			log.Fatalf("market init: %v", err)
 		}

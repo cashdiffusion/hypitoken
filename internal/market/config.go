@@ -49,6 +49,12 @@ type Config struct {
 	// who choose 自提. Default "北京大学45甲楼下".
 	PickupLocation string `yaml:"pickup_location"`
 
+	// AdminToken gates the market /admin surface. When empty the market falls
+	// back to the top-level operator admin_token — but setting it here scopes a
+	// dedicated password to the marketplace so it can differ from (and not
+	// weaken) the main console token.
+	AdminToken string `yaml:"admin_token"`
+
 	// NotifyURL is the public HTTPS URL Z-Pay calls on payment success.
 	// Typically a Caddy site → 127.0.0.1:8320/notify.
 	NotifyURL string `yaml:"notify_url"`
