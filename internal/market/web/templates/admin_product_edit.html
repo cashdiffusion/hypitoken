@@ -52,8 +52,10 @@
     </div>
     <div class="grid grid-cols-2 gap-3">
       <div><label class="lbl">定金比例 %</label><input type="number" step="0.1" min="0.1" max="100" name="deposit_pct" class="field num" value="{{printf "%g" (mul $p.DepositRatio 100)}}" placeholder="10"></div>
-      <div><label class="lbl">排序 · 小在前</label><input type="number" step="1" name="sort_order" class="field num" value="{{$p.SortOrder}}"></div>
+      <div><label class="lbl">固定定金 ¥ <span class="text-ink-soft font-normal">· 选填</span></label><input type="number" step="0.01" min="0" name="deposit_fixed" class="field num" value="{{if $p.DepositFixed}}{{printf "%.2f" $p.DepositFixed}}{{end}}" placeholder="留空用比例"></div>
     </div>
+    <p class="text-ink-soft text-[12px] leading-relaxed -mt-1">填了「固定定金」则忽略比例，该商品定金即为此金额；留空则按比例收取。</p>
+    <div><label class="lbl">排序 · 小在前</label><input type="number" step="1" name="sort_order" class="field num" value="{{$p.SortOrder}}"></div>
     <label class="choice">
       <input type="checkbox" name="active" {{if $p.Active}}checked{{end}}>
       <span class="font-medium text-sm">上架展示 <span class="text-ink-soft font-normal">· 取消则下架隐藏</span></span>

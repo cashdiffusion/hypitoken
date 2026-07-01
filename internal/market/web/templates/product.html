@@ -50,7 +50,7 @@
 
     <!-- Deposit logic note -->
     <div class="card p-4 mt-6 flex items-start gap-3.5" style="background:color-mix(in oklch, var(--accent) 5%, var(--card)); border-color:color-mix(in oklch,var(--accent) 20%,transparent);">
-      <span class="serif-num shrink-0 grid place-items-center min-w-[46px] h-[46px] px-2 rounded-xl text-base font-semibold leading-none" style="color:oklch(0.99 0.01 260); background:linear-gradient(180deg,var(--accent),var(--accent-deep)); box-shadow:inset 0 1px 0 oklch(1 0 0 / 0.35), 0 8px 18px -10px color-mix(in oklch,var(--accent) 70%,transparent);">{{pct $p.DepositRatio}}</span>
+      <span class="serif-num shrink-0 grid place-items-center min-w-[46px] h-[46px] px-2 rounded-xl text-base font-semibold leading-none" style="color:oklch(0.99 0.01 260); background:linear-gradient(180deg,var(--accent),var(--accent-deep)); box-shadow:inset 0 1px 0 oklch(1 0 0 / 0.35), 0 8px 18px -10px color-mix(in oklch,var(--accent) 70%,transparent);">{{pct $p.DepositRatioEffective}}</span>
       <div class="text-[13.5px] leading-relaxed">
         <div class="font-medium">支付 <span class="serif-num" style="color:var(--vermilion);">¥{{printf "%.2f" $p.DepositAmount}}</span> 定金即锁定此件</div>
         <div class="text-ink-soft mt-0.5">余款 <span class="num">¥{{printf "%.2f" (sub $p.Price $p.DepositAmount)}}</span> 于交付时当面付清。</div>
@@ -90,7 +90,7 @@
         <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5.6 13.9c-.3.5-1 .6-1.8.3-1.4-.6-2.9-1-4.5-1.2-1.2 1.5-2.8 2.5-4.7 2.5-1.6 0-2.7-.7-2.8-1.9-.1-1.4 1.3-2.2 3.5-2.2 1 0 2.1.2 3.3.5.3-.6.6-1.3.8-2H6.8v-.6h3v-1.1H6v-.6h3.8V8.2h1.3v1.3h3.1v.6h-3.1v1.1h2.5c-.2.9-.5 1.7-.9 2.4 1 .2 1.9.5 2.6.7.7.3 1 .8.7 1.6z"/></svg>
         用支付宝支付定金 ¥{{printf "%.2f" $p.DepositAmount}}
       </button>
-      <p class="eyebrow text-center" style="letter-spacing:0.16em;">手机端将直接打开支付宝 · 无需扫码</p>
+      <p class="eyebrow text-center" style="letter-spacing:0.16em;">手机端将一键跳转支付宝</p>
     </form>
     {{end}}
   </div>

@@ -90,6 +90,9 @@ CREATE TABLE market_orders (
 CREATE INDEX idx_market_orders_product ON market_orders(product_id, status);
 CREATE INDEX idx_market_orders_status ON market_orders(status, created_at);
 `,
+	// v2 — optional fixed deposit amount (CNY). When > 0 it overrides the
+	// ratio for this product; 0 keeps the percentage behaviour.
+	`ALTER TABLE market_products ADD COLUMN deposit_fixed REAL NOT NULL DEFAULT 0;`,
 }
 
 // Open opens (or reuses) the SQLite file at path with WAL + synchronous=FULL
@@ -150,6 +153,7 @@ type Product struct {
 	Description  string    `json:"description"`
 	Price        float64   `json:"price"`
 	DepositRatio float64   `json:"deposit_ratio"`
+	DepositFixed float64   `json:"deposit_fixed"` // when > 0, overrides the ratio
 	Quantity     int       `json:"quantity"`
 	Images       []string  `json:"images"`
 	Active       bool      `json:"active"`
@@ -162,8 +166,27 @@ type Product struct {
 	Available int `json:"available"` // Quantity - Reserved (clamped >= 0)
 }
 
-// DepositAmount returns the rounded deposit for this product's price+ratio.
-func (p *Product) DepositAmount() float64 { return roundYuan(p.Price * p.DepositRatio) }
+// DepositAmount returns the rounded deposit. A fixed amount (deposit_fixed > 0)
+// wins over the ratio; it is capped at the full price. Otherwise it's
+// price × ratio.
+func (p *Product) DepositAmount() float64 {
+	if p.DepositFixed > 0 {
+		if p.DepositFixed > p.Price {
+			return roundYuan(p.Price)
+		}
+		return roundYuan(p.DepositFixed)
+	}
+	return roundYuan(p.Price * p.DepositRatio)
+}
+
+// DepositRatioEffective is the deposit as a fraction of price, for display —
+// accurate whether the deposit is fixed or ratio-based.
+func (p *Product) DepositRatioEffective() float64 {
+	if p.Price <= 0 {
+		return p.DepositRatio
+	}
+	return p.DepositAmount() / p.Price
+}
 
 // SoldOut reports whether no units remain.
 func (p *Product) SoldOut() bool { return p.Available <= 0 }
@@ -176,14 +199,14 @@ func (p *Product) PrimaryImage() string {
 	return p.Images[0]
 }
 
-const productCols = `id, name, description, price, deposit_ratio, quantity, images, active, sort_order, created_at, updated_at`
+const productCols = `id, name, description, price, deposit_ratio, deposit_fixed, quantity, images, active, sort_order, created_at, updated_at`
 
 func scanProduct(row interface{ Scan(...any) error }) (*Product, error) {
 	var p Product
 	var act int
 	var imagesJSON string
 	var c, u int64
-	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.DepositRatio, &p.Quantity, &imagesJSON, &act, &p.SortOrder, &c, &u); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.DepositRatio, &p.DepositFixed, &p.Quantity, &imagesJSON, &act, &p.SortOrder, &c, &u); err != nil {
 		return nil, err
 	}
 	p.Active = act == 1
@@ -237,9 +260,9 @@ func (db *DB) CreateProduct(ctx context.Context, p *Product) error {
 		act = 1
 	}
 	res, err := db.ExecContext(ctx,
-		`INSERT INTO market_products (name, description, price, deposit_ratio, quantity, images, active, sort_order, created_at, updated_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		p.Name, p.Description, p.Price, p.DepositRatio, p.Quantity, imagesJSON, act, p.SortOrder, now, now)
+		`INSERT INTO market_products (name, description, price, deposit_ratio, deposit_fixed, quantity, images, active, sort_order, created_at, updated_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		p.Name, p.Description, p.Price, p.DepositRatio, p.DepositFixed, p.Quantity, imagesJSON, act, p.SortOrder, now, now)
 	if err != nil {
 		return err
 	}
@@ -307,8 +330,8 @@ func (db *DB) UpdateProduct(ctx context.Context, p *Product) error {
 		act = 1
 	}
 	_, err := db.ExecContext(ctx,
-		`UPDATE market_products SET name=?, description=?, price=?, deposit_ratio=?, quantity=?, images=?, active=?, sort_order=?, updated_at=? WHERE id=?`,
-		p.Name, p.Description, p.Price, p.DepositRatio, p.Quantity, marshalImages(p.Images), act, p.SortOrder, now, p.ID)
+		`UPDATE market_products SET name=?, description=?, price=?, deposit_ratio=?, deposit_fixed=?, quantity=?, images=?, active=?, sort_order=?, updated_at=? WHERE id=?`,
+		p.Name, p.Description, p.Price, p.DepositRatio, p.DepositFixed, p.Quantity, marshalImages(p.Images), act, p.SortOrder, now, p.ID)
 	return err
 }
 

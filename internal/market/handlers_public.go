@@ -105,7 +105,7 @@ func (m *Market) handleCreateOrder(c *gin.Context) {
 		ProductName:   p.Name,
 		Price:         p.Price,
 		DepositAmount: p.DepositAmount(),
-		DepositRatio:  p.DepositRatio,
+		DepositRatio:  p.DepositRatioEffective(), // effective % — accurate for fixed or ratio deposits
 		Status:        OrderPending,
 		PayMethod:     payMethod,
 		FulfilMethod:  fulfil,

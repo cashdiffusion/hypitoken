@@ -132,6 +132,7 @@ func (m *Market) render(c *gin.Context, name string, data gin.H) {
 	data["SiteName"] = m.cfg.SiteName
 	data["SiteURL"] = m.cfg.SiteURL
 	data["PickupLocation"] = m.cfg.PickupLocation
+	data["SellerWechat"] = m.cfg.SellerWechat
 	if _, ok := data["IsAdmin"]; !ok {
 		data["IsAdmin"] = c.GetBool("is_admin")
 	}

@@ -49,6 +49,11 @@ type Config struct {
 	// who choose 自提. Default "北京大学45甲楼下".
 	PickupLocation string `yaml:"pickup_location"`
 
+	// SellerWechat is the operator's WeChat ID shown to a buyer AFTER a
+	// successful deposit payment, so they can add the seller to arrange the
+	// hand-off. Empty = the contact card is hidden.
+	SellerWechat string `yaml:"seller_wechat"`
+
 	// AdminToken gates the market /admin surface. When empty the market falls
 	// back to the top-level operator admin_token — but setting it here scopes a
 	// dedicated password to the marketplace so it can differ from (and not

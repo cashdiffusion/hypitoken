@@ -119,6 +119,14 @@ func (m *Market) parseProductForm(c *gin.Context, p *Product) error {
 		p.DepositRatio = ratioPct / 100
 	}
 
+	// Optional fixed deposit (CNY). When > 0 it overrides the ratio for this
+	// product; blank / 0 keeps the percentage behaviour.
+	if fixed, ferr := strconv.ParseFloat(strings.TrimSpace(c.DefaultPostForm("deposit_fixed", "")), 64); ferr == nil && fixed > 0 {
+		p.DepositFixed = roundYuan(fixed)
+	} else {
+		p.DepositFixed = 0
+	}
+
 	qty, err := strconv.Atoi(strings.TrimSpace(c.DefaultPostForm("quantity", "1")))
 	if err != nil || qty < 1 {
 		qty = 1

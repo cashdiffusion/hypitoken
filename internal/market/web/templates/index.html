@@ -7,7 +7,7 @@
     好物流转<span style="color:var(--accent);">,</span> 付个<span style="color:var(--accent);">定金</span>就安心。
   </h1>
   <p class="text-ink-soft text-[15px] sm:text-base mt-5 max-w-xl leading-relaxed">
-    支付小额定金即可锁定心仪好物,余款在<span class="text-ink font-medium">自提或配送到楼</span>时当面付清。手机端一键支付宝,无需扫码。
+    支付小额定金即可锁定心仪好物,余款在<span class="text-ink font-medium">自提或配送到楼</span>时当面付清。手机端一键跳转支付宝。
   </p>
 </section>
 
@@ -32,9 +32,15 @@
       <svg class="w-4 h-4" style="color:var(--accent);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
     </div>
     <div class="font-display font-semibold text-[13.5px] sm:text-[15px] leading-tight">支付宝直付</div>
-    <div class="text-ink-soft text-[11.5px] sm:text-xs mt-1 leading-snug">手机端免扫码</div>
+    <div class="text-ink-soft text-[11.5px] sm:text-xs mt-1 leading-snug">手机端一键跳转</div>
   </div>
 </div>
+
+<!-- 我的订单 · restored from this device (localStorage), hidden when empty -->
+<section id="myorders" class="mb-9 sm:mb-12 hidden">
+  <div class="rule eyebrow mb-4"><span>我的订单 · 本设备</span></div>
+  <div id="myorders-list" class="space-y-2.5"></div>
+</section>
 
 {{if .Products}}
 <div class="rule eyebrow mb-4"><span>在售 · {{len .Products}}</span></div>
@@ -82,4 +88,29 @@
   <p class="text-ink-soft text-[14px] mt-1.5">过会儿再来逛逛，新货随时上架。</p>
 </div>
 {{end}}
+
+<!-- Render "我的订单" from this device's localStorage -->
+<script>
+  (function(){
+    var KEY='market.orders.v1', arr=[];
+    try{ arr=JSON.parse(localStorage.getItem(KEY))||[]; }catch(e){}
+    if(!arr.length) return;
+    var sec=document.getElementById('myorders'), list=document.getElementById('myorders-list');
+    var META={ paid:['已付定金','pill-navy'], fulfilled:['已完成','pill-ink'], pending:['待支付定金','pill-vermilion'], expired:['已过期','pill-muted'], cancelled:['已取消','pill-muted'] };
+    arr.slice(0,8).forEach(function(o){
+      var m=META[o.status]||['—','pill-muted'];
+      var a=document.createElement('a');
+      a.href='/order/'+encodeURIComponent(o.id);
+      a.className='card shadow-soft px-4 py-3 flex items-center justify-between gap-3 hover:shadow-lift transition-all';
+      var left=document.createElement('div'); left.className='min-w-0';
+      var nm=document.createElement('div'); nm.className='text-sm font-medium truncate'; nm.textContent=o.name||'商品';
+      var sub=document.createElement('div'); sub.className='num text-xs text-ink-soft mt-1';
+      sub.innerHTML='定金 <span class="serif-num" style="color:var(--accent);">¥'+(o.deposit||'')+'</span> · '+(o.fulfil||'');
+      left.appendChild(nm); left.appendChild(sub);
+      var pill=document.createElement('span'); pill.className='pill '+m[1]+' shrink-0'; pill.textContent=m[0];
+      a.appendChild(left); a.appendChild(pill); list.appendChild(a);
+    });
+    sec.classList.remove('hidden');
+  })();
+</script>
 {{end}}
