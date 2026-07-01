@@ -228,6 +228,26 @@ func (m *Market) handleZPayNotify(c *gin.Context) {
 		}
 	}
 
+	// Server-side confirmation of real payment. The async callback is already
+	// signature-verified, but before a unit is claimed we ALSO ask Z-Pay
+	// directly (server→api.php, merchant key never leaves our box) whether the
+	// order is truly paid — so a product only ever sells out on money we can
+	// independently confirm. Policy: a query that explicitly says NOT paid
+	// blocks MarkPaid and asks Z-Pay to retry (the query may still be catching
+	// up); a transient query error falls back to the signed callback so a real
+	// payment is never dropped.
+	if q, qerr := m.zpay.QueryTrade(ctx, o.OutTradeNo); qerr != nil {
+		log.Warnf("market: zpay query %s failed, trusting signed notify: %v", o.OutTradeNo, qerr)
+	} else if !strings.EqualFold(q.TradeStatus, "TRADE_SUCCESS") && !strings.EqualFold(q.TradeStatus, "TRADE_FINISHED") {
+		log.Warnf("market: zpay query says order %s NOT paid (status=%s) — refusing to mark paid", o.OutTradeNo, q.TradeStatus)
+		c.String(http.StatusBadRequest, "fail")
+		return
+	} else if qpaid, perr := strconv.ParseFloat(strings.TrimSpace(q.TotalAmount), 64); perr == nil && roundYuan(qpaid)+0.001 < o.DepositAmount {
+		log.Warnf("market: zpay query amount mismatch order=%s paid=%.2f want=%.2f", o.OutTradeNo, qpaid, o.DepositAmount)
+		c.String(http.StatusBadRequest, "fail")
+		return
+	}
+
 	switch _, err := m.db.MarkPaid(ctx, o.OutTradeNo, n.TradeNo); {
 	case err == nil:
 		log.Infof("market: order %s deposit paid (¥%.2f)", o.OutTradeNo, o.DepositAmount)

@@ -26,8 +26,8 @@ type DB struct {
 
 // Order status values.
 const (
-	OrderPending   = "pending"   // deposit not yet confirmed; reserves a unit
-	OrderPaid      = "paid"      // deposit confirmed; unit reserved
+	OrderPending   = "pending"   // deposit not yet paid; does NOT reserve a unit
+	OrderPaid      = "paid"      // deposit paid (verified notify); reserves a unit
 	OrderExpired   = "expired"   // pending too long; unit freed
 	OrderCancelled = "cancelled" // operator-cancelled; unit freed
 	OrderFulfilled = "fulfilled" // goods handed over (terminal happy path)
@@ -162,7 +162,7 @@ type Product struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 
 	// Derived:
-	Reserved  int `json:"reserved"`  // live pending + paid + fulfilled orders
+	Reserved  int `json:"reserved"`  // PAID + fulfilled orders (real money only)
 	Available int `json:"available"` // Quantity - Reserved (clamped >= 0)
 }
 
@@ -221,12 +221,15 @@ func scanProduct(row interface{ Scan(...any) error }) (*Product, error) {
 	return &p, nil
 }
 
-// reservedCounts returns product_id → count of units locked by live orders
-// (pending, paid, fulfilled). Expired/cancelled orders free their unit.
+// reservedCounts returns product_id → count of units locked by orders whose
+// deposit is ACTUALLY PAID (paid, fulfilled). A product only sells out once real
+// money has arrived (a signature-verified Z-Pay notify → MarkPaid). Pending
+// (unpaid) orders never reserve a unit, so an abandoned checkout can't make an
+// item look sold out; expired/cancelled orders free their unit.
 func (db *DB) reservedCounts(ctx context.Context) (map[int64]int, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT product_id, COUNT(*) FROM market_orders WHERE status IN (?,?,?) GROUP BY product_id`,
-		OrderPending, OrderPaid, OrderFulfilled)
+		`SELECT product_id, COUNT(*) FROM market_orders WHERE status IN (?,?) GROUP BY product_id`,
+		OrderPaid, OrderFulfilled)
 	if err != nil {
 		return nil, err
 	}
@@ -395,9 +398,11 @@ func scanOrder(row interface{ Scan(...any) error }) (*Order, error) {
 	return &o, nil
 }
 
-// CreateOrderReserving atomically checks the product still has an available
-// unit (quantity > live pending+paid+fulfilled orders) and, if so, inserts the
-// pending order — reserving that unit. Returns ErrSoldOut when full.
+// CreateOrderReserving atomically checks the product still has a unit that
+// hasn't been PAID for (quantity > paid+fulfilled orders) and, if so, inserts
+// the pending order. Pending orders don't hold inventory — sold-out is decided
+// by real, paid deposits only — so the product only rejects new checkouts once
+// `quantity` units have actually been paid. Returns ErrSoldOut when full.
 func (db *DB) CreateOrderReserving(ctx context.Context, o *Order) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -416,8 +421,8 @@ func (db *DB) CreateOrderReserving(ctx context.Context, o *Order) error {
 
 	var reserved int
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM market_orders WHERE product_id = ? AND status IN (?,?,?)`,
-		o.ProductID, OrderPending, OrderPaid, OrderFulfilled).Scan(&reserved); err != nil {
+		`SELECT COUNT(*) FROM market_orders WHERE product_id = ? AND status IN (?,?)`,
+		o.ProductID, OrderPaid, OrderFulfilled).Scan(&reserved); err != nil {
 		return err
 	}
 	if reserved >= quantity {
