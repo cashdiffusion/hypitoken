@@ -17,7 +17,9 @@
         <img src="/img/{{$p.ID}}/{{.}}" class="w-full h-full object-cover">
         <form method="POST" action="/admin/products/{{$p.ID}}/images/delete" class="absolute top-1.5 right-1.5">
           <input type="hidden" name="file" value="{{.}}">
-          <button type="submit" class="w-6 h-6 rounded-full text-white text-[11px] flex items-center justify-center shadow-lift" style="background:var(--vermilion);" onclick="return confirm('删除这张图片?')">✕</button>
+          <button type="submit" class="w-6 h-6 rounded-full flex items-center justify-center shadow-lift" style="background:var(--accent); color:oklch(0.99 0.01 260);" onclick="return confirm('删除这张图片?')" aria-label="删除图片">
+            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
         </form>
       </div>
       {{else}}

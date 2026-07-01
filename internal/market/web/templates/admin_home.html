@@ -26,8 +26,8 @@
 <div class="grid sm:grid-cols-2 gap-3 mb-9 stagger">
   {{range .Products}}
   <a href="/admin/products/{{.ID}}" class="card shadow-soft p-3 flex items-center gap-3.5 hover:shadow-lift transition-all">
-    <div class="w-16 h-16 rounded-xl bg-paper overflow-hidden shrink-0">
-      {{if .PrimaryImage}}<img src="/img/{{.ID}}/{{.PrimaryImage}}" class="w-full h-full object-cover">{{else}}<div class="w-full h-full flex items-center justify-center font-display italic text-2xl" style="color:var(--line-strong);">物</div>{{end}}
+    <div class="w-16 h-16 rounded-xl overflow-hidden shrink-0" style="background:color-mix(in oklch,var(--paper) 60%,var(--card));">
+      {{if .PrimaryImage}}<img src="/img/{{.ID}}/{{.PrimaryImage}}" class="w-full h-full object-cover">{{else}}<div class="mono-tile w-full h-full"><svg class="w-6 h-6 opacity-55" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="8.5" cy="8.5" r="1.5"/></svg></div>{{end}}
     </div>
     <div class="flex-1 min-w-0">
       <div class="font-medium text-sm truncate">{{.Name}}</div>
