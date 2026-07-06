@@ -1407,10 +1407,4 @@ export default {
       accepted: "已加入团队空间",
     },
   },
-
-  splash: {
-    eyebrow: "企业空间",
-    welcome: "欢迎回到你的专属企业工作区",
-    skip: "点击任意处跳过",
-  },
 } as const;

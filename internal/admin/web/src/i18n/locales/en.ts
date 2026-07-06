@@ -1442,10 +1442,4 @@ export default {
       accepted: "Joined the workspace",
     },
   },
-
-  splash: {
-    eyebrow: "Enterprise Workspace",
-    welcome: "Welcome back to your dedicated enterprise workspace",
-    skip: "Click anywhere to skip",
-  },
 } as const;

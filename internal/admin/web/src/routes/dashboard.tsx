@@ -2,7 +2,6 @@ import { Activity, ArrowUpRight, Gauge, Gift, KeyRound, Pencil, Wallet } from "l
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
-import { EnterpriseSplash } from "@/components/app/enterprise-splash";
 import { NicknameDialog } from "@/components/app/nickname-dialog";
 import { CountUp, GlassPanel, PageHeader, StatTile } from "@/components/app/page-primitives";
 import { TermsNotice } from "@/components/app/terms-notice";
@@ -74,7 +73,6 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <EnterpriseSplash />
       <TermsNotice />
       {welcome && (
         <WelcomeBonus
