@@ -4,6 +4,10 @@
 export default {
   common: {
     loading: "Loading…",
+    reload: "Reload",
+    appCrashed: "Something went wrong",
+    appCrashedHint:
+      "This page could not finish rendering. Reload it, or contact an administrator if the problem keeps happening.",
     pagerRange: "{{from}}–{{to}} of {{total}}",
     pagerEmpty: "0 items",
     pagerPrev: "Previous",

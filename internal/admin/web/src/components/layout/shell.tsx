@@ -57,7 +57,6 @@ function SideNavLink({
     <NavLink
       to={to}
       end={end}
-      viewTransition
       className={cn(
         "relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
         active ? "font-medium text-primary" : "text-muted-foreground hover:text-foreground",

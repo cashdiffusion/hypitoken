@@ -49,6 +49,51 @@ interface PersonalConsole {
   spent_today: number;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finiteNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeAgg(value: unknown): PersonalAgg {
+  const row = isRecord(value) ? value : {};
+  return {
+    count: finiteNumber(row.count),
+    input_tokens: finiteNumber(row.input_tokens),
+    output_tokens: finiteNumber(row.output_tokens),
+    cache_read_tokens: finiteNumber(row.cache_read_tokens),
+    cache_create_tokens: finiteNumber(row.cache_create_tokens),
+    cost_usd: finiteNumber(row.cost_usd),
+    errors: finiteNumber(row.errors),
+    total_duration_ms: finiteNumber(row.total_duration_ms),
+  };
+}
+
+function normalizeAggMap(value: unknown): Record<string, PersonalAgg> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([key, row]) => [key, normalizeAgg(row)]));
+}
+
+// The console is fed by asynchronously aggregated request logs. Treat that
+// response as untrusted at runtime: a mixed-version rollout, proxy error, or
+// old cached payload must degrade to zero values instead of crashing React.
+function normalizePersonalConsole(value: unknown): PersonalConsole {
+  const row = isRecord(value) ? value : {};
+  return {
+    total: normalizeAgg(row.total),
+    today: normalizeAgg(row.today),
+    today_key: typeof row.today_key === "string" ? row.today_key : "",
+    by_model: normalizeAggMap(row.by_model),
+    by_day: normalizeAggMap(row.by_day),
+    balance_usd: finiteNumber(row.balance_usd),
+    spent_total: finiteNumber(row.spent_total),
+    spent_today: finiteNumber(row.spent_today),
+  };
+}
+
 // TREND_DAYS — how many trailing UTC days the usage trend + daily table cover.
 const TREND_DAYS = 14;
 
@@ -193,8 +238,8 @@ export default function ConsolePage() {
   const refresh = useCallback(async () => {
     try {
       if (view === "personal") {
-        const p = await apiGet<PersonalConsole>("/me/console");
-        setPersonal(p);
+        const p = await apiGet<unknown>("/me/console");
+        setPersonal(normalizePersonalConsole(p));
       } else {
         const d = await api<Summary>("/admin/api/summary");
         setData(d);
@@ -441,7 +486,7 @@ function PersonalView({ personal }: { personal: PersonalConsole | null }) {
   const cacheHit = cacheDenom > 0 ? (total.cache_read_tokens / cacheDenom) * 100 : 0;
   const days = buildDays(personal?.by_day);
   const modelPoints: ModelPoint[] = personal
-    ? Object.entries(personal.by_model)
+    ? Object.entries(personal.by_model ?? {})
         .map(([model, a]) => ({
           model,
           requests: a.count,

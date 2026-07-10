@@ -140,7 +140,9 @@ export default function BillingPage() {
     const out = params.get("out");
     if (!out) return;
     // Strip the return params so a refresh doesn't re-trigger.
-    window.history.replaceState({}, "", window.location.pathname);
+    // Keep BrowserRouter's usr/key/idx state intact while removing the payment
+    // return parameter, otherwise later SPA transitions can lose their index.
+    window.history.replaceState(window.history.state, "", window.location.pathname);
     setSettleOut(out);
     let stop = false;
     (async () => {

@@ -121,7 +121,9 @@ function captureFromURL(): void {
   params.delete("ref");
   const qs = params.toString();
   const clean = window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
-  window.history.replaceState(null, "", clean);
+  // BrowserRouter stores its navigation index and location key in
+  // history.state. Preserve that bookkeeping while removing only ?ref=.
+  window.history.replaceState(window.history.state, "", clean);
 }
 
 // startDwellTracking pings accumulated on-page time periodically and once more

@@ -4,6 +4,9 @@
 export default {
   common: {
     loading: "加载中…",
+    reload: "重新加载",
+    appCrashed: "页面遇到了一点问题",
+    appCrashedHint: "当前页面没有正常完成渲染。请重新加载；如果问题反复出现，请联系管理员。",
     pagerRange: "{{from}}–{{to}} · 共 {{total}} 条",
     pagerEmpty: "共 0 条",
     pagerPrev: "上一页",

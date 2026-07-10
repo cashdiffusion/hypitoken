@@ -1,7 +1,8 @@
 import { Activity, ArrowUpRight, Gauge, Gift, KeyRound, Pencil, Wallet } from "lucide-react";
+import { AnimatePresence } from "motion/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { NicknameDialog } from "@/components/app/nickname-dialog";
 import { CountUp, GlassPanel, PageHeader, StatTile } from "@/components/app/page-primitives";
 import { TermsNotice } from "@/components/app/terms-notice";
@@ -25,6 +26,7 @@ export default function DashboardPage() {
     wsList.find((w) => w.type === "personal") ??
     wsList[0];
   const location = useLocation();
+  const navigate = useNavigate();
   const [tx, setTx] = useState<WalletTx[]>([]);
   const [tokens, setTokens] = useState<UserToken[]>([]);
   // Account usage summary — the source of truth for lifetime spend. We pull it
@@ -50,9 +52,9 @@ export default function DashboardPage() {
   useEffect(() => {
     const st = location.state as { welcomeBonus?: number; fraud?: boolean } | null;
     if (st?.welcomeBonus || st?.fraud) {
-      window.history.replaceState({}, "");
+      navigate(location.pathname, { replace: true, state: null });
     }
-  }, [location.state]);
+  }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
     apiGet<{ transactions: WalletTx[] }>("/billing/transactions").then((r) =>
@@ -74,13 +76,15 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       <TermsNotice />
-      {welcome && (
-        <WelcomeBonus
-          amount={welcome.bonus}
-          fraud={welcome.fraud}
-          onDismiss={() => setWelcome(null)}
-        />
-      )}
+      <AnimatePresence>
+        {welcome && (
+          <WelcomeBonus
+            amount={welcome.bonus}
+            fraud={welcome.fraud}
+            onDismiss={() => setWelcome(null)}
+          />
+        )}
+      </AnimatePresence>
       <PageHeader
         eyebrow={greetLine(t)}
         title={
