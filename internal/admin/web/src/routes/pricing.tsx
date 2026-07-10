@@ -93,6 +93,33 @@ const CLAUDE_MODELS = [
 // Codex CLI OAuth models — covered by ChatGPT Plus/Pro/Team subscription.
 const CODEX_OAUTH_MODELS = [
   {
+    name: "gpt-5.6-sol",
+    display: "GPT-5.6 Sol",
+    tier: "flagship",
+    input: 5.0,
+    output: 30.0,
+    cacheWrite: null,
+    cacheRead: 0.5,
+  },
+  {
+    name: "gpt-5.6-terra",
+    display: "GPT-5.6 Terra",
+    tier: "advanced",
+    input: 2.5,
+    output: 15.0,
+    cacheWrite: null,
+    cacheRead: 0.25,
+  },
+  {
+    name: "gpt-5.6-luna",
+    display: "GPT-5.6 Luna",
+    tier: "fast",
+    input: 1.0,
+    output: 6.0,
+    cacheWrite: null,
+    cacheRead: 0.1,
+  },
+  {
     name: "gpt-5.5",
     display: "GPT-5.5",
     tier: "flagship",
@@ -132,10 +159,10 @@ const CODEX_OAUTH_MODELS = [
     name: "gpt-5.2",
     display: "GPT-5.2",
     tier: "standard",
-    input: 1.5,
-    output: 6.0,
+    input: 1.75,
+    output: 14.0,
     cacheWrite: null,
-    cacheRead: null,
+    cacheRead: 0.175,
   },
 ];
 
