@@ -77,6 +77,8 @@ type SaaSTokenInfo struct {
 
 // PreCheckError is the per-request rejection produced by SaaSAdapter.PreCheck.
 type PreCheckError struct {
-	Status int
-	Body   any
+	Status  int
+	Code    string
+	Message string
+	Details map[string]any
 }

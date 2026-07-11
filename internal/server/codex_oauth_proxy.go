@@ -66,7 +66,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	ctx := c.Request.Context()
 	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upURL, bytes.NewReader(upstreamBody))
 	if err != nil {
-		c.AbortWithStatusJSON(500, gin.H{"error": err.Error()})
+		writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusInternalServerError, Code: "request_preparation_failed", Message: "The request could not be prepared. Please try again."})
 		return false, true
 	}
 	copyForwardableHeaders(c.Request.Header, upReq.Header)
@@ -152,8 +152,8 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			s.pool.ReportUpstreamError(a, http.StatusTooManyRequests, resetAt)
 			return true, false
 		}
-		writeResponseHeaders(c, resp)
-		_, _ = c.Writer.Write(errBody)
+		copySafeRetryHeaders(c, resp.Header)
+		writeAPIError(c, auth.ProviderOpenAI, publicUpstreamError(resp.StatusCode, errBody))
 		s.emitLog(requestlog.Record{
 			Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.ProviderOpenAI,
 			AuthID: a.ID, AuthLabel: a.Label, AuthKind: "oauth", Model: model,
@@ -175,7 +175,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		_ = resp.Body.Close()
 		if rerr != nil {
 			log.Warnf("codex oauth: read compact body via %s: %v", a.ID, rerr)
-			c.AbortWithStatusJSON(502, gin.H{"error": "codex upstream: " + rerr.Error()})
+			writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusBadGateway, Code: "service_response_error", Message: "The model service returned an unreadable response. Please try again."})
 			s.emitLog(requestlog.Record{
 				Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.ProviderOpenAI,
 				AuthID: a.ID, AuthLabel: a.Label, AuthKind: "oauth", Model: model,
@@ -213,7 +213,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		payload, aerr := aggregateCodexResponseStream(resp.Body, &counts)
 		if aerr != nil {
 			log.Warnf("codex oauth: aggregation via %s failed: %v", a.ID, aerr)
-			c.AbortWithStatusJSON(502, gin.H{"error": "codex upstream: " + aerr.Error()})
+			writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusBadGateway, Code: "service_response_error", Message: "The model service returned an incomplete response. Please try again."})
 			_ = resp.Body.Close()
 			s.emitLog(requestlog.Record{
 				Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.ProviderOpenAI,

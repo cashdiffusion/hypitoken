@@ -219,7 +219,7 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	ctx := c.Request.Context()
 	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upURL, bytes.NewReader(upstreamBody))
 	if err != nil {
-		c.AbortWithStatusJSON(500, gin.H{"error": err.Error()})
+		writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusInternalServerError, Code: "request_preparation_failed", Message: "The request could not be prepared. Please try again."})
 		return false, true
 	}
 	copyForwardableHeaders(c.Request.Header, upReq.Header)
@@ -279,11 +279,11 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	var missingUsage bool
 	switch {
 	case resp.StatusCode >= 400:
-		writeResponseHeaders(c, resp)
 		errBody, _ := io.ReadAll(resp.Body)
-		_, _ = c.Writer.Write(errBody)
 		errSnippet = truncate(errBody, 500)
 		log.Warnf("codex proxy(apikey): %s returned %d — body=%s", a.ID, resp.StatusCode, errSnippet)
+		copySafeRetryHeaders(c, resp.Header)
+		writeAPIError(c, auth.ProviderOpenAI, publicUpstreamError(resp.StatusCode, errBody))
 	default:
 		// Decide SSE-vs-JSON from the client's stream flag + the actual bytes,
 		// NOT the upstream Content-Type alone: relays (e.g. New-API gateways)
@@ -311,7 +311,7 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 				_ = resp.Body.Close()
 				log.Warnf("codex proxy(apikey): %s returned success without usage on non-stream response; failing closed", a.ID)
 				s.cooldownCodexAPIKey(a, http.StatusBadGateway, time.Time{})
-				c.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": "upstream response missing usage; billing cannot be computed"})
+				writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusBadGateway, Code: "service_response_error", Message: "The model service returned an incomplete response. Please try again."})
 				s.emitLog(requestlog.Record{
 					Client: clientName, ClientToken: maskClientToken(clientToken),
 					Provider: auth.ProviderOpenAI, AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",

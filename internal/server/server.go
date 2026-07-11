@@ -360,7 +360,7 @@ func (s *Server) clientAuth() gin.HandlerFunc {
 		if s.saas != nil && tok != "" {
 			if info, ok := s.saas.Lookup(tok); ok {
 				if info.Disabled {
-					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token or account disabled"})
+					writeAPIError(c, requestProvider(c), APIError{Status: http.StatusForbidden, Code: "account_disabled", Message: "This API key or account is disabled. Contact support if you believe this is a mistake."})
 					return
 				}
 				c.Set("client_token", tok)
@@ -374,12 +374,12 @@ func (s *Server) clientAuth() gin.HandlerFunc {
 		// a configured operator token.
 		if !s.tokens.Empty() {
 			if tok == "" {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
+				writeAPIError(c, requestProvider(c), APIError{Status: http.StatusUnauthorized, Code: "missing_api_key", Message: "No API key was provided. Add a Bearer token or API key header and try again."})
 				return
 			}
 			entry, ok := s.tokens.Lookup(tok)
 			if !ok {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+				writeAPIError(c, requestProvider(c), APIError{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "The provided API key is invalid."})
 				return
 			}
 			c.Set("client_token", tok)
@@ -389,10 +389,10 @@ func (s *Server) clientAuth() gin.HandlerFunc {
 		}
 		// Fail closed: matched neither a SaaS token nor a configured legacy token.
 		if tok == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
+			writeAPIError(c, requestProvider(c), APIError{Status: http.StatusUnauthorized, Code: "missing_api_key", Message: "No API key was provided. Add a Bearer token or API key header and try again."})
 			return
 		}
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+		writeAPIError(c, requestProvider(c), APIError{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "The provided API key is invalid."})
 	}
 }
 

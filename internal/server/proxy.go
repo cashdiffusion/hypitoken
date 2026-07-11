@@ -66,7 +66,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.AbortWithStatusJSON(400, gin.H{"error": "read body: " + err.Error()})
+		writeAPIError(c, provider, APIError{Status: http.StatusBadRequest, Code: "invalid_request_body", Message: "The request body could not be read. Send valid JSON and try again."})
 		return
 	}
 
@@ -102,7 +102,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	if saasOK && s.saas != nil {
 		clientGroup = s.saas.CredentialGroup(saasInfo)
 		if pre := s.saas.PreCheck(c.Request.Context(), saasInfo); pre != nil {
-			c.AbortWithStatusJSON(pre.Status, pre.Body)
+			writeAPIError(c, provider, APIError{Status: pre.Status, Code: pre.Code, Message: pre.Message, Details: pre.Details})
 			s.emitLog(requestlog.Record{
 				Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider, Model: model,
 				Stream: peek.Stream, Path: path, Status: pre.Status,
@@ -124,12 +124,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 			spent := s.usage.WeeklyCostUSD(clientToken)
 			if spent >= weeklyLimit {
 				c.Header("Retry-After", "604800")
-				c.AbortWithStatusJSON(429, gin.H{
-					"error":     "weekly budget exceeded",
-					"spent_usd": spent,
-					"limit_usd": weeklyLimit,
-					"week":      s.usage.CurrentWeekKey(),
-				})
+				writeAPIError(c, provider, APIError{Status: http.StatusTooManyRequests, Code: "api_key_weekly_limit_exceeded", Message: "This API key has reached its weekly spending limit. Increase the key limit or retry after the weekly reset.", Details: map[string]any{"spent_usd": spent, "limit_usd": weeklyLimit, "week": s.usage.CurrentWeekKey()}})
 				s.emitLog(requestlog.Record{
 					Client:      clientName,
 					ClientToken: maskClientToken(clientToken),
@@ -155,7 +150,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	// client directly what's wrong.
 	if auth.NormalizeProvider(provider) == auth.ProviderOpenAI && path == "/v1/chat/completions" && !s.pool.HasAPIKeyFor(provider, clientGroup, model) {
 		msg := fmt.Sprintf("model %q is only available via /v1/responses on this server (no OpenAI-compatible API-key credential is configured for it); retry with the /v1/responses endpoint", model)
-		c.AbortWithStatusJSON(400, gin.H{"error": msg})
+		writeAPIError(c, provider, APIError{Status: http.StatusBadRequest, Code: "unsupported_endpoint", Message: msg})
 		s.emitLog(requestlog.Record{
 			Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider, Model: model,
 			Stream: peek.Stream, Path: path, Status: 400,
@@ -172,11 +167,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	if limit := s.clientRPM(c, provider, clientToken); limit > 0 {
 		if ok, retry := s.rpm.Allow(rpmKey, limit); !ok {
 			c.Header("Retry-After", strconv.Itoa(retry))
-			c.AbortWithStatusJSON(429, gin.H{
-				"error":       "rate limit exceeded",
-				"rpm_limit":   limit,
-				"retry_after": retry,
-			})
+			writeAPIError(c, provider, APIError{Status: http.StatusTooManyRequests, Code: "api_key_rate_limit_exceeded", Message: "This API key has exceeded its requests-per-minute limit. Retry after the indicated delay.", Details: map[string]any{"rpm_limit": limit, "retry_after_seconds": retry}})
 			s.emitLog(requestlog.Record{
 				Client:      clientName,
 				ClientToken: maskClientToken(clientToken),
@@ -203,11 +194,7 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		defer releaseSlot()
 		if int(cur) > maxConc {
 			c.Header("Retry-After", "5")
-			c.AbortWithStatusJSON(429, gin.H{
-				"error":          "too many concurrent requests",
-				"max_concurrent": maxConc,
-				"in_flight":      int(cur),
-			})
+			writeAPIError(c, provider, APIError{Status: http.StatusTooManyRequests, Code: "api_key_concurrency_limit_exceeded", Message: "This API key has too many requests in progress. Wait for an active request to finish and try again.", Details: map[string]any{"max_concurrent": maxConc, "in_flight": int(cur)}})
 			s.emitLog(requestlog.Record{
 				Client:      clientName,
 				ClientToken: maskClientToken(clientToken),
@@ -252,12 +239,12 @@ func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clie
 	attempts := 0
 	var lastDeferred *deferredResponse
 
-	// surfaceDeferred replays a withheld upstream error to the client once no
-	// healthy credential remains — preferable to a synthetic 503 because the
-	// client (e.g. Claude Code) backs off correctly on the genuine 429 +
-	// Retry-After it would otherwise have received directly.
+	// Convert withheld service errors to the gateway's stable public taxonomy.
+	// Raw bodies remain in operator logs because they may identify a vendor,
+	// relay, account, or credential.
 	surfaceDeferred := func(d *deferredResponse) {
-		replayDeferred(c, d)
+		copySafeRetryHeaders(c, d.header)
+		writeAPIError(c, provider, publicUpstreamError(d.status, d.body))
 		s.emitLog(requestlog.Record{
 			Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider,
 			AuthID: d.authID, Model: model, Status: d.status, Attempts: attempts,
@@ -284,7 +271,7 @@ func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clie
 			if len(tried) > 0 {
 				msg = "all upstream credentials exhausted"
 			}
-			c.AbortWithStatusJSON(503, gin.H{"error": msg})
+			writeAPIError(c, provider, APIError{Status: http.StatusServiceUnavailable, Code: "service_temporarily_unavailable", Message: "The requested model is temporarily unavailable. Please try again shortly."})
 			s.emitLog(requestlog.Record{
 				Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider, Model: model,
 				Stream: stream, Path: path, Status: 503, Attempts: attempts,
@@ -326,7 +313,7 @@ func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clie
 		surfaceDeferred(lastDeferred)
 		return
 	}
-	c.AbortWithStatusJSON(503, gin.H{"error": "upstream retries exhausted"})
+	writeAPIError(c, provider, APIError{Status: http.StatusServiceUnavailable, Code: "service_temporarily_unavailable", Message: "The requested model is temporarily unavailable after several attempts. Please try again shortly."})
 	s.emitLog(requestlog.Record{
 		Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider, Model: model,
 		Stream: stream, Path: path, Status: 503, Attempts: attempts,
@@ -408,6 +395,14 @@ func replayDeferred(c *gin.Context, d *deferredResponse) {
 	}
 	c.Writer.WriteHeader(d.status)
 	_, _ = c.Writer.Write(d.body)
+}
+
+func copySafeRetryHeaders(c *gin.Context, h http.Header) {
+	for _, key := range []string{"Retry-After", "X-RateLimit-Reset"} {
+		if value := h.Get(key); value != "" {
+			c.Header(key, value)
+		}
+	}
 }
 
 // doForward sends the request with one credential. Returns (retry, done, deferred):
@@ -525,7 +520,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	}
 	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(upstreamBody))
 	if err != nil {
-		c.AbortWithStatusJSON(500, gin.H{"error": err.Error()})
+		writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusInternalServerError, Code: "request_preparation_failed", Message: "The request could not be prepared. Please try again."})
 		return false, true, nil
 	}
 
@@ -773,8 +768,8 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 			Error:       fmt.Sprintf("upstream %d", resp.StatusCode),
 		})
 
-		writeResponseHeaders(c, resp)
-		_, _ = c.Writer.Write(errBody)
+		copySafeRetryHeaders(c, resp.Header)
+		writeAPIError(c, auth.NormalizeProvider(a.Provider), publicUpstreamError(resp.StatusCode, errBody))
 		return false, true, nil
 	}
 
@@ -941,7 +936,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	ctx := c.Request.Context()
 	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upURL, bytes.NewReader(upstreamBody))
 	if err != nil {
-		c.AbortWithStatusJSON(500, gin.H{"error": err.Error()})
+		writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusInternalServerError, Code: "request_preparation_failed", Message: "The request could not be prepared. Please try again."})
 		return false, true, nil
 	}
 	copyForwardableHeaders(c.Request.Header, upReq.Header)
@@ -964,7 +959,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		}
 		log.Warnf("proxy(apikey): upstream transport error via %s: %v", a.ID, err)
 		a.MarkFailure(fmt.Sprintf("transport: %v", err))
-		c.AbortWithStatusJSON(502, gin.H{"error": err.Error()})
+		writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusBadGateway, Code: "service_connection_error", Message: "The model service could not be reached. Please try again."})
 		s.emitLog(requestlog.Record{
 			Client: clientName, ClientToken: maskClientToken(clientToken),
 			Provider: auth.NormalizeProvider(a.Provider), AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
@@ -1067,16 +1062,17 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		}
 	}
 
-	writeResponseHeaders(c, resp)
 	var counts usage.Counts
 	var sub advisor.SubUsage
 	var errSnippet string
 	if resp.StatusCode >= 400 {
 		errBody, _ := io.ReadAll(resp.Body)
-		_, _ = c.Writer.Write(errBody)
 		errSnippet = truncate(errBody, 500)
 		log.Warnf("proxy(apikey): %s returned %d — body=%s", a.ID, resp.StatusCode, errSnippet)
+		copySafeRetryHeaders(c, resp.Header)
+		writeAPIError(c, auth.NormalizeProvider(a.Provider), publicUpstreamError(resp.StatusCode, errBody))
 	} else {
+		writeResponseHeaders(c, resp)
 		counts.Requests = 1
 		if stream && strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
 			// Headers are already committed above (the 4xx branch needs them),

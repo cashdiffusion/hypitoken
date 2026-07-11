@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -131,7 +132,7 @@ func (s *Server) tryKiro(
 	// Parse the Anthropic-format body into the typed struct kirobridge expects.
 	var areq kirobridge.AnthropicRequest
 	if err := json.Unmarshal(body, &areq); err != nil {
-		c.AbortWithStatusJSON(400, gin.H{"error": "kiro: parse request: " + err.Error()})
+		writeAPIError(c, auth.ProviderAnthropic, APIError{Status: http.StatusBadRequest, Code: "invalid_request_body", Message: "The request body is not valid JSON or does not match the messages API schema."})
 		return true
 	}
 	areq.Stream = stream
@@ -166,13 +167,7 @@ func (s *Server) tryKiro(
 		// returns errors BEFORE writeSSE/writeOneShot fires, so this is the
 		// common case. Skip when bytes are already on the wire (mid-stream).
 		if !c.Writer.Written() {
-			c.AbortWithStatusJSON(status, gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    "upstream_error",
-					"message": derr.Error(),
-				},
-			})
+			writeAPIError(c, auth.ProviderAnthropic, publicUpstreamError(status, []byte(derr.Error())))
 		}
 		return true
 	}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,7 +120,7 @@ func TestForwardWithFailoverSwitchesCredentialOnQuota(t *testing.T) {
 	// B replies with a distinctive non-2xx body so we can assert the client got
 	// B's response (proving rotation) without constructing the usage/pricing
 	// billing machinery the <400 success path needs. 400 is non-retryable, so
-	// the loop stops at B and forwards it verbatim.
+	// the loop stops at B and returns the gateway's sanitized client error.
 	const bResponse = `{"served_by":"B"}`
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "Bearer tokenB" {
@@ -146,7 +147,7 @@ func TestForwardWithFailoverSwitchesCredentialOnQuota(t *testing.T) {
 	s.forwardWithFailover(c, auth.ProviderAnthropic, "/v1/messages",
 		"claude-haiku-4-5-20251001", "tok-abcdef123456", "", "client", "slot-1", haikuBody, false, time.Now())
 
-	if w.Code != http.StatusBadRequest || w.Body.String() != bResponse {
+	if w.Code != http.StatusBadRequest || w.Header().Get("X-Error-Code") != "invalid_request" || strings.Contains(w.Body.String(), "served_by") {
 		t.Fatalf("client should have received B's response after A's quota 429; got code=%d body=%q", w.Code, w.Body.String())
 	}
 	if !credA.IsQuotaExceeded(time.Now()) {
@@ -155,9 +156,8 @@ func TestForwardWithFailoverSwitchesCredentialOnQuota(t *testing.T) {
 }
 
 // TestForwardWithFailoverSurfacesRealErrorWhenExhausted verifies that when
-// every credential is quota-limited, the client receives the genuine upstream
-// 429 (with its rate-limit headers) — NOT a synthetic 503 — so clients back
-// off correctly instead of hard-erroring.
+// every credential is quota-limited, the client receives a stable, sanitized
+// 429 rather than the raw service body or service-specific headers.
 func TestForwardWithFailoverSurfacesRealErrorWhenExhausted(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	reset := strconv.FormatInt(time.Now().Add(3*time.Hour).Unix(), 10)
@@ -184,13 +184,13 @@ func TestForwardWithFailoverSurfacesRealErrorWhenExhausted(t *testing.T) {
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("exhausted pool must surface the real upstream 429, not a synthetic 503; got %d", w.Code)
 	}
-	if w.Header().Get("Anthropic-Ratelimit-Unified-Status") != "rejected" {
-		t.Fatal("surfaced 429 should carry the upstream rate-limit headers so the client backs off correctly")
+	if w.Header().Get("X-Error-Code") != "service_rate_limited" || strings.Contains(w.Body.String(), "Anthropic") {
+		t.Fatal("surfaced 429 should use the sanitized public error taxonomy")
 	}
 }
 
 // TestDoForwardForwardsNonRetryableErrors verifies that request-level and
-// upstream-wide errors are forwarded to the client verbatim (no failover):
+// upstream-wide errors are sanitized without failover:
 // a generic 400 (client fault — every credential rejects it) and a 503
 // (Anthropic-wide weather — retrying just amplifies load).
 func TestDoForwardForwardsNonRetryableErrors(t *testing.T) {
@@ -229,8 +229,8 @@ func TestDoForwardForwardsNonRetryableErrors(t *testing.T) {
 			if w.Code != tc.status {
 				t.Fatalf("client status = %d, want %d", w.Code, tc.status)
 			}
-			if w.Body.String() != tc.body {
-				t.Fatalf("client body = %q, want %q (forwarded verbatim)", w.Body.String(), tc.body)
+			if w.Header().Get("X-Error-Code") == "" || w.Body.String() == tc.body {
+				t.Fatalf("client body should be standardized and sanitized, got %q", w.Body.String())
 			}
 			if cred.IsQuotaExceeded(time.Now()) {
 				t.Fatalf("non-retryable %d must not cool down the credential", tc.status)

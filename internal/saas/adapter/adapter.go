@@ -131,11 +131,11 @@ func (a *Adapter) Lookup(token string) (server.SaaSTokenInfo, bool) {
 
 func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *server.PreCheckError {
 	if info.Disabled {
-		return &server.PreCheckError{Status: http.StatusForbidden, Body: map[string]any{"error": "token or account disabled"}}
+		return &server.PreCheckError{Status: http.StatusForbidden, Code: "account_disabled", Message: "This API key or account is disabled. Contact support if you believe this is a mistake."}
 	}
 	// Balance is the BILLING workspace's pool (personal or enterprise).
 	if info.BalanceUSD <= 0 {
-		return &server.PreCheckError{Status: http.StatusPaymentRequired, Body: map[string]any{"error": "insufficient balance", "balance_usd": info.BalanceUSD}}
+		return &server.PreCheckError{Status: http.StatusPaymentRequired, Code: "insufficient_balance", Message: "The account balance is insufficient. Add funds before retrying.", Details: map[string]any{"balance_usd": info.BalanceUSD}}
 	}
 	now := time.Now()
 	dayStart := now.Truncate(24 * time.Hour)
@@ -146,13 +146,13 @@ func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *serv
 	if info.WorkspaceDailyCap > 0 {
 		spent, err := a.DB.SumChargeSinceForWorkspace(ctx, info.WorkspaceID, dayStart)
 		if err == nil && spent >= info.WorkspaceDailyCap {
-			return &server.PreCheckError{Status: http.StatusTooManyRequests, Body: map[string]any{"error": "workspace daily cap exceeded", "spent_usd": spent, "cap_usd": info.WorkspaceDailyCap}}
+			return capError("workspace_daily_limit_exceeded", "The workspace has reached its daily spending limit. Increase the limit or retry after the daily reset.", spent, info.WorkspaceDailyCap)
 		}
 	}
 	if info.WorkspaceMonthlyCap > 0 {
 		spent, err := a.DB.SumChargeSinceForWorkspace(ctx, info.WorkspaceID, monthStart)
 		if err == nil && spent >= info.WorkspaceMonthlyCap {
-			return &server.PreCheckError{Status: http.StatusTooManyRequests, Body: map[string]any{"error": "workspace monthly cap exceeded", "spent_usd": spent, "cap_usd": info.WorkspaceMonthlyCap}}
+			return capError("workspace_monthly_limit_exceeded", "The workspace has reached its monthly spending limit. Increase the limit or retry after the monthly reset.", spent, info.WorkspaceMonthlyCap)
 		}
 	}
 
@@ -161,7 +161,7 @@ func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *serv
 	if info.MemberMonthlyCap > 0 {
 		spent, err := a.DB.SumChargeSinceForMember(ctx, info.WorkspaceID, info.UserID, monthStart)
 		if err == nil && spent >= info.MemberMonthlyCap {
-			return &server.PreCheckError{Status: http.StatusTooManyRequests, Body: map[string]any{"error": "member monthly cap exceeded", "spent_usd": spent, "cap_usd": info.MemberMonthlyCap}}
+			return capError("member_monthly_limit_exceeded", "This workspace member has reached the monthly spending limit. Ask a workspace administrator to increase it or retry after the monthly reset.", spent, info.MemberMonthlyCap)
 		}
 	}
 
@@ -171,16 +171,20 @@ func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *serv
 	if info.DailyUSDCap > 0 {
 		spent, err := a.DB.SumChargeSince(ctx, info.UserID, dayStart)
 		if err == nil && spent >= info.DailyUSDCap {
-			return &server.PreCheckError{Status: http.StatusTooManyRequests, Body: map[string]any{"error": "daily cap exceeded", "spent_usd": spent, "cap_usd": info.DailyUSDCap}}
+			return capError("api_key_daily_limit_exceeded", "This API key has reached its daily spending limit. Increase the key limit or retry after the daily reset.", spent, info.DailyUSDCap)
 		}
 	}
 	if mcap := effectiveMonthlyCap(info.MonthlyUSDCap, info.AdminMonthlyCap); mcap > 0 {
 		spent, err := a.DB.SumChargeSince(ctx, info.UserID, monthStart)
 		if err == nil && spent >= mcap {
-			return &server.PreCheckError{Status: http.StatusTooManyRequests, Body: map[string]any{"error": "monthly cap exceeded", "spent_usd": spent, "cap_usd": mcap}}
+			return capError("api_key_monthly_limit_exceeded", "This API key has reached its monthly spending limit. Increase the key limit or retry after the monthly reset.", spent, mcap)
 		}
 	}
 	return nil
+}
+
+func capError(code, message string, spent, cap float64) *server.PreCheckError {
+	return &server.PreCheckError{Status: http.StatusTooManyRequests, Code: code, Message: message, Details: map[string]any{"spent_usd": spent, "limit_usd": cap}}
 }
 
 // effectiveMonthlyCap folds the owner's self-set per-token monthly cap with any

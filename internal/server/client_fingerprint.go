@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
+	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/clientguard"
 )
 
@@ -30,14 +31,7 @@ func requireClaudeCodeClient() gin.HandlerFunc {
 		if d := guard.Inspect(c.Request.Header); d.Blocked {
 			log.Warnf("client-fp: rejecting request to %s — %s — UA=%q",
 				c.Request.URL.Path, d.Reason, c.Request.Header.Get("User-Agent"))
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    "forbidden",
-					"message": "client not allowed: this gateway only accepts interactive Claude clients (Claude Code, Claude Desktop, Cursor). Raw SDKs, LiteLLM, and scripting clients are blocked.",
-					"reason":  d.Reason,
-				},
-			})
+			writeAPIError(c, auth.ProviderAnthropic, APIError{Status: http.StatusForbidden, Code: "client_not_allowed", Message: "This API endpoint only accepts supported interactive clients."})
 			return
 		}
 		c.Next()

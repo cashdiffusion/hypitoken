@@ -64,7 +64,7 @@ func isCodexWSUpgrade(r *http.Request) bool {
 // the cc-core uTLS fingerprint.
 func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	if !isCodexWSUpgrade(c.Request) {
-		c.AbortWithStatusJSON(http.StatusUpgradeRequired, gin.H{"error": "WebSocket upgrade required (Upgrade: websocket)"})
+		writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusUpgradeRequired, Code: "websocket_upgrade_required", Message: "This endpoint requires a WebSocket upgrade request."})
 		return
 	}
 	const provider = auth.ProviderOpenAI
@@ -86,7 +86,7 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	if saasOK && s.saas != nil {
 		clientGroup = s.saas.CredentialGroup(saasInfo)
 		if pre := s.saas.PreCheck(c.Request.Context(), saasInfo); pre != nil {
-			c.AbortWithStatusJSON(pre.Status, pre.Body)
+			writeAPIError(c, auth.ProviderOpenAI, APIError{Status: pre.Status, Code: pre.Code, Message: pre.Message, Details: pre.Details})
 			return
 		}
 	} else if entry, ok := s.tokens.Lookup(clientToken); ok {
@@ -97,7 +97,7 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	if limit := s.clientRPM(c, provider, clientToken); limit > 0 {
 		if ok, retry := s.rpm.Allow(rpmKey, limit); !ok {
 			c.Header("Retry-After", strconv.Itoa(retry))
-			c.AbortWithStatusJSON(429, gin.H{"error": "rate limit exceeded", "retry_after": retry})
+			writeAPIError(c, provider, APIError{Status: http.StatusTooManyRequests, Code: "api_key_rate_limit_exceeded", Message: "This API key has exceeded its requests-per-minute limit. Retry after the indicated delay.", Details: map[string]any{"retry_after_seconds": retry}})
 			return
 		}
 	}
@@ -107,7 +107,7 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 		defer releaseSlot()
 		if int(cur) > maxConc {
 			c.Header("Retry-After", "5")
-			c.AbortWithStatusJSON(429, gin.H{"error": "too many concurrent requests", "max_concurrent": maxConc})
+			writeAPIError(c, provider, APIError{Status: http.StatusTooManyRequests, Code: "api_key_concurrency_limit_exceeded", Message: "This API key has too many requests in progress. Wait for an active request to finish and try again.", Details: map[string]any{"max_concurrent": maxConc}})
 			return
 		}
 	}
