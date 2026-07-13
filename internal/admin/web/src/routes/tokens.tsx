@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { GlassPanel, PageHeader } from "@/components/app/page-primitives";
+import { TagInput } from "@/components/app/tag-input";
 import { Reveal } from "@/components/landing/reveal";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -66,6 +67,10 @@ export default function TokensPage() {
   const [useToken, setUseToken] = useState<UserToken | null>(null);
   const [editToken, setEditToken] = useState<UserToken | null>(null);
 
+  // Labels already used on this account, offered as one-click adds so a team
+  // converges on "研发部" instead of accumulating 研发/研发部/研发组.
+  const tagSuggestions = useMemo(() => [...new Set(tokens.flatMap((k) => k.tags ?? []))], [tokens]);
+
   const refresh = async () => {
     const r = await apiGet<{ tokens: UserToken[] }>("/tokens");
     setTokens(r.tokens || []);
@@ -110,6 +115,18 @@ export default function TokensPage() {
                   <TableRow key={t.id} className={t.disabled ? "opacity-50" : ""}>
                     <TableCell className="font-medium">
                       {t.name || <span className="text-muted-foreground">(unnamed)</span>}
+                      {t.tags && t.tags.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {t.tags.map((tag) => (
+                            <span
+                              key={tag}
+                              className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-normal text-primary"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -215,8 +232,18 @@ export default function TokensPage() {
         </GlassPanel>
       </Reveal>
 
-      <CreateTokenDialog open={open} onOpenChange={setOpen} onCreated={refresh} />
-      <EditTokenDialog token={editToken} onClose={() => setEditToken(null)} onSaved={refresh} />
+      <CreateTokenDialog
+        open={open}
+        onOpenChange={setOpen}
+        onCreated={refresh}
+        suggestions={tagSuggestions}
+      />
+      <EditTokenDialog
+        token={editToken}
+        onClose={() => setEditToken(null)}
+        onSaved={refresh}
+        suggestions={tagSuggestions}
+      />
       <UseTokenDialog token={useToken} onClose={() => setUseToken(null)} />
     </div>
   );
@@ -319,15 +346,18 @@ function EditTokenDialog({
   token,
   onClose,
   onSaved,
+  suggestions,
 }: {
   token: UserToken | null;
   onClose: () => void;
   onSaved: () => void;
+  suggestions: string[];
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [cap, setCap] = useState("");
   const [groups, setGroups] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally keyed on token.id only — re-syncs form when a different token is opened, not on every upstream property update
   useEffect(() => {
@@ -335,6 +365,7 @@ function EditTokenDialog({
     setName(token.name || "");
     setCap(token.monthly_usd_cap > 0 ? String(token.monthly_usd_cap) : "");
     setGroups(token.groups ? token.groups.slice() : []);
+    setTags(token.tags ? token.tags.slice() : []);
   }, [token?.id]);
 
   if (!token) return null;
@@ -349,6 +380,7 @@ function EditTokenDialog({
         max_concurrent: token.max_concurrent,
         rpm: token.rpm,
         groups,
+        tags,
       });
       toast.success("已更新");
       onSaved();
@@ -381,6 +413,11 @@ function EditTokenDialog({
               value={cap}
               onChange={(e) => setCap(e.target.value)}
             />
+          </div>
+          <div className="space-y-2">
+            <Label>{t("tokens.tags.label")}</Label>
+            <TagInput value={tags} onChange={setTags} suggestions={suggestions} />
+            <p className="text-xs text-muted-foreground">{t("tokens.tags.hint")}</p>
           </div>
           <div className="space-y-2">
             <Label>渠道（按优先级排列）</Label>
@@ -641,10 +678,12 @@ function CreateTokenDialog({
   open,
   onOpenChange,
   onCreated,
+  suggestions,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onCreated: () => void;
+  suggestions: string[];
 }) {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -656,6 +695,7 @@ function CreateTokenDialog({
   const [name, setName] = useState("");
   const [cap, setCap] = useState("");
   const [groups, setGroups] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
   const [workspaceId, setWorkspaceId] = useState(defaultWsId); // "0" = personal
 
   // Seed the billing-space default each time the dialog opens (user/workspaces
@@ -671,6 +711,7 @@ function CreateTokenDialog({
         name,
         monthly_usd_cap: parseFloat(cap) || 0,
         groups,
+        tags,
         workspace_id: Number(workspaceId) || 0,
       });
       toast.success(t("tokens.dialog.created"));
@@ -679,6 +720,7 @@ function CreateTokenDialog({
       setName("");
       setCap("");
       setGroups([]);
+      setTags([]);
       setWorkspaceId(defaultWsId);
     } catch (e) {
       toast.error(errMsg(e));
@@ -735,6 +777,11 @@ function CreateTokenDialog({
               <p className="text-xs text-muted-foreground">{t("tokens.dialog.billingSpaceHint")}</p>
             </div>
           )}
+          <div className="space-y-2">
+            <Label>{t("tokens.tags.label")}</Label>
+            <TagInput value={tags} onChange={setTags} suggestions={suggestions} />
+            <p className="text-xs text-muted-foreground">{t("tokens.tags.hint")}</p>
+          </div>
           <div className="space-y-2">
             <Label>渠道（可选，按优先级排列）</Label>
             <ChannelPicker value={groups} onChange={setGroups} />

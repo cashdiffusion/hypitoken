@@ -81,7 +81,7 @@ func TestEnterpriseWorkspaceBillingIsolation(t *testing.T) {
 	}
 
 	// Charge the enterprise pool $10.
-	_, charged, err := d.ChargeWorkspaceWithFloor(ctx, entWS, uid, TxKindCharge, 10, "token=1 model=x", "", 0)
+	_, charged, err := d.ChargeWorkspaceWithFloor(ctx, entWS, uid, TxKindCharge, 10, "token=1 model=x", "", 0, ChargeMeta{})
 	if err != nil {
 		t.Fatalf("charge enterprise: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestMemberSpendScopedToWorkspace(t *testing.T) {
 	if _, err := d.AddBalance(ctx, uid, TxKindTopup, 20, "seed", "", true); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, _, err := d.ChargeWorkspaceWithFloor(ctx, personalWS, uid, TxKindCharge, 3, "token=1 model=x", "", 0); err != nil {
+	if _, _, err := d.ChargeWorkspaceWithFloor(ctx, personalWS, uid, TxKindCharge, 3, "token=1 model=x", "", 0, ChargeMeta{}); err != nil {
 		t.Fatalf("charge personal: %v", err)
 	}
 

@@ -20,7 +20,7 @@ func TestChargeWithFloorClampsToOverdraft(t *testing.T) {
 
 	// A $50 charge against $0.01 with a $10 overdraft floor must clamp so the
 	// wallet rests at exactly -$10, charging only $10.01.
-	newBal, charged, err := d.ChargeWithFloor(ctx, uid, TxKindCharge, 50, "big", "", 10)
+	newBal, charged, err := d.ChargeWithFloor(ctx, uid, TxKindCharge, 50, "big", "", 10, ChargeMeta{})
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestChargeWithFloorClampsToOverdraft(t *testing.T) {
 	}
 
 	// Already at the floor — a further charge takes nothing and never deepens.
-	newBal, charged, err = d.ChargeWithFloor(ctx, uid, TxKindCharge, 5, "more", "", 10)
+	newBal, charged, err = d.ChargeWithFloor(ctx, uid, TxKindCharge, 5, "more", "", 10, ChargeMeta{})
 	if err != nil {
 		t.Fatalf("charge2: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestChargeWithFloorNoClampWithinBudget(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	// $3 charge against $5 with a $10 floor: full charge, balance $2.
-	newBal, charged, err := d.ChargeWithFloor(ctx, uid, TxKindCharge, 3, "ok", "", 10)
+	newBal, charged, err := d.ChargeWithFloor(ctx, uid, TxKindCharge, 3, "ok", "", 10, ChargeMeta{})
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestChargeWithFloorDisabled(t *testing.T) {
 	ctx := context.Background()
 	uid := mkUser(t, d, "unbounded@example.com")
 	// floor <= 0 disables the cap: balance may go arbitrarily negative.
-	newBal, charged, err := d.ChargeWithFloor(ctx, uid, TxKindCharge, 100, "huge", "", 0)
+	newBal, charged, err := d.ChargeWithFloor(ctx, uid, TxKindCharge, 100, "huge", "", 0, ChargeMeta{})
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}

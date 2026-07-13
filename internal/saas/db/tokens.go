@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"math/big"
+	"strings"
 	"time"
 )
 
@@ -29,16 +30,19 @@ type UserToken struct {
 	// none); the effective cap is min(MonthlyUSDCap, AdminMonthlyCap>0).
 	WorkspaceID     int64
 	AdminMonthlyCap float64
+	// Tags are free-form labels ("研发部", "前端"), used to group spend in the
+	// usage reports. Unlike Groups they carry no routing meaning at all.
+	Tags []string
 }
 
-const tokenCols = `id, user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at, groups, workspace_id, admin_monthly_cap`
+const tokenCols = `id, user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at, groups, workspace_id, admin_monthly_cap, tags`
 
 func scanToken(row interface{ Scan(...any) error }) (*UserToken, error) {
 	var t UserToken
 	var disabled int
 	var lastUsed, created int64
-	var groupsJSON string
-	if err := row.Scan(&t.ID, &t.UserID, &t.Token, &t.Name, &t.DailyUSDCap, &t.MonthlyUSDCap, &t.MaxConcurrent, &t.RPM, &disabled, &lastUsed, &created, &groupsJSON, &t.WorkspaceID, &t.AdminMonthlyCap); err != nil {
+	var groupsJSON, tagsJSON string
+	if err := row.Scan(&t.ID, &t.UserID, &t.Token, &t.Name, &t.DailyUSDCap, &t.MonthlyUSDCap, &t.MaxConcurrent, &t.RPM, &disabled, &lastUsed, &created, &groupsJSON, &t.WorkspaceID, &t.AdminMonthlyCap, &tagsJSON); err != nil {
 		return nil, err
 	}
 	t.Disabled = disabled != 0
@@ -47,7 +51,39 @@ func scanToken(row interface{ Scan(...any) error }) (*UserToken, error) {
 	}
 	t.CreatedAt = time.Unix(created, 0)
 	t.Groups = parseGroupsJSON(groupsJSON)
+	t.Tags = parseGroupsJSON(tagsJSON)
 	return &t, nil
+}
+
+// MaxTokenTags / MaxTokenTagLen bound what a caller can stuff into the tags
+// column. Enforced by SanitizeTags, which every write path runs its input through.
+const (
+	MaxTokenTags   = 8
+	MaxTokenTagLen = 32
+)
+
+// SanitizeTags trims, de-dupes and bounds a caller-supplied label list. Order is
+// preserved (it's the display order). Any UTF-8 content is fine — the value is
+// JSON-encoded for storage and compared decoded by json_each — so this only has
+// to stop someone storing a novel in the column.
+func SanitizeTags(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	for _, raw := range in {
+		tag := strings.TrimSpace(raw)
+		if tag == "" || seen[tag] {
+			continue
+		}
+		if len([]rune(tag)) > MaxTokenTagLen {
+			tag = string([]rune(tag)[:MaxTokenTagLen])
+		}
+		seen[tag] = true
+		out = append(out, tag)
+		if len(out) == MaxTokenTags {
+			break
+		}
+	}
+	return out
 }
 
 // parseGroupsJSON decodes the groups column. Empty / malformed → nil slice.
@@ -81,6 +117,7 @@ type TokenParams struct {
 	// WorkspaceID is the billing target chosen at creation. 0 = bind to the
 	// user's personal workspace (default for individual users).
 	WorkspaceID int64
+	Tags        []string
 }
 
 func (db *DB) CreateUserToken(ctx context.Context, userID int64, p TokenParams) (*UserToken, error) {
@@ -97,9 +134,10 @@ func (db *DB) CreateUserToken(ctx context.Context, userID int64, p TokenParams) 
 	}
 	now := time.Now().Unix()
 	res, err := db.ExecContext(ctx, `INSERT INTO user_tokens
-		(user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at, groups, workspace_id, admin_monthly_cap)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 0)`,
-		userID, tok, p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, now, marshalGroupsJSON(p.Groups), wsID)
+		(user_id, token, name, daily_usd_cap, monthly_usd_cap, max_concurrent, rpm, disabled, last_used_at, created_at, groups, workspace_id, admin_monthly_cap, tags)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 0, ?)`,
+		userID, tok, p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, now,
+		marshalGroupsJSON(p.Groups), wsID, marshalGroupsJSON(SanitizeTags(p.Tags)))
 	if err != nil {
 		return nil, err
 	}
@@ -144,17 +182,18 @@ func (db *DB) ListUserTokens(ctx context.Context, userID int64) ([]*UserToken, e
 
 func (db *DB) UpdateUserToken(ctx context.Context, id int64, p TokenParams, disabled *bool) error {
 	groups := marshalGroupsJSON(p.Groups)
+	tags := marshalGroupsJSON(SanitizeTags(p.Tags))
 	if disabled != nil {
 		d := 0
 		if *disabled {
 			d = 1
 		}
-		_, err := db.ExecContext(ctx, `UPDATE user_tokens SET name=?, daily_usd_cap=?, monthly_usd_cap=?, max_concurrent=?, rpm=?, disabled=?, groups=? WHERE id=?`,
-			p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, d, groups, id)
+		_, err := db.ExecContext(ctx, `UPDATE user_tokens SET name=?, daily_usd_cap=?, monthly_usd_cap=?, max_concurrent=?, rpm=?, disabled=?, groups=?, tags=? WHERE id=?`,
+			p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, d, groups, tags, id)
 		return err
 	}
-	_, err := db.ExecContext(ctx, `UPDATE user_tokens SET name=?, daily_usd_cap=?, monthly_usd_cap=?, max_concurrent=?, rpm=?, groups=? WHERE id=?`,
-		p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, groups, id)
+	_, err := db.ExecContext(ctx, `UPDATE user_tokens SET name=?, daily_usd_cap=?, monthly_usd_cap=?, max_concurrent=?, rpm=?, groups=?, tags=? WHERE id=?`,
+		p.Name, p.DailyUSDCap, p.MonthlyUSDCap, p.MaxConcurrent, p.RPM, groups, tags, id)
 	return err
 }
 
@@ -203,6 +242,21 @@ func (db *DB) ListWorkspaceMemberTokens(ctx context.Context, workspaceID, userID
 // never touch a member's personal-space keys.
 func (db *DB) SetTokenAdminMonthlyCap(ctx context.Context, tokenID, workspaceID int64, monthlyCap float64) error {
 	res, err := db.ExecContext(ctx, `UPDATE user_tokens SET admin_monthly_cap = ? WHERE id = ? AND workspace_id = ?`, monthlyCap, tokenID, workspaceID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetTokenTags relabels a key, but only one actually bound to the given workspace
+// — so a space admin can label their team's keys without ever being able to touch
+// a member's personal-space keys. Same guard as SetTokenAdminMonthlyCap.
+func (db *DB) SetTokenTags(ctx context.Context, tokenID, workspaceID int64, tags []string) error {
+	res, err := db.ExecContext(ctx, `UPDATE user_tokens SET tags = ? WHERE id = ? AND workspace_id = ?`,
+		marshalGroupsJSON(SanitizeTags(tags)), tokenID, workspaceID)
 	if err != nil {
 		return err
 	}

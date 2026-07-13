@@ -38,9 +38,16 @@ type tokenView struct {
 	Groups          []string `json:"groups,omitempty"`
 	WorkspaceID     int64    `json:"workspace_id"`                // billing target
 	AdminMonthlyCap float64  `json:"admin_monthly_cap,omitempty"` // space-admin imposed (read-only here)
+	// Tags always serializes (as [] when empty) so the frontend never has to
+	// null-check before mapping over it.
+	Tags []string `json:"tags"`
 }
 
 func toView(t *db.UserToken) tokenView {
+	tags := t.Tags
+	if tags == nil {
+		tags = []string{}
+	}
 	return tokenView{
 		ID: t.ID, Token: t.Token, Name: t.Name,
 		DailyUSDCap: t.DailyUSDCap, MonthlyUSDCap: t.MonthlyUSDCap,
@@ -51,6 +58,7 @@ func toView(t *db.UserToken) tokenView {
 		Groups:          append([]string(nil), t.Groups...),
 		WorkspaceID:     t.WorkspaceID,
 		AdminMonthlyCap: t.AdminMonthlyCap,
+		Tags:            append([]string{}, tags...),
 	}
 }
 
@@ -80,6 +88,7 @@ type createReq struct {
 	RPM           int      `json:"rpm"`
 	Groups        []string `json:"groups,omitempty"` // priority-ordered credential-group fallthrough
 	WorkspaceID   int64    `json:"workspace_id"`     // billing target; 0 = personal workspace
+	Tags          []string `json:"tags,omitempty"`   // free-form labels for spend reporting
 }
 
 func (h *Handler) create(c *gin.Context) {
@@ -104,7 +113,7 @@ func (h *Handler) create(c *gin.Context) {
 	t, err := h.DB.CreateUserToken(c.Request.Context(), u.ID, db.TokenParams{
 		Name: req.Name, DailyUSDCap: req.DailyUSDCap, MonthlyUSDCap: req.MonthlyUSDCap,
 		MaxConcurrent: req.MaxConcurrent, RPM: req.RPM,
-		Groups: req.Groups, WorkspaceID: req.WorkspaceID,
+		Groups: req.Groups, WorkspaceID: req.WorkspaceID, Tags: req.Tags,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -136,7 +145,7 @@ func (h *Handler) update(c *gin.Context) {
 	if err := h.DB.UpdateUserToken(c.Request.Context(), id, db.TokenParams{
 		Name: req.Name, DailyUSDCap: req.DailyUSDCap, MonthlyUSDCap: req.MonthlyUSDCap,
 		MaxConcurrent: req.MaxConcurrent, RPM: req.RPM,
-		Groups: req.Groups,
+		Groups: req.Groups, Tags: req.Tags,
 	}, req.Disabled); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

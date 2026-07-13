@@ -576,7 +576,78 @@ UPDATE workspaces SET
     codex_multiplier  = COALESCE((SELECT g.codex_multiplier  FROM pricing_groups g WHERE g.id = workspaces.group_id), 0)
 WHERE type = 'enterprise';
 `,
+
+	// v15 — per-token / per-model spend attribution becomes first-class.
+	//
+	// Until now the proxy squeezed both into the free-text `ref`
+	// ("token=<id> model=<name>"), which can't be indexed, grouped or filtered —
+	// so "show me what each key in my company spent" was unanswerable.
+	//
+	// The token-count axes land here too, rather than being read back from the
+	// cc-core requestlog: that JSONL is retention-GC'd and only carries a MASKED
+	// client token (which key rotation invalidates), so it can never be the
+	// billing source of truth. wallet_tx is. Historical rows keep 0 counts —
+	// honestly "not recorded", which the CSV renders as blank rather than 0.
+	//
+	// `ref` is deliberately left intact: /billing/transactions and
+	// /workspaces/:id/ledger still render it, and it stays as an audit trail.
+	`
+ALTER TABLE wallet_tx ADD COLUMN token_id            INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE wallet_tx ADD COLUMN model               TEXT    NOT NULL DEFAULT '';
+ALTER TABLE wallet_tx ADD COLUMN input_tokens        INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE wallet_tx ADD COLUMN output_tokens       INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE wallet_tx ADD COLUMN cache_read_tokens   INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE wallet_tx ADD COLUMN cache_create_tokens INTEGER NOT NULL DEFAULT 0;
+
+-- Per-key labels, e.g. '["研发部","前端"]'. '' = untagged. Same storage
+-- convention as user_tokens.groups (v4) — a JSON array in a TEXT column.
+ALTER TABLE user_tokens ADD COLUMN tags TEXT NOT NULL DEFAULT '';
+` + backfillTokenAttributionSQL + `
+CREATE INDEX idx_wallet_tx_ws_time    ON wallet_tx(workspace_id, created_at);
+CREATE INDEX idx_wallet_tx_ws_token   ON wallet_tx(workspace_id, token_id, created_at);
+CREATE INDEX idx_wallet_tx_user_token ON wallet_tx(user_id, token_id, created_at);
+CREATE INDEX idx_user_tokens_ws       ON user_tokens(workspace_id);
+`,
 }
+
+// backfillTokenAttributionSQL recovers token_id / model from the legacy free-text
+// ref on every historical charge row. Kept as a named constant so the migration
+// and its test exercise the exact same statement and cannot drift.
+//
+// Layout: ref = "token=<digits> model=<name>". "token=" is 6 chars, so the digits
+// start at 1-based position 7; " model=" is 7 chars, so the model starts 7 past
+// the separator and runs to end-of-string (model is the format's last field, so
+// a name containing spaces survives intact).
+//
+// The guards matter more than the extraction:
+//
+//   - instr(...) >= 8 means at least one digit precedes the separator, which also
+//     keeps the substr length >= 1 — SQLite's substr treats a NEGATIVE length as
+//     "take the characters BEFORE the offset", so an unguarded row with no
+//     separator (instr = 0) would silently extract garbage rather than error.
+//   - The GLOB pair is an exact "one-or-more digits, nothing else" test. Without
+//     it, a malformed 'token=9x model=…' would CAST to 9 and attribute that money
+//     to key 9 — a wrong answer is far worse than no answer here.
+//
+// Rows failing any guard simply stay at token_id = 0: the "unattributed" bucket,
+// which the reports surface as its own visible row rather than folding into a
+// real key. topup (out_trade_no) / adjust (bonus) / refund refs are structurally
+// excluded by the kind + LIKE predicates.
+//
+// G101 fires on the literal "token=" below. It is a SQL prefix being parsed out
+// of a ledger ref, not a hardcoded credential.
+//
+//nolint:gosec // G101 false positive — see above.
+const backfillTokenAttributionSQL = `
+UPDATE wallet_tx
+   SET token_id = CAST(substr(ref, 7, instr(ref, ' model=') - 7) AS INTEGER),
+       model    =      substr(ref, instr(ref, ' model=') + 7)
+ WHERE kind = 'charge'
+   AND ref LIKE 'token=%'
+   AND instr(ref, ' model=') >= 8
+   AND substr(ref, 7, instr(ref, ' model=') - 7) GLOB '[0-9]*'
+   AND substr(ref, 7, instr(ref, ' model=') - 7) NOT GLOB '*[^0-9]*';
+`
 
 func (db *DB) migrate() error {
 	ctx := context.Background()

@@ -20,6 +20,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/profile"
 	"github.com/wjsoj/CPA-Claude/internal/saas/referral"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
+	"github.com/wjsoj/CPA-Claude/internal/saas/usage"
 	"github.com/wjsoj/CPA-Claude/internal/saas/workspace"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/pricing"
@@ -108,6 +109,11 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	})
 	tokensH.Routes(authed.Group("/tokens"))
 	billingH.UserRoutes(authed.Group("/billing"))
+	// Spend analytics. Only needs the store, so it's built here rather than
+	// lengthening Mount's already-long parameter list. The same handler serves the
+	// team view further down, under RequireWorkspaceAdmin.
+	usageH := usage.New(store)
+	usageH.PersonalRoutes(authed.Group("/me/usage"))
 	// Arena leaderboard + profile (nickname / public opt-in / IP greeting) —
 	// all authed user routes.
 	if arenaH != nil {
@@ -678,6 +684,9 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 		teamG := authed.Group("/workspaces/:id")
 		teamG.Use(saasauth.RequireWorkspaceAdmin(store))
 		workspaceH.TeamRoutes(teamG)
+		// Per-key spend for the whole space — same reports as the personal view,
+		// scoped to the workspace the middleware just authorized.
+		usageH.TeamRoutes(teamG.Group("/usage"))
 	}
 
 	// Admin (operator-only).

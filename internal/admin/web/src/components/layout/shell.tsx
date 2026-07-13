@@ -1,5 +1,6 @@
 import {
   Building2,
+  ChartColumnBig,
   Gift,
   KeyRound,
   LayoutDashboard,
@@ -33,6 +34,7 @@ const NAV_ITEMS = [
   { to: "/app/invite", labelKey: "nav.invite", icon: Gift },
   { to: "/app/tokens", labelKey: "nav.tokens", icon: KeyRound },
   { to: "/app/billing", labelKey: "nav.billing", icon: Wallet },
+  { to: "/app/usage", labelKey: "nav.usage", icon: ChartColumnBig },
   { to: "/app/logs", labelKey: "nav.logs", icon: Receipt },
   { to: "/app/console", labelKey: "nav.console", icon: Terminal },
 ];

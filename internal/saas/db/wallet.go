@@ -27,6 +27,26 @@ type WalletTx struct {
 
 var ErrInsufficientBalance = errors.New("insufficient balance")
 
+// ChargeMeta is the structured attribution recorded alongside a charge row: which
+// key spent the money, on which model, and how many tokens it moved. Before v15
+// the first two were squeezed into the free-text `ref` and the token counts lived
+// only in the retention-GC'd requestlog, which made "what did each key in my
+// company spend" unanswerable from the ledger. Now the ledger is self-contained.
+//
+// The zero value is correct for money-in (topup / adjust / refund): those rows
+// have no key or model, and land on the column defaults.
+//
+// Flat int64s rather than a cc-core usage.Counts, to keep package db free of any
+// cc-core dependency.
+type ChargeMeta struct {
+	TokenID           int64
+	Model             string
+	InputTokens       int64
+	OutputTokens      int64
+	CacheReadTokens   int64
+	CacheCreateTokens int64
+}
+
 // AddBalance applies a signed delta to the user's balance and records a wallet_tx
 // row in a single transaction. Returns the new balance.
 //
@@ -94,12 +114,12 @@ func addWorkspaceBalanceTx(ctx context.Context, tx *sql.Tx, workspaceID, userID 
 // ChargeWithFloor deducts from the USER's personal workspace (the legacy
 // "charge my own wallet" path). The proxy hot path uses ChargeWorkspaceWithFloor
 // with the token's bound workspace instead.
-func (db *DB) ChargeWithFloor(ctx context.Context, userID int64, kind string, amountUSD float64, ref, note string, maxOverdraftUSD float64) (newBal float64, charged float64, err error) {
+func (db *DB) ChargeWithFloor(ctx context.Context, userID int64, kind string, amountUSD float64, ref, note string, maxOverdraftUSD float64, meta ChargeMeta) (newBal float64, charged float64, err error) {
 	wsID, err := db.PersonalWorkspaceID(ctx, userID)
 	if err != nil {
 		return 0, 0, err
 	}
-	return db.ChargeWorkspaceWithFloor(ctx, wsID, userID, kind, amountUSD, ref, note, maxOverdraftUSD)
+	return db.ChargeWorkspaceWithFloor(ctx, wsID, userID, kind, amountUSD, ref, note, maxOverdraftUSD, meta)
 }
 
 // ChargeWorkspaceWithFloor deducts amountUSD (>= 0) from a workspace's balance
@@ -110,7 +130,7 @@ func (db *DB) ChargeWithFloor(ctx context.Context, userID int64, kind string, am
 // floor is clamped so the balance rests exactly on it, and the clamped
 // (actually-charged) amount is returned so the request log stays in lockstep
 // with the ledger. maxOverdraftUSD <= 0 disables the floor.
-func (db *DB) ChargeWorkspaceWithFloor(ctx context.Context, workspaceID, userID int64, kind string, amountUSD float64, ref, note string, maxOverdraftUSD float64) (newBal float64, charged float64, err error) {
+func (db *DB) ChargeWorkspaceWithFloor(ctx context.Context, workspaceID, userID int64, kind string, amountUSD float64, ref, note string, maxOverdraftUSD float64, meta ChargeMeta) (newBal float64, charged float64, err error) {
 	if amountUSD <= 0 {
 		bal, gerr := db.GetWorkspaceBalance(ctx, workspaceID)
 		return bal, 0, gerr
@@ -149,8 +169,16 @@ func (db *DB) ChargeWorkspaceWithFloor(ctx context.Context, workspaceID, userID 
 	if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET balance_usd = ?, updated_at = ? WHERE id = ?`, newBal, now, workspaceID); err != nil {
 		return 0, 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx (user_id, workspace_id, kind, amount_usd, ref, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		userID, workspaceID, kind, -charged, ref, note, now); err != nil {
+	// `ref` is still written in its legacy "token=<id> model=<name>" form even
+	// though both fields now have real columns: /billing/transactions and
+	// /workspaces/:id/ledger render it, and it doubles as an audit trail against
+	// which the structured columns can be re-derived.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx
+		(user_id, workspace_id, kind, amount_usd, ref, note, created_at,
+		 token_id, model, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		userID, workspaceID, kind, -charged, ref, note, now,
+		meta.TokenID, meta.Model, meta.InputTokens, meta.OutputTokens, meta.CacheReadTokens, meta.CacheCreateTokens); err != nil {
 		return 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {

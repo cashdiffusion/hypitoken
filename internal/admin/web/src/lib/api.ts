@@ -94,6 +94,37 @@ export async function api<T = unknown>(path: string, opts: RequestInit = {}): Pr
   return data as T;
 }
 
+// apiDownload fetches a file endpoint and saves it to disk.
+//
+// A plain <a href> can't be used: the JWT lives in localStorage, not a cookie, so
+// a browser navigation would arrive at the server unauthenticated. We fetch with
+// the Authorization header, then hand the blob to a synthetic anchor.
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const token = getJWT();
+  const res = await fetch(BASE + path, {
+    method: "GET",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    if (res.status === 401 && token) handleSessionExpired();
+    throw new ApiError(`HTTP ${res.status}`, res.status);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    // Object URLs pin their blob in memory until revoked — without this, every
+    // export leaks the whole file for the lifetime of the tab.
+    URL.revokeObjectURL(url);
+  }
+}
+
 export const apiGet = <T = unknown>(p: string) => api<T>(p, { method: "GET" });
 export const apiPost = <T = unknown>(p: string, body?: unknown) =>
   api<T>(p, { method: "POST", body: body == null ? undefined : JSON.stringify(body) });

@@ -17,6 +17,7 @@ import ForgotPasswordPage from "@/routes/forgot-password";
 import HomePage from "@/routes/home";
 import LoginPage from "@/routes/login";
 import LogsPage from "@/routes/logs";
+import UsagePage from "@/routes/usage";
 
 // Leaderboard pulls in a canvas pixel-office renderer + SSE — lazy-load it so
 // the dashboard bundle isn't burdened for users who never open the arena.
@@ -106,6 +107,7 @@ export default function App() {
               <Route path="workspace" element={<WorkspacePage />} />
               <Route path="billing" element={<BillingPage />} />
               <Route path="logs" element={<LogsPage />} />
+              <Route path="usage" element={<UsagePage />} />
               <Route path="console" element={<ConsolePage />} />
               <Route
                 path="admin/*"

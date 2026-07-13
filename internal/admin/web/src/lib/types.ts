@@ -101,6 +101,94 @@ export interface UserToken {
   // Priority-ordered credential-channel fallthrough list. Empty = use the
   // user's pricing group (legacy routing).
   groups?: string[];
+  // Which workspace this key bills. 0 / undefined = the owner's personal space.
+  workspace_id?: number;
+  // Free-form labels ("研发部", "前端"). Purely for grouping spend in reports —
+  // unlike `groups` they carry no routing meaning. Always an array from /tokens.
+  tags?: string[];
+}
+
+/* --- Spend analytics (/me/usage/*, /workspaces/:id/usage/*) --------------- */
+
+// One key's rollup. `email` / `user_id` are only populated in the team view.
+//
+// NOTE charge_events counts BILLABLE EVENTS, not requests: one call writes an
+// extra row per advisor sub-model and writes none at all when the cost rounds to
+// zero. Label it 计费笔数, never 请求数.
+export interface TokenSpend {
+  token_id: number;
+  name: string;
+  tags: string[];
+  user_id?: number;
+  email?: string;
+  deleted?: boolean;
+  spent_usd: number;
+  charge_events: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_create_tokens: number;
+  last_at?: number;
+}
+
+export interface ModelSpend {
+  model: string;
+  spent_usd: number;
+  charge_events: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_create_tokens: number;
+}
+
+export interface TagSpend {
+  tag: string;
+  spent_usd: number;
+  charge_events: number;
+  tokens: number;
+}
+
+// One calendar day (UTC). Zero-filled server-side, so the series is dense.
+export interface DaySpend {
+  day: string; // YYYY-MM-DD
+  spent_usd: number;
+  charge_events: number;
+}
+
+export interface UsageSummary {
+  range: { from: string; to: string };
+  total: {
+    spent_usd: number;
+    charge_events: number;
+    active_tokens: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_create_tokens: number;
+  };
+  by_token: TokenSpend[];
+  by_model: ModelSpend[];
+  by_tag: TagSpend[];
+  by_day: DaySpend[];
+  streak: { current_days: number; longest_days: number };
+}
+
+export interface SpendRow {
+  id: number;
+  created_at: number;
+  token_id: number;
+  token_name: string;
+  token_tags: string[];
+  email?: string;
+  model: string;
+  amount_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_create_tokens: number;
+  // false = a pre-v15 row whose key/model couldn't be recovered from the legacy
+  // ref. Its token counts are unknown (not zero).
+  attributed: boolean;
 }
 
 // Channel = a credential group with at least one usable (non-disabled,

@@ -238,17 +238,26 @@ func (h *Handler) listMemberTokens(c *gin.Context) {
 	}
 	out := make([]gin.H, 0, len(toks))
 	for _, t := range toks {
+		tags := t.Tags
+		if tags == nil {
+			tags = []string{}
+		}
 		out = append(out, gin.H{
 			"id": t.ID, "name": t.Name, "token_masked": maskToken(t.Token),
 			"monthly_usd_cap": t.MonthlyUSDCap, "admin_monthly_cap": t.AdminMonthlyCap,
 			"disabled": t.Disabled, "created_at": t.CreatedAt.Unix(),
+			"tags": tags,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"tokens": out})
 }
 
+// setTokenCapReq carries both space-admin-editable fields on a member's key. Tags
+// is a pointer so an omitted field means "leave the labels alone", distinct from
+// an explicit [] meaning "clear them".
 type setTokenCapReq struct {
-	AdminMonthlyCap float64 `json:"admin_monthly_cap"`
+	AdminMonthlyCap float64   `json:"admin_monthly_cap"`
+	Tags            *[]string `json:"tags"`
 }
 
 func (h *Handler) setTokenCap(c *gin.Context) {
@@ -259,6 +268,8 @@ func (h *Handler) setTokenCap(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
 	}
+	// Both writes are workspace-scoped at the SQL level, so a space admin can
+	// never reach a key bound to someone's personal space.
 	if err := h.DB.SetTokenAdminMonthlyCap(c.Request.Context(), tid, id, req.AdminMonthlyCap); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "token not in this workspace"})
@@ -266,6 +277,16 @@ func (h *Handler) setTokenCap(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if req.Tags != nil {
+		if err := h.DB.SetTokenTags(c.Request.Context(), tid, id, *req.Tags); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "token not in this workspace"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

@@ -233,7 +233,15 @@ func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provide
 	// ones. The clamped amount is what we record, so the request log and the
 	// wallet ledger stay in lockstep. The charge is attributed to info.UserID
 	// (the member who triggered it) for per-member usage/audit.
-	_, charged, err := a.DB.ChargeWorkspaceWithFloor(ctx, info.WorkspaceID, info.UserID, db.TxKindCharge, billed, ref, "", a.MaxOverdraftUSD)
+	_, charged, err := a.DB.ChargeWorkspaceWithFloor(ctx, info.WorkspaceID, info.UserID, db.TxKindCharge, billed, ref, "", a.MaxOverdraftUSD,
+		db.ChargeMeta{
+			TokenID:           info.TokenID,
+			Model:             model,
+			InputTokens:       counts.InputTokens,
+			OutputTokens:      counts.OutputTokens,
+			CacheReadTokens:   counts.CacheReadTokens,
+			CacheCreateTokens: counts.CacheCreateTokens,
+		})
 	if err != nil {
 		return 0, err
 	}
