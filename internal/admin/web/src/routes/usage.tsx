@@ -7,7 +7,7 @@ import { CountUp, GlassPanel, PageHeader, StatTile } from "@/components/app/page
 import { Pager } from "@/components/app/pager";
 import { SpendHeatmap } from "@/components/app/spend-heatmap";
 import { StreakFlame } from "@/components/app/streak-flame";
-import { ModelBreakdown, SpendTrend, TokenBreakdown } from "@/components/app/usage-charts";
+import { ModelBreakdown, SpendTrend, TokenComparison } from "@/components/app/usage-charts";
 import {
   defaultFilter,
   ExportButton,
@@ -63,6 +63,7 @@ export default function UsagePage() {
 
   const [filter, setFilter] = useState<UsageFilter>(defaultFilter);
   const [summary, setSummary] = useState<UsageSummary | null>(null);
+  const [universe, setUniverse] = useState<UsageSummary | null>(null);
   const [rows, setRows] = useState<SpendRow[]>([]);
   const [rowTotal, setRowTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -70,6 +71,13 @@ export default function UsagePage() {
   const [error, setError] = useState("");
 
   const query = usageQuery(filter);
+  // The filter controls (token / model / tag) and the token-comparison chart
+  // need the FULL set for the current date range — never the token/model/tag-
+  // narrowed set the main summary returns. Fetching summary filtered by token X
+  // makes by_token collapse to just X, which is what left the picker with only
+  // "all" + the one already chosen. So drive them from an unfiltered-by-facet
+  // fetch keyed on date + scope only, so picking a token doesn't refetch it.
+  const universeQuery = new URLSearchParams({ from: filter.from, to: filter.to }).toString();
 
   // Summary (charts + heatmap + streak). Debounced so dragging a date input
   // doesn't fire a request per keystroke.
@@ -91,6 +99,22 @@ export default function UsagePage() {
       clearTimeout(timer);
     };
   }, [basePath, query]);
+
+  // Token/model/tag universe for the current range + scope. Populates the
+  // filter dropdowns and the comparison chart with every key, independent of
+  // which one is currently selected.
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      apiGet<UsageSummary>(`${basePath}/summary?${universeQuery}`)
+        .then((d) => !cancelled && setUniverse(d))
+        .catch(() => {});
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [basePath, universeQuery]);
 
   // Detail rows follow the same filter, plus pagination.
   useEffect(() => {
@@ -161,9 +185,9 @@ export default function UsagePage() {
         <FilterBar
           value={filter}
           onChange={changeFilter}
-          tokens={summary?.by_token || []}
-          models={summary?.by_model || []}
-          tags={summary?.by_tag || []}
+          tokens={universe?.by_token || []}
+          models={universe?.by_model || []}
+          tags={universe?.by_tag || []}
           showMember={showMember}
         />
       </Reveal>
@@ -252,25 +276,24 @@ export default function UsagePage() {
         </GlassPanel>
       </Reveal>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Reveal>
-          <GlassPanel title={t("usage.chart.byToken")} description={t("usage.chart.byTokenSub")}>
-            <TokenBreakdown
-              tokens={summary?.by_token || []}
-              selectedTokenId={filter.tokenId}
-              showMember={showMember}
-              onSelectToken={(id) =>
-                changeFilter({ ...filter, tokenId: filter.tokenId === id ? undefined : id })
-              }
-            />
-          </GlassPanel>
-        </Reveal>
-        <Reveal>
-          <GlassPanel title={t("usage.chart.byModel")} description={t("usage.chart.byModelSub")}>
-            <ModelBreakdown models={summary?.by_model || []} />
-          </GlassPanel>
-        </Reveal>
-      </div>
+      <Reveal>
+        <GlassPanel title={t("usage.chart.byToken")} description={t("usage.chart.byTokenSub")}>
+          <TokenComparison
+            tokens={universe?.by_token || []}
+            selectedTokenId={filter.tokenId}
+            showMember={showMember}
+            onSelectToken={(id) =>
+              changeFilter({ ...filter, tokenId: filter.tokenId === id ? undefined : id })
+            }
+          />
+        </GlassPanel>
+      </Reveal>
+
+      <Reveal>
+        <GlassPanel title={t("usage.chart.byModel")} description={t("usage.chart.byModelSub")}>
+          <ModelBreakdown models={summary?.by_model || []} />
+        </GlassPanel>
+      </Reveal>
 
       <Reveal>
         <GlassPanel

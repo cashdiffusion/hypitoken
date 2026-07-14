@@ -1491,14 +1491,22 @@ export default {
     chart: {
       trend: "Spend over time",
       trendSub: "Daily spend (UTC)",
-      byToken: "By key",
-      byTokenSub: "Click a bar to filter by that key",
+      byToken: "Key comparison",
+      byTokenSub: "Compare what each key spent; click any row to view just that key",
       byModel: "By model",
       byModelSub: "Share of spend per model",
       others: "{{n}} others",
       totalSpend: "total",
       unknownModel: "unknown",
       empty: "No spend in this range",
+    },
+    compare: {
+      summary: "{{n}} keys · {{total}} total",
+      metric: {
+        spend: "Spend",
+        events: "Events",
+        tokens: "Tokens",
+      },
     },
     heatmap: {
       title: "Spend heatmap",

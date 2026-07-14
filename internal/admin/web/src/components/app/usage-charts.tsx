@@ -1,20 +1,12 @@
+import { motion } from "motion/react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from "recharts";
+import { Badge } from "@/components/ui/badge";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { categorySlots, categoryVar, spendConfig } from "@/lib/chart-theme";
 import type { DaySpend, ModelSpend, TokenSpend } from "@/lib/types";
-import { fmtUSD } from "@/lib/utils";
+import { cn, fmtCompact, fmtUSD } from "@/lib/utils";
 
 /* Charts for the spend dashboard.
  *
@@ -85,80 +77,136 @@ export function SpendTrend({ days }: { days: DaySpend[] }) {
   );
 }
 
-/* --- Spend by key --------------------------------------------------------- */
+/* --- Spend by key: cross-token comparison --------------------------------- */
 
-const TOP_N = 8;
-
-export interface TokenBreakdownProps {
+export interface TokenComparisonProps {
   tokens: TokenSpend[];
   selectedTokenId?: number;
   onSelectToken?: (tokenId: number) => void;
   showMember?: boolean;
 }
 
-/** Horizontal bars: key names are long and variable-length, so a vertical layout
- * would shred the x-axis labels. Clicking a bar filters the whole page to that
- * key — the fastest possible path to "what did THIS key cost me". */
-export function TokenBreakdown({
+type CompareMetric = "spend" | "events" | "tokens";
+const METRICS: CompareMetric[] = ["spend", "events", "tokens"];
+
+const tokenCount = (k: TokenSpend) =>
+  k.input_tokens + k.output_tokens + k.cache_read_tokens + k.cache_create_tokens;
+
+/** Ranked, side-by-side comparison of EVERY key in the range — the answer to
+ * "which of the keys I handed out cost what". Always shows the full set (not a
+ * top-N slice), scrolls when there are many, and lets you compare on three
+ * axes: money, billable events, or raw tokens. Clicking a row filters the whole
+ * page to that key, so comparison and drill-down share one control. Fed from
+ * the unfiltered-by-token universe, so selecting one key never hides the rest. */
+export function TokenComparison({
   tokens,
   selectedTokenId,
   onSelectToken,
   showMember,
-}: TokenBreakdownProps) {
+}: TokenComparisonProps) {
   const { t } = useTranslation();
-  if (tokens.length === 0) return <EmptyChart hint={t("usage.chart.empty")} />;
+  const [metric, setMetric] = useState<CompareMetric>("spend");
 
-  const top = tokens.slice(0, TOP_N);
-  const rest = tokens.slice(TOP_N);
-  const data = top.map((k) => ({
-    token_id: k.token_id,
-    label: labelFor(
-      k,
-      showMember,
-      t("usage.token.deleted", { id: k.token_id }),
-      t("usage.token.unattributed"),
-    ),
-    spent_usd: k.spent_usd,
-  }));
-  if (rest.length > 0) {
-    data.push({
-      token_id: -1,
-      label: t("usage.chart.others", { n: rest.length }),
-      spent_usd: rest.reduce((s, k) => s + k.spent_usd, 0),
-    });
-  }
+  const metricValue = (k: TokenSpend) =>
+    metric === "spend" ? k.spent_usd : metric === "events" ? k.charge_events : tokenCount(k);
+  const fmt = (n: number) => (metric === "spend" ? fmtUSD(n) : fmtCompact(Math.round(n)));
+
+  const ranked = [...tokens]
+    .sort((a, b) => metricValue(b) - metricValue(a))
+    .filter((k) => metricValue(k) > 0);
+  if (ranked.length === 0) return <EmptyChart hint={t("usage.chart.empty")} />;
+
+  const max = metricValue(ranked[0]) || 1;
+  const grand = ranked.reduce((s, k) => s + metricValue(k), 0);
 
   return (
-    <ChartContainer config={spendConfig} className={CHART_CLASS}>
-      <BarChart data={data} layout="vertical" margin={{ left: 4, right: 16 }}>
-        <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-border/50" />
-        <XAxis type="number" hide />
-        <YAxis
-          type="category"
-          dataKey="label"
-          tickLine={false}
-          axisLine={false}
-          width={130}
-          className="text-xs"
-          tickFormatter={(v: string) => (v.length > 18 ? `${v.slice(0, 17)}…` : v)}
-        />
-        <ChartTooltip
-          cursor={false}
-          content={<ChartTooltipContent valueFormatter={(v) => fmtUSD(Number(v))} />}
-        />
-        <Bar dataKey="spent_usd" radius={[0, 6, 6, 0]} isAnimationActive>
-          {data.map((d) => (
-            <Cell
-              key={d.token_id}
-              fill="var(--color-spent_usd)"
-              fillOpacity={selectedTokenId && selectedTokenId !== d.token_id ? 0.35 : 1}
-              cursor={d.token_id > 0 ? "pointer" : "default"}
-              onClick={() => d.token_id > 0 && onSelectToken?.(d.token_id)}
-            />
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">
+          {t("usage.compare.summary", { n: ranked.length, total: fmt(grand) })}
+        </span>
+        <div className="flex items-center gap-0.5 rounded-full bg-muted/60 p-0.5">
+          {METRICS.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMetric(m)}
+              className={cn(
+                "relative rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                metric === m
+                  ? "text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {metric === m && (
+                <motion.span
+                  layoutId="usage-compare-metric"
+                  className="absolute inset-0 rounded-full bg-primary"
+                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                />
+              )}
+              <span className="relative z-10">{t(`usage.compare.metric.${m}`)}</span>
+            </button>
           ))}
-        </Bar>
-      </BarChart>
-    </ChartContainer>
+        </div>
+      </div>
+
+      <div className="max-h-[420px] space-y-1 overflow-y-auto pr-1">
+        {ranked.map((k, i) => {
+          const v = metricValue(k);
+          const pct = grand > 0 ? (v / grand) * 100 : 0;
+          const active = selectedTokenId === k.token_id;
+          const dimmed = selectedTokenId != null && !active;
+          const clickable = k.token_id > 0;
+          return (
+            <button
+              key={k.token_id}
+              type="button"
+              disabled={!clickable}
+              onClick={() => clickable && onSelectToken?.(k.token_id)}
+              className={cn(
+                "flex w-full flex-col gap-1 rounded-lg px-2.5 py-2 text-left transition-colors",
+                clickable && "hover:bg-muted/60",
+                active && "bg-primary/10 ring-1 ring-primary/30",
+                dimmed && "opacity-55",
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <span className="w-5 shrink-0 text-center font-mono text-xs text-muted-foreground">
+                  {i + 1}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                  {labelFor(
+                    k,
+                    showMember,
+                    t("usage.token.deleted", { id: k.token_id }),
+                    t("usage.token.unattributed"),
+                  )}
+                </span>
+                {k.tags?.slice(0, 2).map((tag) => (
+                  <Badge key={tag} variant="outline" className="hidden text-[10px] sm:inline-flex">
+                    {tag}
+                  </Badge>
+                ))}
+                <span className="shrink-0 font-mono text-sm tabular-nums">{fmt(v)}</span>
+                <span className="w-11 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+                  {pct.toFixed(1)}%
+                </span>
+              </div>
+              <div className="ml-7 h-2 overflow-hidden rounded-full bg-muted">
+                <motion.div
+                  className="h-full rounded-full bg-primary"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${(v / max) * 100}%` }}
+                  transition={{ type: "spring", stiffness: 120, damping: 20 }}
+                  style={{ opacity: active ? 1 : selectedTokenId != null ? 0.5 : 0.85 }}
+                />
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

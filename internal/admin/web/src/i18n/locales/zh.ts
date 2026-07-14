@@ -1455,14 +1455,22 @@ export default {
     chart: {
       trend: "花费趋势",
       trendSub: "每日花费（UTC）",
-      byToken: "按令牌",
-      byTokenSub: "点击柱条可筛选该令牌",
+      byToken: "令牌对比",
+      byTokenSub: "对比每个令牌的消耗；点击任意一行可只看该令牌",
       byModel: "按模型",
       byModelSub: "各模型花费占比",
       others: "其他 {{n}} 个",
       totalSpend: "总花费",
       unknownModel: "未知模型",
       empty: "该区间内没有花费记录",
+    },
+    compare: {
+      summary: "共 {{n}} 个令牌 · 合计 {{total}}",
+      metric: {
+        spend: "花费",
+        events: "计费笔数",
+        tokens: "Tokens",
+      },
     },
     heatmap: {
       title: "花费热力图",
