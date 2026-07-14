@@ -382,21 +382,6 @@ type deferredResponse struct {
 	authID string
 }
 
-// replayDeferred writes a withheld upstream error response to the client,
-// honouring the same hop-by-hop header filter as writeResponseHeaders.
-func replayDeferred(c *gin.Context, d *deferredResponse) {
-	for k, vs := range d.header {
-		if hopHeaders[http.CanonicalHeaderKey(k)] {
-			continue
-		}
-		for _, v := range vs {
-			c.Writer.Header().Add(k, v)
-		}
-	}
-	c.Writer.WriteHeader(d.status)
-	_, _ = c.Writer.Write(d.body)
-}
-
 func copySafeRetryHeaders(c *gin.Context, h http.Header) {
 	for _, key := range []string{"Retry-After", "X-RateLimit-Reset"} {
 		if value := h.Get(key); value != "" {
@@ -706,18 +691,34 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 			}
 		case resp.StatusCode == 401 || resp.StatusCode == 403:
 			retryable = true
-			// On 401, a body of {"type":"authentication_error", ...} or
-			// "Invalid authentication credentials" means Anthropic has
-			// definitively rejected this credential. For OAuth we just
-			// refreshed the access token before this call, so a 401 here
-			// is not a transient token-expiry — the underlying account
-			// has been revoked or had its Opus/Sonnet entitlements
-			// stripped. The default 60s cooldown just lets the credential
-			// cycle back into rotation a minute later and 401 the next
-			// random customer, so promote to sticky hard-failure instead.
+			// A 401 with body {"type":"authentication_error", ...} /
+			// "Invalid authentication credentials" is Anthropic rejecting this
+			// credential — but a SINGLE one is almost never a dead account. A
+			// proactive EnsureFresh mints a new access token and Anthropic
+			// invalidates the old one server-side the instant refresh
+			// completes; any request that captured the old bearer and is still
+			// on the wire during that ~1-2s rotation window comes back 401. On
+			// a busy account (many client tokens, always some request in
+			// flight) every refresh orphans one or a few requests this way —
+			// all transient, all followed by successes on the fresh token.
+			// Immediately hard-disabling on the first such 401 (as we used to)
+			// took healthy paying subscriptions offline until a manual
+			// re-login. Instead cooldown-and-retry per strike and let the
+			// dedicated Consecutive401s accumulator promote to a sticky
+			// hard-failure only after a sustained run with no intervening
+			// success (auth401HardFailureThreshold). A genuinely revoked
+			// refresh token is still caught earlier and authoritatively by the
+			// refresh path's invalid_grant hard-failure.
 			if resp.StatusCode == 401 && isDefinitiveAuthRejection(errBody) {
-				a.MarkHardFailure(fmt.Sprintf("upstream 401 authentication rejected: %s", truncate(errBody, 200)))
-				log.Warnf("auth: %s hard-disabled — definitive 401 authentication rejection", a.ID)
+				n := a.MarkAuthRejection(fmt.Sprintf("upstream 401 authentication rejected: %s", truncate(errBody, 200)))
+				if a.IsHardFailed() {
+					log.Warnf("auth: %s hard-disabled — %d consecutive 401s with no success (presumed revoked)", a.ID, n)
+				} else {
+					// Transient (token-rotation race). Short cooldown so it steps
+					// out of rotation briefly, then self-recovers on the fresh token.
+					s.pool.ReportUpstreamError(a, resp.StatusCode, time.Time{})
+					log.Warnf("auth: %s transient 401 (rotation race, strike %d) — cooldown + retry", a.ID, n)
+				}
 			} else {
 				resetAt := parseRetryAfter(resp.Header)
 				s.pool.ReportUpstreamError(a, resp.StatusCode, resetAt)

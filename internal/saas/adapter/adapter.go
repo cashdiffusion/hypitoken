@@ -183,8 +183,8 @@ func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *serv
 	return nil
 }
 
-func capError(code, message string, spent, cap float64) *server.PreCheckError {
-	return &server.PreCheckError{Status: http.StatusTooManyRequests, Code: code, Message: message, Details: map[string]any{"spent_usd": spent, "limit_usd": cap}}
+func capError(code, message string, spent, limit float64) *server.PreCheckError {
+	return &server.PreCheckError{Status: http.StatusTooManyRequests, Code: code, Message: message, Details: map[string]any{"spent_usd": spent, "limit_usd": limit}}
 }
 
 // effectiveMonthlyCap folds the owner's self-set per-token monthly cap with any
