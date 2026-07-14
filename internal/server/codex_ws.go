@@ -42,7 +42,18 @@ const (
 	// upstream frame is relayed to the client the credential is locked (no
 	// silent switch is possible after bytes are committed to the client).
 	codexWSMaxAcquire = 4
+	// codexWSBillQueue is the per-session buffer of completed turns awaiting
+	// asynchronous settlement. Deep enough that a slow SaaS write never
+	// back-pressures the relay in practice; a full queue falls back to inline
+	// billing rather than dropping a charge.
+	codexWSBillQueue = 64
 )
+
+// codexWSTurnBill is one completed WS turn queued for asynchronous settlement.
+type codexWSTurnBill struct {
+	turn usage.Counts
+	dur  time.Duration
+}
 
 var codexWSUpgrader = gorillaws.Upgrader{
 	ReadBufferSize:    4096,
@@ -113,6 +124,29 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	}
 
 	slotID := clientSlotID(c)
+
+	// Fair-share gate on pool slots. A WS session holds its slot for the whole
+	// life of the socket (chatgpt.com keeps these open up to an hour), unlike an
+	// HTTP request which holds one for seconds — so without this a couple of
+	// heavy WS users sit on most of the provider's slot capacity and everyone
+	// else gets "no credentials available" from a healthy fleet. Refuse only
+	// slots this token does not already hold, so an established session is never
+	// torn down. Checked before the upgrade, while an HTTP status can still be
+	// returned.
+	if maxSess := s.cfg.ClientMaxSessions; maxSess > 0 && clientToken != "" {
+		if held, already := s.pool.SessionsHeld(provider, clientToken, slotID); !already && held >= maxSess {
+			log.Warnf("codex ws: token %s at its session cap (%d held, max %d) — refusing a new session",
+				maskClientToken(clientToken), held, maxSess)
+			c.Header("Retry-After", "30")
+			writeAPIError(c, provider, APIError{
+				Status:  http.StatusTooManyRequests,
+				Code:    "api_key_session_limit_exceeded",
+				Message: "You already have too many concurrent Codex sessions open. Close an idle Codex window and retry — long-lived sessions hold an upstream slot for up to an hour.",
+				Details: map[string]any{"held": held, "max_sessions": maxSess},
+			})
+			return
+		}
+	}
 
 	// Upgrade the client connection. Past this point no HTTP status can be sent;
 	// failures close the WS with a control frame.
@@ -238,9 +272,47 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	}
 
 	var counts usage.Counts
-	s.pumpCodexWS(c.Request.Context(), clientConn, up, a, clientGroup, &counts)
+	// Bill each turn as it completes, not once at the end: a WS session can run
+	// for an hour and hundreds of turns, and deferring settlement to the close
+	// makes the credential's cost lag its real upstream usage (the quota % ticks
+	// up live while total cost sits still) and loses the whole session's billing
+	// outright if the process restarts mid-stream.
+	//
+	// Settlement is asynchronous (matches sub2api): a single per-session goroutine
+	// drains a buffered channel and runs the billing funnel (pricing + SaaS DB
+	// write + request log) off the relay's hot path, so a slow charge never
+	// stalls the next turn's forwarding. The channel is drained (not abandoned)
+	// on close, so a normal disconnect loses nothing; only an outright process
+	// crash can drop turns still queued — the same trade sub2api's worker pool
+	// makes.
+	billCh := make(chan codexWSTurnBill, codexWSBillQueue)
+	var billWG sync.WaitGroup
+	billWG.Add(1)
+	go func() {
+		defer billWG.Done()
+		for tb := range billCh {
+			s.billCodexWSTurn(c, a, model, clientToken, clientName, tb.turn, tb.dur)
+		}
+	}()
+	billTurn := func(turn usage.Counts, dur time.Duration) {
+		tb := codexWSTurnBill{turn: turn, dur: dur}
+		select {
+		case billCh <- tb:
+		default:
+			s.billCodexWSTurn(c, a, model, clientToken, clientName, tb.turn, tb.dur)
+		}
+	}
+	s.pumpCodexWS(c.Request.Context(), clientConn, up, a, clientGroup, &counts, billTurn)
+	close(billCh)
+	billWG.Wait() // drain every queued turn before the request returns
 
-	s.billCodexWS(c, a, model, clientToken, clientName, &counts, start)
+	// Per-turn already settled cost + client billing + request log for each turn.
+	// Fold the session's full token totals into the auth ledger once here (drives
+	// load-balancing weight + the credential's token display); cost is zero to
+	// avoid double-charging.
+	if counts.InputTokens > 0 || counts.OutputTokens > 0 || counts.CacheReadTokens > 0 || counts.CacheCreateTokens > 0 {
+		s.usage.Record(a.ID, a.Label, counts)
+	}
 	if counts.Requests > 0 {
 		a.MarkSuccess()
 	}
@@ -251,7 +323,7 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 // upstream->client direction; the cross-group previous_response_id rewrite is
 // applied on the client->upstream direction for follow-up turns. Both relay
 // goroutines are joined before returning so counts is safe for billing.
-func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up codexws.Conn, a *auth.Auth, group string, counts *usage.Counts) {
+func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up codexws.Conn, a *auth.Auth, group string, counts *usage.Counts, onTurn func(turn usage.Counts, dur time.Duration)) {
 	done := make(chan struct{})
 	var once sync.Once
 	stop := func() {
@@ -269,6 +341,11 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 	go func() {
 		defer wg.Done()
 		defer stop()
+		// billed tracks the token totals already settled via onTurn, so each
+		// terminal event bills only its own turn's delta. turnStart bounds the
+		// per-turn duration reported to the request log.
+		var billed usage.Counts
+		turnStart := time.Now()
 		for {
 			_ = up.SetReadDeadline(time.Now().Add(codexWSReadDeadline))
 			mt, data, err := up.ReadMessage()
@@ -282,6 +359,12 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 				counts.Add(extractCodexBackendUsageFromJSON(data))
 				if codexTerminalEvent(data) {
 					counts.Requests++
+					if onTurn != nil {
+						onTurn(codexTurnDelta(*counts, billed), time.Since(turnStart))
+						billed = *counts
+						billed.Requests = 0 // Requests isn't part of the token delta
+						turnStart = time.Now()
+					}
 				}
 			}
 			_ = client.SetWriteDeadline(time.Now().Add(codexWSWriteDeadline))
@@ -338,16 +421,35 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 // -> SaaS Charge (group×provider multiplier) -> usage ledger -> request log. A
 // multi-turn WS connection accumulates one Requests increment per terminal
 // event, so counts already reflects every billed turn.
-func (s *Server) billCodexWS(c *gin.Context, a *auth.Auth, model, clientToken, clientName string, counts *usage.Counts, start time.Time) {
-	s.usage.Record(a.ID, a.Label, *counts)
+// codexTurnDelta returns the tokens consumed since the last settled turn —
+// cur (running session total) minus billed (total already settled) — tagged as
+// one request. Keeping this a pure function makes the "each turn bills only its
+// own delta, never the running total" invariant directly testable.
+func codexTurnDelta(cur, billed usage.Counts) usage.Counts {
+	return usage.Counts{
+		InputTokens:       cur.InputTokens - billed.InputTokens,
+		OutputTokens:      cur.OutputTokens - billed.OutputTokens,
+		CacheCreateTokens: cur.CacheCreateTokens - billed.CacheCreateTokens,
+		CacheReadTokens:   cur.CacheReadTokens - billed.CacheReadTokens,
+		Requests:          1,
+	}
+}
+
+// billCodexWSTurn settles one completed WS turn through the same funnel as the
+// HTTP Codex path. turn carries just this turn's tokens with Requests==1. The
+// auth's own token ledger is NOT touched here — it is folded in once for the
+// whole session when the socket closes, so per-turn settlement never
+// double-counts it. One request-log row is emitted per turn, so the admin panel
+// shows each turn's real cost as it happens rather than one hour-long row.
+func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToken, clientName string, turn usage.Counts, dur time.Duration) {
 	var costUSD float64
 	var userID int64
 	var multiplier float64
-	if counts.Requests > 0 && clientToken != "" {
-		official := s.pricing.Cost(auth.ProviderOpenAI, model, *counts)
+	if turn.Requests > 0 && clientToken != "" {
+		official := s.pricing.Cost(auth.ProviderOpenAI, model, turn)
 		costUSD = official
 		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
-			billed, err := s.saas.Charge(c.Request.Context(), info, auth.ProviderOpenAI, model, *counts, official)
+			billed, err := s.saas.Charge(c.Request.Context(), info, auth.ProviderOpenAI, model, turn, official)
 			if err != nil {
 				log.Warnf("saas: ws charge failed for token user=%d: %v", info.UserID, err)
 			} else {
@@ -356,7 +458,7 @@ func (s *Server) billCodexWS(c *gin.Context, a *auth.Auth, model, clientToken, c
 				multiplier = s.saas.MultiplierFor(info, auth.ProviderOpenAI)
 			}
 		}
-		s.usage.RecordClient(clientToken, clientName, *counts, costUSD)
+		s.usage.RecordClient(clientToken, clientName, turn, costUSD)
 	}
 	s.emitLog(requestlog.Record{
 		Client:      clientName,
@@ -366,14 +468,14 @@ func (s *Server) billCodexWS(c *gin.Context, a *auth.Auth, model, clientToken, c
 		AuthLabel:   a.Label,
 		AuthKind:    "oauth",
 		Model:       model,
-		Input:       counts.InputTokens,
-		Output:      counts.OutputTokens,
-		CacheRead:   counts.CacheReadTokens,
+		Input:       turn.InputTokens,
+		Output:      turn.OutputTokens,
+		CacheRead:   turn.CacheReadTokens,
 		CostUSD:     costUSD,
 		UserID:      userID,
 		Multiplier:  multiplier,
 		Status:      200,
-		DurationMs:  time.Since(start).Milliseconds(),
+		DurationMs:  dur.Milliseconds(),
 		Stream:      true,
 		Path:        "/v1/responses",
 	})

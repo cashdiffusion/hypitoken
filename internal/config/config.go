@@ -119,6 +119,19 @@ type Config struct {
 	// 0 = unlimited. Per-token overrides take precedence.
 	ClientMaxConcurrent int `yaml:"client_max_concurrent"`
 
+	// Maximum pool slots one client token may hold at once for a single
+	// provider. 0 = unlimited.
+	//
+	// A fair-share cap, distinct from ClientMaxConcurrent. A pool slot is what a
+	// credential's max_concurrent rations, and slots are held for very unequal
+	// durations: an HTTP request holds one for seconds, but a codex-tui
+	// WebSocket session holds one for as long as the socket is open — chatgpt.com
+	// keeps those alive up to an hour. Without this a couple of WS users can sit
+	// on most of a provider's slot capacity and everyone else gets "no
+	// credentials available" from a healthy fleet. Only NEW slots are refused; a
+	// session already holding one keeps working.
+	ClientMaxSessions int `yaml:"client_max_sessions"`
+
 	// Default sliding-window requests-per-minute cap per client token.
 	// 0 = unlimited. Per-token overrides take precedence.
 	ClientRPM int `yaml:"client_rpm"`
