@@ -494,6 +494,20 @@ export default {
       step3Run: "3. 运行",
       yourToken: "你的令牌：",
     },
+    onboarding: {
+      oneClick: "一键接入",
+      oneClickHint:
+        "CC Switch 会自动帮你写好客户端配置，无需手动改文件。需先安装 CC Switch 桌面版。",
+      openInCCSwitch: "在 CC Switch 中打开",
+      orManual: "或手动配置",
+      step2Env: "环境变量（当前终端）",
+      step2EnvHint: "粘贴到终端执行，然后在同一个会话里运行 claude。",
+      step2File: "或写入配置文件（持久）",
+      step2FileHint: "重开终端也生效。",
+      cherryTitle: "聊天客户端",
+      cherryHint: "将本网关作为 OpenAI 兼容供应商导入 Cherry Studio。",
+      importToCherry: "导入到 Cherry Studio",
+    },
   },
 
   billing: {

@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { GlassPanel, PageHeader } from "@/components/app/page-primitives";
 import { TagInput } from "@/components/app/tag-input";
+import { ClientOnboarding, type OnboardingLabels } from "@/components/client-onboarding";
 import { Reveal } from "@/components/landing/reveal";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -45,7 +46,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import type { Channel, UserToken } from "@/lib/types";
@@ -453,125 +453,34 @@ function CopyBtn({ text }: { text: string }) {
   );
 }
 
-function CodeBlock({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false);
-  // min-w-0 + w-full lets this shrink inside CSS grid/flex parents instead of
-  // sizing to its widest line and pushing the parent dialog past max-width.
-  return (
-    <div className="relative mt-3 w-full min-w-0 rounded-lg border border-border bg-[#0d1117]">
-      <button
-        type="button"
-        onClick={async () => {
-          await copyToClipboard(code);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        }}
-        className="absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs text-zinc-400 transition-colors hover:bg-white/10 hover:text-white"
-      >
-        {copied ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
-        {copied ? "Copied" : "Copy"}
-      </button>
-      <pre className="overflow-x-auto px-4 py-4 pr-16 font-mono text-xs leading-relaxed text-zinc-200">
-        {code}
-      </pre>
-    </div>
-  );
+/** i18n → OnboardingLabels for the shared client-onboarding panel. */
+function useOnboardingLabels(): OnboardingLabels {
+  const { t } = useTranslation();
+  return {
+    oneClick: t("tokens.onboarding.oneClick"),
+    oneClickHint: t("tokens.onboarding.oneClickHint"),
+    openInCCSwitch: t("tokens.onboarding.openInCCSwitch"),
+    orManual: t("tokens.onboarding.orManual"),
+    step1Install: t("tokens.useTokenDialog.step1Install"),
+    step2Config: t("tokens.useTokenDialog.step2Config"),
+    step2Env: t("tokens.onboarding.step2Env"),
+    step2EnvHint: t("tokens.onboarding.step2EnvHint"),
+    step2File: t("tokens.onboarding.step2File"),
+    step2FileHint: t("tokens.onboarding.step2FileHint"),
+    step3Run: t("tokens.useTokenDialog.step3Run"),
+    cherryTitle: t("tokens.onboarding.cherryTitle"),
+    cherryHint: t("tokens.onboarding.cherryHint"),
+    importToCherry: t("tokens.onboarding.importToCherry"),
+    yourToken: t("tokens.useTokenDialog.yourToken"),
+    copy: t("common.copy"),
+    copied: t("common.copied"),
+  };
 }
 
 function UseTokenDialog({ token, onClose }: { token: UserToken | null; onClose: () => void }) {
   const { t } = useTranslation();
-  const defaultOS = detectOS();
-  const [os, setOS] = useState<"macOS" | "Windows" | "Linux">(defaultOS);
-
+  const labels = useOnboardingLabels();
   const tk = token?.token ?? "";
-
-  const claudeCodeConfig = {
-    macOS: `mkdir -p ~/.claude
-cat > ~/.claude/settings.json <<'EOF'
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "https://api.novadiffusion.com",
-    "ANTHROPIC_AUTH_TOKEN": "${tk}"
-  }
-}
-EOF`,
-    Windows: `New-Item -ItemType Directory -Force "$env:USERPROFILE\\.claude"
-@'
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "https://api.novadiffusion.com",
-    "ANTHROPIC_AUTH_TOKEN": "${tk}"
-  }
-}
-'@ | Set-Content "$env:USERPROFILE\\.claude\\settings.json"`,
-    Linux: `mkdir -p ~/.claude
-cat > ~/.claude/settings.json <<'EOF'
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "https://api.novadiffusion.com",
-    "ANTHROPIC_AUTH_TOKEN": "${tk}"
-  }
-}
-EOF`,
-  };
-
-  const claudeCodeInstall = {
-    macOS: `curl -fsSL https://claude.ai/install.sh | bash`,
-    Windows: `irm https://claude.ai/install.ps1 | iex`,
-    Linux: `curl -fsSL https://claude.ai/install.sh | bash`,
-  };
-
-  const codexConfigToml = `model_provider = "hypitoken"
-
-[model_providers.hypitoken]
-name = "HypiToken"
-base_url = "https://api.novadiffusion.com/v1"
-wire_api = "responses"
-requires_openai_auth = true`;
-
-  const codexAuthJson = {
-    macOS: `mkdir -p ~/.codex
-cat > ~/.codex/config.toml <<'EOF'
-${codexConfigToml}
-EOF
-cat > ~/.codex/auth.json <<'EOF'
-{ "OPENAI_API_KEY": "${tk}" }
-EOF
-chmod 600 ~/.codex/auth.json`,
-    Windows: `# In WSL2 (recommended):
-mkdir -p ~/.codex
-cat > ~/.codex/config.toml <<'EOF'
-${codexConfigToml}
-EOF
-cat > ~/.codex/auth.json <<'EOF'
-{ "OPENAI_API_KEY": "${tk}" }
-EOF
-chmod 600 ~/.codex/auth.json
-
-# Or in native PowerShell:
-New-Item -ItemType Directory -Force "$env:USERPROFILE\\.codex"
-Set-Content "$env:USERPROFILE\\.codex\\config.toml" @'
-${codexConfigToml}
-'@
-Set-Content "$env:USERPROFILE\\.codex\\auth.json" '{ "OPENAI_API_KEY": "${tk}" }'`,
-    Linux: `mkdir -p ~/.codex
-cat > ~/.codex/config.toml <<'EOF'
-${codexConfigToml}
-EOF
-cat > ~/.codex/auth.json <<'EOF'
-{ "OPENAI_API_KEY": "${tk}" }
-EOF
-chmod 600 ~/.codex/auth.json`,
-  };
-
-  const codexInstall = {
-    macOS: `npm install -g @openai/codex`,
-    Windows: `# WSL2 (recommended):
-wsl --install
-# Then inside Ubuntu:
-npm install -g @openai/codex`,
-    Linux: `npm install -g @openai/codex`,
-  };
 
   return (
     <Dialog open={!!token} onOpenChange={(o) => !o && onClose()}>
@@ -589,86 +498,13 @@ npm install -g @openai/codex`,
           <DialogDescription>{t("tokens.useTokenDialog.sub")}</DialogDescription>
         </DialogHeader>
 
-        {/* OS selector */}
-        <div className="flex gap-2 pt-1">
-          {(["macOS", "Windows", "Linux"] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setOS(s)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                os === s
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-
-        {/* Tool selector */}
-        <Tabs defaultValue="claude-code" className="mt-2 min-w-0">
-          <TabsList className="w-full">
-            <TabsTrigger value="claude-code" className="flex-1">
-              Claude Code
-            </TabsTrigger>
-            <TabsTrigger value="codex" className="flex-1">
-              Codex CLI
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Claude Code */}
-          <TabsContent value="claude-code" className="space-y-4 pt-2 min-w-0">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">
-                {t("tokens.useTokenDialog.step1Install")}
-              </p>
-              <CodeBlock code={claudeCodeInstall[os]} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">
-                {t("tokens.useTokenDialog.step2Config")}
-              </p>
-              <CodeBlock code={claudeCodeConfig[os]} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">
-                {t("tokens.useTokenDialog.step3Run")}
-              </p>
-              <CodeBlock code="claude" />
-            </div>
-          </TabsContent>
-
-          {/* Codex CLI */}
-          <TabsContent value="codex" className="space-y-4 pt-2 min-w-0">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">
-                {t("tokens.useTokenDialog.step1Install")}
-              </p>
-              <CodeBlock code={codexInstall[os]} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">
-                {t("tokens.useTokenDialog.step2Config")}
-              </p>
-              <CodeBlock code={codexAuthJson[os]} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-muted-foreground">
-                {t("tokens.useTokenDialog.step3Run")}
-              </p>
-              <CodeBlock code="codex" />
-            </div>
-          </TabsContent>
-        </Tabs>
-
-        <div className="min-w-0 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-          <div className="font-medium text-foreground">{t("tokens.useTokenDialog.yourToken")}</div>
-          <code className="mt-1 block w-full overflow-x-auto rounded bg-muted px-1.5 py-0.5 font-mono">
-            {tk}
-          </code>
-        </div>
+        {token && (
+          <ClientOnboarding
+            config={{ token: tk, baseUrl: window.location.origin, providerName: "HypiToken" }}
+            labels={labels}
+            initialOS={detectOS()}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

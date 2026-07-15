@@ -513,6 +513,20 @@ export default {
       step3Run: "3. Run",
       yourToken: "Your token:",
     },
+    onboarding: {
+      oneClick: "One-click setup",
+      oneClickHint:
+        "CC Switch writes the client config for you — no manual file editing. Requires the CC Switch desktop app.",
+      openInCCSwitch: "Open in CC Switch",
+      orManual: "or configure manually",
+      step2Env: "Environment variables (this shell)",
+      step2EnvHint: "Paste into your terminal, then run claude in the same session.",
+      step2File: "Or persist to the config file",
+      step2FileHint: "Survives new terminals.",
+      cherryTitle: "Chat client",
+      cherryHint: "Import this gateway into Cherry Studio as an OpenAI-compatible provider.",
+      importToCherry: "Import to Cherry Studio",
+    },
   },
 
   billing: {
