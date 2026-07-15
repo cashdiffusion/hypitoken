@@ -150,6 +150,7 @@ func (h *Handler) Register(r *gin.Engine) {
 		api.POST("/apikeys", h.handleCreateAPIKey)
 		api.POST("/auths/:id/anthropic-usage", h.handleAnthropicUsage)
 		api.POST("/auths/:id/codex-usage", h.handleCodexUsage)
+		api.POST("/auths/:id/reset-codex-credit", h.handleResetCodexCredit)
 		api.GET("/requests", h.handleRequestsQuery)
 		api.GET("/requests/clients", h.handleRequestsClients)
 		api.GET("/requests/hourly", h.handleRequestsHourly)
@@ -1167,6 +1168,40 @@ func (h *Handler) handleCodexUsage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"usage": info})
 }
 
+// handleResetCodexCredit consumes one Codex rate-limit reset credit (the "quota
+// reset card") for an OpenAI OAuth credential, immediately resetting the
+// account's rolling rate-limit window(s) instead of waiting for the natural
+// reset. It burns one of the account's finite reset credits.
+//
+// After a successful redeem we re-probe wham/usage so the response carries the
+// refreshed available_count and reset windows, letting the UI update in one
+// round trip. A usage-refresh failure is non-fatal — the reset already
+// succeeded, so we still return 200 with the reset result and omit usage.
+func (h *Handler) handleResetCodexCredit(c *gin.Context) {
+	id := c.Param("id")
+	a := h.pool.FindByID(id)
+	if a == nil || a.Kind != auth.KindOAuth {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "oauth credential not found"})
+		return
+	}
+	if auth.NormalizeProvider(a.Provider) != auth.ProviderOpenAI {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "reset-codex-credit endpoint is OpenAI-only"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	result, err := a.ResetCodexCredit(ctx, h.pool.UseUTLS())
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	resp := gin.H{"reset": result}
+	if usage, uerr := a.FetchCodexUsage(ctx, h.pool.UseUTLS()); uerr == nil {
+		resp["usage"] = usage
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 // ---- request log query ----
 
 func (h *Handler) handleRequestsHourly(c *gin.Context) {
@@ -1686,6 +1721,7 @@ func (h *Handler) RegisterSaaSBridge(g *gin.RouterGroup) {
 	g.GET("/requests/hourly", h.handleRequestsHourly)
 	g.POST("/credentials/:id/anthropic-usage", h.handleAnthropicUsage)
 	g.POST("/credentials/:id/codex-usage", h.handleCodexUsage)
+	g.POST("/credentials/:id/reset-codex-credit", h.handleResetCodexCredit)
 	// Rich credential read + mutations. Mirrors the legacy /summary fields so
 	// the SaaS panel can render the same usage / quota / model_map / sparkline
 	// data that the operator panel does. The saas/admin CredHandler still owns

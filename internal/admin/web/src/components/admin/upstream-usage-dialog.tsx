@@ -1,4 +1,4 @@
-import { Gauge, RefreshCw } from "lucide-react";
+import { Gauge, RefreshCw, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -91,6 +91,23 @@ interface CodexUsageResponse {
     // can't break rendering.
     rate_limit_reached_type?: string | Record<string, unknown> | null;
   };
+}
+
+// Response of POST /credentials/:id/reset-codex-credit. usage is the refreshed
+// wham/usage snapshot taken right after the redeem (absent if that follow-up
+// probe failed — the reset itself still succeeded).
+interface CodexResetResponse {
+  reset?: {
+    code?: string;
+    windows_reset?: number;
+    credit?: {
+      reset_type?: string;
+      status?: string;
+      redeemed_at?: string;
+      expires_at?: string;
+    };
+  };
+  usage?: CodexUsageResponse["usage"];
 }
 
 // fmtWindowSeconds turns a limit_window_seconds value into a human label
@@ -266,6 +283,7 @@ export function UpstreamUsageDialog({ authId, authLabel, provider = "anthropic",
         </DialogHeader>
         {provider === "openai" ? (
           <CodexUsageBody
+            authId={authId}
             data={data as CodexUsageResponse | null}
             busy={busy}
             err={err}
@@ -380,23 +398,50 @@ function AnthropicUsageBody({
 }
 
 function CodexUsageBody({
+  authId,
   data,
   busy,
   err,
   onRefresh,
 }: {
+  authId: string | null;
   data: CodexUsageResponse | null;
   busy: boolean;
   err: string;
   onRefresh: () => void;
 }) {
   const { t } = useTranslation();
+  const [resetting, setResetting] = useState(false);
+  const [resetMsg, setResetMsg] = useState("");
+  const [resetErr, setResetErr] = useState("");
   const u = data?.usage;
   const rl = u?.rate_limit;
   const credits = u?.credits;
   const spend = u?.spend_control;
-  const resetCredits = u?.rate_limit_reset_credits?.available_count;
+  const resetCredits = u?.rate_limit_reset_credits?.available_count ?? 0;
   const windows = collectCodexWindows(u);
+
+  // Consume one rate-limit reset credit. Irreversible (burns a card), so we
+  // confirm first, then re-query usage via onRefresh so the countdowns and the
+  // remaining-credit count both update.
+  const doReset = async () => {
+    if (!authId || resetting || resetCredits <= 0) return;
+    if (!window.confirm(t("legacy.upstreamUsage.resetConfirm", { n: resetCredits }))) return;
+    setResetting(true);
+    setResetMsg("");
+    setResetErr("");
+    try {
+      const d = await apiPost<CodexResetResponse>(
+        `/admin/credentials/${encodeURIComponent(authId)}/reset-codex-credit`,
+      );
+      setResetMsg(t("legacy.upstreamUsage.resetDone", { n: d.reset?.windows_reset ?? 0 }));
+      onRefresh();
+    } catch (e) {
+      setResetErr(errMsg(e, String(e)));
+    } finally {
+      setResetting(false);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -479,9 +524,29 @@ function CodexUsageBody({
         </div>
       )}
 
-      {typeof resetCredits === "number" && resetCredits > 0 && (
-        <div className="text-xs text-muted-foreground">
-          {t("legacy.upstreamUsage.resetCredits", { n: resetCredits })}
+      {u && (
+        <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-2">
+          <div className="text-xs text-muted-foreground">
+            {t("legacy.upstreamUsage.resetCredits", { n: resetCredits })}
+          </div>
+          <div className="flex items-center gap-2">
+            {resetMsg && <span className="text-xs text-success">{resetMsg}</span>}
+            {resetErr && <span className="text-xs text-destructive">{resetErr}</span>}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={resetting || resetCredits <= 0}
+              onClick={doReset}
+              title={
+                resetCredits > 0
+                  ? t("legacy.upstreamUsage.resetButton")
+                  : t("legacy.upstreamUsage.resetNone")
+              }
+            >
+              <Zap className={cn("size-3", resetting && "animate-pulse")} />
+              {resetting ? t("legacy.upstreamUsage.resetting") : t("legacy.upstreamUsage.resetButton")}
+            </Button>
+          </div>
         </div>
       )}
 
