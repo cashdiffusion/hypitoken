@@ -1390,7 +1390,8 @@ export default {
       resetCredits: "Limit-reset credits available: {{n}}",
       resetButton: "Reset quota",
       resetting: "Resetting…",
-      resetConfirm: "Consume one reset credit for this account? It immediately resets the rate-limit window and cannot be undone. {{n}} available.",
+      resetConfirm:
+        "Consume one reset credit for this account? It immediately resets the rate-limit window and cannot be undone. {{n}} available.",
       resetDone: "Reset done — {{n}} window(s) reset",
       resetNone: "No reset credits available",
       tierLabel: "Tier: {{tier}}",

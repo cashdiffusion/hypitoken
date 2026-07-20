@@ -544,7 +544,9 @@ function CodexUsageBody({
               }
             >
               <Zap className={cn("size-3", resetting && "animate-pulse")} />
-              {resetting ? t("legacy.upstreamUsage.resetting") : t("legacy.upstreamUsage.resetButton")}
+              {resetting
+                ? t("legacy.upstreamUsage.resetting")
+                : t("legacy.upstreamUsage.resetButton")}
             </Button>
           </div>
         </div>

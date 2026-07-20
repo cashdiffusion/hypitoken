@@ -1354,7 +1354,8 @@ export default {
       resetCredits: "可用限额重置额度：{{n}}",
       resetButton: "重置额度",
       resetting: "重置中…",
-      resetConfirm: "确定为该账号消耗一张额度重置卡吗？将立即重置限额窗口，且不可撤销。剩余可用：{{n}}",
+      resetConfirm:
+        "确定为该账号消耗一张额度重置卡吗？将立即重置限额窗口，且不可撤销。剩余可用：{{n}}",
       resetDone: "重置成功，已重置 {{n}} 个窗口",
       resetNone: "暂无可用重置卡",
       tierLabel: "套餐：{{tier}}",
