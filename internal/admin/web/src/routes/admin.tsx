@@ -1031,6 +1031,7 @@ function EditCredentialDialog({
   const [group, setGroup] = useState("");
   const [proxy, setProxy] = useState("");
   const [base, setBase] = useState("");
+  const [apiKey, setAPIKey] = useState("");
   const [maxC, setMaxC] = useState("");
   const [disabled, setDisabled] = useState(false);
   const [modelMap, setModelMap] = useState("");
@@ -1042,6 +1043,7 @@ function EditCredentialDialog({
       setGroup(cred.group || "");
       setProxy(cred.proxy_url || "");
       setBase(cred.base_url || "");
+      setAPIKey("");
       setMaxC(String(cred.max_concurrent ?? 0));
       setDisabled(!!cred.disabled);
       setModelMap(
@@ -1065,6 +1067,7 @@ function EditCredentialDialog({
         max_concurrent: number;
         disabled: boolean;
         base_url?: string;
+        api_key?: string;
         model_map?: Record<string, string>;
       } = {
         label,
@@ -1075,6 +1078,9 @@ function EditCredentialDialog({
       };
       if (isAPIKey) {
         body.base_url = base;
+        if (apiKey.trim() !== "") {
+          body.api_key = apiKey.trim();
+        }
       }
       if (modelMap.trim() === "") {
         body.model_map = {};
@@ -1133,15 +1139,31 @@ function EditCredentialDialog({
             />
           </div>
           {isAPIKey && (
-            <div className="space-y-2">
-              <Label>Base URL</Label>
-              <Input
-                value={base}
-                onChange={(e) => setBase(e.target.value)}
-                placeholder="留空走默认"
-                className="font-mono"
-              />
-            </div>
+            <>
+              <div className="space-y-2">
+                <Label>API Key</Label>
+                <Input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setAPIKey(e.target.value)}
+                  placeholder="留空表示不修改"
+                  autoComplete="new-password"
+                  className="font-mono"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  为安全起见不会显示当前 Key；只有填写新值时才会替换。
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>Base URL</Label>
+                <Input
+                  value={base}
+                  onChange={(e) => setBase(e.target.value)}
+                  placeholder="留空走默认"
+                  className="font-mono"
+                />
+              </div>
+            </>
           )}
           <div className="space-y-2">
             <Label>Model map（JSON）</Label>
@@ -1608,7 +1630,7 @@ function AddAPIKeyDialog({
               try {
                 await apiPost("/admin/credentials/apikey", {
                   provider,
-                  key,
+                  api_key: key,
                   label,
                   base_url: base,
                   proxy_url: proxy,

@@ -684,6 +684,7 @@ type patchAuthBody struct {
 	MaxConcurrent *int               `json:"max_concurrent"`
 	ProxyURL      *string            `json:"proxy_url"`
 	BaseURL       *string            `json:"base_url"`
+	APIKey        *string            `json:"api_key"`
 	Label         *string            `json:"label"`
 	Group         *string            `json:"group"`
 	ModelMap      *map[string]string `json:"model_map"`
@@ -706,6 +707,16 @@ func (h *Handler) handlePatchAuth(c *gin.Context) {
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	if body.APIKey != nil {
+		if a.Kind != auth.KindAPIKey {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "api_key can only be changed for API-key credentials"})
+			return
+		}
+		if strings.TrimSpace(*body.APIKey) == "" {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "api_key must not be empty"})
+			return
+		}
 	}
 	if body.Disabled != nil {
 		a.SetDisabled(*body.Disabled)
@@ -737,6 +748,43 @@ func (h *Handler) handlePatchAuth(c *gin.Context) {
 	if err := a.Persist(); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "persist failed: " + err.Error()})
 		return
+	}
+	if body.APIKey != nil {
+		key := strings.TrimSpace(*body.APIKey)
+		data, err := os.ReadFile(a.FilePath)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "read credential failed: " + err.Error()})
+			return
+		}
+		var raw map[string]any
+		if err = json.Unmarshal(data, &raw); err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "parse credential failed: " + err.Error()})
+			return
+		}
+		raw["api_key"] = key
+		delete(raw, "key")
+		delete(raw, "access_token")
+		data, err = json.MarshalIndent(raw, "", "  ")
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "encode credential failed: " + err.Error()})
+			return
+		}
+		replacement, err := auth.ParseFile(a.FilePath, data)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		tmp := a.FilePath + ".tmp"
+		if err = os.WriteFile(tmp, data, 0600); err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "write credential failed: " + err.Error()})
+			return
+		}
+		if err = os.Rename(tmp, a.FilePath); err != nil {
+			_ = os.Remove(tmp)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "replace credential failed: " + err.Error()})
+			return
+		}
+		h.pool.AddAPIKey(replacement)
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
