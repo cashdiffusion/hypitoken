@@ -1213,6 +1213,13 @@ func (h *Handler) handleCodexUsage(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
+	// FetchCodexUsage marks the credential when the upstream reports a reached
+	// limit, but an available snapshot must also clear any older local cooldown.
+	// Without this reverse transition the admin can show available quota while
+	// the scheduler continues excluding the credential until the stale reset_at.
+	if info.RateLimit != nil && !info.RateLimit.LimitReached {
+		a.ClearQuota()
+	}
 	c.JSON(http.StatusOK, gin.H{"usage": info})
 }
 
@@ -1243,6 +1250,10 @@ func (h *Handler) handleResetCodexCredit(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
+	// A successful reset invalidates the previous usage-limit cooldown. The
+	// usage refresh below will mark it again if the upstream still reports a
+	// reached window (for example when only one of two windows was reset).
+	a.ClearQuota()
 	resp := gin.H{"reset": result}
 	if usage, uerr := a.FetchCodexUsage(ctx, h.pool.UseUTLS()); uerr == nil {
 		resp["usage"] = usage
