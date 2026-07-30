@@ -142,12 +142,8 @@ func (c *Checker) RunOnce(ctx context.Context) {
 			// taint the (separately maintained) /responses health view.
 			if provider == auth.ProviderOpenAI {
 				probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-				if info, err := a.FetchCodexUsage(probeCtx, c.Pool.UseUTLS()); err != nil {
+				if _, err := a.FetchCodexUsage(probeCtx, c.Pool.UseUTLS()); err != nil {
 					log.Debugf("health: codex wham/usage probe %s: %v", a.ID, err)
-				} else if info.RateLimit != nil && !info.RateLimit.LimitReached {
-					// FetchCodexUsage records reached limits, but an explicitly
-					// available snapshot must also release a stale local cooldown.
-					a.ClearQuota()
 				}
 				cancel()
 			}

@@ -46,8 +46,7 @@ func (c *CredHandler) Routes(g *gin.RouterGroup) {
 
 type apikeyReq struct {
 	Provider string            `json:"provider"`
-	APIKey   string            `json:"api_key"`
-	Key      string            `json:"key"` // Backward compatibility for older clients.
+	Key      string            `json:"key"`
 	Label    string            `json:"label"`
 	BaseURL  string            `json:"base_url"`
 	ProxyURL string            `json:"proxy_url"`
@@ -61,10 +60,7 @@ func (c *CredHandler) createAPIKey(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
 	}
-	key := strings.TrimSpace(req.APIKey)
-	if key == "" {
-		key = strings.TrimSpace(req.Key)
-	}
+	key := strings.TrimSpace(req.Key)
 	if key == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "key required"})
 		return
