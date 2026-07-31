@@ -292,12 +292,20 @@ type authRow struct {
 	Disabled      bool       `json:"disabled"`
 	QuotaExceeded bool       `json:"quota_exceeded"`
 	QuotaResetAt  *time.Time `json:"quota_reset_at,omitempty"`
-	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
-	LastFailure   string     `json:"last_failure,omitempty"`
-	FileBacked    bool       `json:"file_backed"`
-	Healthy       bool       `json:"healthy"`
-	HardFailure   bool       `json:"hard_failure"`
-	FailureReason string     `json:"failure_reason,omitempty"`
+	// Quarantine is the API-key circuit breaker: a channel that failed
+	// repeatedly is paused for a self-expiring, exponentially growing
+	// interval so traffic rotates onto a working key. Surfaced so the panel
+	// can distinguish "paused, will retry at X" from a plain failure — a
+	// silently paused channel looks identical to a healthy idle one.
+	// Zero/absent = circuit closed. API-key credentials only.
+	QuarantinedUntil  *time.Time `json:"quarantined_until,omitempty"`
+	QuarantineStrikes int        `json:"quarantine_strikes,omitempty"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
+	LastFailure       string     `json:"last_failure,omitempty"`
+	FileBacked        bool       `json:"file_backed"`
+	Healthy           bool       `json:"healthy"`
+	HardFailure       bool       `json:"hard_failure"`
+	FailureReason     string     `json:"failure_reason,omitempty"`
 	// RefreshSuspended is true when the background OAuth refresher
 	// (cc-core/auth Pool.RefreshExpiring) will deliberately skip this
 	// credential — i.e. it is disabled or hard-failed. The frontend uses
@@ -369,6 +377,11 @@ func (h *Handler) buildAuthRows() []authRow {
 		if !st.Auth.ExpiresAt.IsZero() {
 			t := st.Auth.ExpiresAt
 			expAt = &t
+		}
+		var quarantinedUntil *time.Time
+		if !st.Auth.QuarantineUntil.IsZero() {
+			t := st.Auth.QuarantineUntil
+			quarantinedUntil = &t
 		}
 		var u *usageSummary
 		// Show a usage row for every auth that has either in-memory daily
@@ -450,6 +463,8 @@ func (h *Handler) buildAuthRows() []authRow {
 			Disabled:               st.Auth.Disabled,
 			QuotaExceeded:          !st.Auth.QuotaExceededAt.IsZero(),
 			QuotaResetAt:           quotaReset,
+			QuarantinedUntil:       quarantinedUntil,
+			QuarantineStrikes:      st.Auth.QuarantineStrikes,
 			ExpiresAt:              expAt,
 			FileBacked:             strings.TrimSpace(st.Auth.FilePath) != "",
 			Healthy:                healthy,

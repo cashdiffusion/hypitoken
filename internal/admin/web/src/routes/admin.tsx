@@ -832,8 +832,25 @@ function CredentialDetail({ c }: { c: Credential }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 px-2">
       {/* Alerts */}
-      {(c.quota_exceeded || failureBanner || c.last_client_cancel || c.refresh_suspended) && (
+      {(c.quota_exceeded ||
+        c.quarantined_until ||
+        failureBanner ||
+        c.last_client_cancel ||
+        c.refresh_suspended) && (
         <div className="lg:col-span-3 flex flex-col gap-2">
+          {c.quarantined_until && (
+            <AlertStrip
+              tone="warning"
+              icon={<AlertTriangle className="size-3.5" />}
+              label="渠道已暂停"
+            >
+              {`连续上游报错,流量已切换到其他渠道。将于 ${new Date(
+                c.quarantined_until,
+              ).toLocaleString()} 自动探活${
+                c.quarantine_strikes ? `(第 ${c.quarantine_strikes} 轮退避)` : ""
+              },成功一次即完全恢复,无需人工处理。`}
+            </AlertStrip>
+          )}
           {c.quota_exceeded && (
             <AlertStrip
               tone="warning"
@@ -1470,6 +1487,26 @@ function HealthPill({ cred }: { cred: Credential }) {
         ])}
       >
         quota
+      </span>
+    );
+  }
+  if (cred.quarantined_until) {
+    // Distinct from both `quota` and `hard fail`: the channel is temporarily
+    // out of rotation after repeated upstream errors and will re-probe itself.
+    // Without its own badge a paused channel is indistinguishable from an
+    // idle healthy one, which is how a silently dead relay stays unnoticed.
+    return (
+      <span
+        className="rounded border border-warning/30 bg-warning/15 px-2 py-0.5 text-xs font-mono uppercase text-warning"
+        title={tip([
+          "已暂停 — 连续上游报错,流量已切到其他渠道",
+          `恢复探活于 ${new Date(cred.quarantined_until).toLocaleString()}`,
+          cred.quarantine_strikes ? `第 ${cred.quarantine_strikes} 轮退避` : undefined,
+          cred.failure_reason && `原因: ${cred.failure_reason}`,
+          "成功一次即自动完全恢复,无需人工处理",
+        ])}
+      >
+        paused
       </span>
     );
   }

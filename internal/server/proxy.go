@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -896,26 +897,42 @@ recoveredFromSignature:
 
 // doForwardAnthropicAPIKey is the API-key passthrough for Anthropic-shaped
 // upstreams (api.anthropic.com or third-party relays). Unlike the OAuth path,
-// we do not inject any Claude Code mimicry headers, do not use uTLS, and do
-// not retry across credentials. Whatever the upstream returns is forwarded
-// to the client verbatim — credential cooldowns and cross-credential retries
-// are intentionally skipped. The only request-side change allowed is the
-// per-credential model rewrite (and the matching response-side rewrite) so
-// model_map'd relay vendors keep working.
+// we inject no Claude Code mimicry headers and do not use uTLS: the request
+// is forwarded essentially verbatim. The only request-side change allowed is
+// the per-credential model rewrite (and the matching response-side rewrite)
+// so model_map'd relay vendors keep working.
 //
-// Health tracking: success → MarkSuccess; 401/402/403 → immediate
-// MarkHardFailure (token revoked, balance depleted, or forbidden — all
-// terminal signals that won't self-heal); other upstream errors
-// (4xx/5xx/429) and transport errors → MarkFailure, which counts toward
-// the consecutive-failure threshold and auto-promotes to a sticky
-// hard-failure once the upstream proves persistently broken. A background
-// midnight job (Pool.RunDailyAnthropicAPIKeyReset) wipes the hard-failure
-// flag once a day so transient overnight outages don't pin a credential
-// offline forever.
-// The (retry, done, deferred) contract matches doForward: a credential-level
-// error (401/402/403 hard-fail, 429/503 transient) is withheld and returned in
-// deferred so forward() can switch credentials transparently. There is no
-// bootstrap-wait gate on this path, so it takes no isRetry flag.
+// Failure handling is driven by classifyUpstreamStatus, which separates
+// faults the client caused from faults the upstream or the credential caused
+// (see upstream_health.go):
+//
+//	faultNone       → MarkSuccess, response forwarded
+//	faultCredential → MarkHardFailure, withheld + retried on another credential
+//	faultUpstream   → MarkFailure,     withheld + retried on another credential
+//	faultClient     → no health change, forwarded verbatim, never retried
+//
+// Only the upstream-side classes touch health, so one client sending
+// malformed requests can no longer degrade a channel that is serving
+// everyone else correctly.
+//
+// Both upstream-side classes feed cc-core's API-key circuit breaker: enough
+// consecutive faults pause the channel for a self-expiring, exponentially
+// growing interval, so traffic rotates onto another key instead of re-paying
+// a doomed round-trip per request, and the channel probes itself back into
+// rotation with no operator involvement. A definitive credential rejection
+// pauses on the first strike. Neither ever *retires* the channel — only the
+// explicit Disabled flag takes an API key offline for good.
+//
+// A <400 response is additionally checked against the Messages API wire
+// format before it is committed or billed (validateAnthropicResponse) — a
+// relay answering 200 with an HTML block page is a faultUpstream, not a
+// zero-token success.
+//
+// The (retry, done, deferred) contract matches doForward: a retryable fault
+// is withheld and returned in deferred so forwardWithFailover can switch
+// credentials transparently, replaying the withheld response only if every
+// credential is exhausted. There is no bootstrap-wait gate on this path, so
+// it takes no isRetry flag.
 func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, clientName string, start time.Time, attempts int) (retry bool, done bool, deferred *deferredResponse) {
 	baseURL := s.cfg.AnthropicBaseURL
 	if ab := strings.TrimRight(a.Snapshot().BaseURL, "/"); ab != "" {
@@ -1022,41 +1039,65 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		}
 	}
 
-	// Credential health bookkeeping + retryability, computed before writing
-	// anything so a credential-level error can be withheld and retried on
-	// another credential while the pool still has a slot.
-	retryable := false
-	switch {
-	case resp.StatusCode < 400:
-		a.MarkSuccess()
-	case resp.StatusCode == http.StatusUnauthorized ||
-		resp.StatusCode == http.StatusPaymentRequired ||
-		resp.StatusCode == http.StatusForbidden:
-		// Token revoked, balance depleted, or forbidden — terminal for this
-		// key. Hard-fail it and retry the request on another credential.
-		a.MarkHardFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
-		retryable = true
-	case resp.StatusCode == http.StatusTooManyRequests ||
-		resp.StatusCode == http.StatusServiceUnavailable:
-		// 429 per-key throttle / 503 vendor overload: transient and not a
-		// verdict on the key itself, so skip Mark* (don't pin a working key or
-		// trip the consecutive-429 stealth-ban accumulator) — but retry on
-		// another credential so the user doesn't eat the relay's weather.
-		retryable = true
-	case resp.StatusCode == http.StatusNotFound:
-		// Route not implemented on this relay (e.g. /v1/messages/count_tokens
-		// on relays that only proxy /v1/messages). Another credential on the
-		// same relay would 404 too — forward it through, don't burn retries.
-	default:
-		a.MarkFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
+	// Response-contract check. A <400 status is not on its own evidence that
+	// the exchange worked: a dead relay in front of the real API answers 200
+	// with an HTML block page, which would otherwise be marked healthy,
+	// streamed to the client as an empty response, and billed as zero tokens.
+	// Validate the wire format first and demote a violation to faultUpstream
+	// so it is withheld and retried like any other upstream failure.
+	//
+	// Buffer the body so the peek is non-consuming; Close still reaches the
+	// original body, so the connection is released exactly as before.
+	statusForFault := resp.StatusCode
+	var bodyBuf *bufio.Reader
+	if resp.StatusCode < 400 {
+		bodyBuf = bufio.NewReaderSize(resp.Body, 64*1024)
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{bodyBuf, resp.Body}
+		if v := validateAnthropicResponse(resp.Header, bodyBuf); v.Detail != "" {
+			log.Warnf("proxy(apikey): %s returned %d but the body is not an Anthropic response (%s) — treating as an upstream failure",
+				a.ID, resp.StatusCode, truncate([]byte(v.Detail), 300))
+			statusForFault = http.StatusBadGateway
+		}
 	}
 
-	if resp.StatusCode >= 400 && retryable {
+	// Credential health bookkeeping + retryability, computed before writing
+	// anything so a retryable fault can be withheld and retried on another
+	// credential while the pool still has a slot.
+	fault := classifyUpstreamStatus(statusForFault)
+	switch fault {
+	case faultNone:
+		a.MarkSuccess()
+	case faultCredential:
+		// Revoked, forbidden, or out of funds — definitive, so cc-core pauses
+		// the channel on this single strike rather than re-presenting a dead
+		// key on every subsequent request. Still never sticky for an API key:
+		// the pause expires by itself.
+		a.MarkHardFailure(fmt.Sprintf("upstream %d", statusForFault))
+	case faultUpstream:
+		// Throttling, gateway errors, or a contract violation. Not a verdict
+		// on the key itself, so it takes several in a row before cc-core
+		// pauses the channel — enough to ride out the ordinary weather of a
+		// shared relay without pausing anything that still works.
+		a.MarkFailure(fmt.Sprintf("upstream %d", statusForFault))
+	case faultClient:
+		// The caller's own request is at fault (400 malformed, 404 route not
+		// implemented by this relay, 413 too large, …). Another credential
+		// would return the identical error, so forward it through untouched
+		// and leave credential health alone.
+	}
+
+	if fault.retryable() {
 		errBody, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		log.Warnf("proxy(apikey): %s returned %d — retrying on another credential. body=%s", a.ID, resp.StatusCode, truncate(errBody, 500))
+		// statusForFault, not resp.StatusCode: a contract violation arrives as
+		// 200 but must be replayed to the client as the 502 it really is if
+		// every credential ends up exhausted.
 		return true, false, &deferredResponse{
-			status: resp.StatusCode,
+			status: statusForFault,
 			header: resp.Header.Clone(),
 			body:   errBody,
 			authID: a.ID,
@@ -1075,7 +1116,12 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	} else {
 		writeResponseHeaders(c, resp)
 		counts.Requests = 1
-		if stream && strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		// Dispatch on the client's stream flag + the actual bytes, not the
+		// upstream Content-Type alone: relays are known to stream the SSE
+		// back as text/plain, which under a header-only check fell through to
+		// the whole-body JSON parse and silently lost all usage (billing =
+		// $0). Same fix the Codex path already carries. Peek is non-consuming.
+		if stream && responseIsSSE(resp.Header, bodyBuf) {
 			// Headers are already committed above (the 4xx branch needs them),
 			// so commit=nil — no cross-credential retry on this verbatim
 			// passthrough path. The relay still adds keepalive + truncation

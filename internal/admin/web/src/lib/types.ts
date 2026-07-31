@@ -285,6 +285,13 @@ export interface Credential {
   disabled: boolean;
   quota_exceeded: boolean;
   quota_reset_at?: string;
+  /**
+   * API-key circuit breaker. Set while the channel is paused after repeated
+   * upstream failures; the pause expires on its own and one good response
+   * clears it. Absent = circuit closed.
+   */
+  quarantined_until?: string;
+  quarantine_strikes?: number;
   expires_at?: string;
   file_backed: boolean;
   healthy: boolean;
