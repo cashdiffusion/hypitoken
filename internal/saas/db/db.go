@@ -28,13 +28,32 @@ type DB struct {
 // power loss without losing committed wallet/payment transactions. SaaS
 // traffic is nowhere near the throughput where the difference matters.
 //
+// _txlock=immediate: every BeginTx opens BEGIN IMMEDIATE rather than Go's
+// default BEGIN DEFERRED. This is load-bearing, not a tuning knob. A deferred
+// transaction takes a read lock on its first SELECT and only asks for the write
+// lock at its first write; when another connection already holds the write
+// lock, SQLite fails that upgrade with SQLITE_BUSY *immediately and
+// deliberately ignores busy_timeout* — backing off would deadlock two readers
+// both waiting to upgrade. So busy_timeout cannot help a deferred read→write
+// transaction, which is exactly the shape of Charge (read balance, then write
+// balance + ledger row). In production this failed ~29% of all charge attempts
+// under normal concurrency (7.8k lost charges in 24h) with no retry anywhere —
+// requests served, never billed. With IMMEDIATE the write lock is taken at
+// BEGIN, so contention waits on busy_timeout instead of erroring out.
+//
+// Every BeginTx site in this module writes, so nothing pays for this
+// serialization needlessly; plain Query/Exec outside a transaction is
+// unaffected. busy_timeout is 10s (was 5s) purely for headroom: charge
+// transactions are sub-millisecond, so the queue drains far below that.
+// TestConcurrentChargesDoNotReturnBusy guards the flag.
+//
 // File mode is force-chmoded to 0600 after open so the wallet ledger is
 // not world-readable even if the filesystem default umask was lax.
 func Open(path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)", path)
+	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)", path)
 	sdb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
