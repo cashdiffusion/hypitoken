@@ -165,17 +165,18 @@ func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *serv
 		}
 	}
 
-	// Layer 3 — the per-token caps (self-set; daily + monthly). Attributed to
-	// the member's own spend. The space-admin per-key override (AdminMonthlyCap)
-	// is folded into the effective monthly cap.
+	// Layer 3 — the per-token caps (self-set; daily + monthly). These must use
+	// token-scoped ledger totals: a sibling key's spend must not consume this
+	// key's allowance. The space-admin per-key override (AdminMonthlyCap) is
+	// folded into the effective monthly cap.
 	if info.DailyUSDCap > 0 {
-		spent, err := a.DB.SumChargeSince(ctx, info.UserID, dayStart)
+		spent, err := a.DB.SumChargeSinceForToken(ctx, info.UserID, info.TokenID, dayStart)
 		if err == nil && spent >= info.DailyUSDCap {
 			return capError("api_key_daily_limit_exceeded", "This API key has reached its daily spending limit. Increase the key limit or retry after the daily reset.", spent, info.DailyUSDCap)
 		}
 	}
 	if mcap := effectiveMonthlyCap(info.MonthlyUSDCap, info.AdminMonthlyCap); mcap > 0 {
-		spent, err := a.DB.SumChargeSince(ctx, info.UserID, monthStart)
+		spent, err := a.DB.SumChargeSinceForToken(ctx, info.UserID, info.TokenID, monthStart)
 		if err == nil && spent >= mcap {
 			return capError("api_key_monthly_limit_exceeded", "This API key has reached its monthly spending limit. Increase the key limit or retry after the monthly reset.", spent, mcap)
 		}

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // A charge must land its structured attribution AND keep writing the legacy ref.
@@ -74,6 +75,57 @@ func TestTopupLeavesAttributionEmpty(t *testing.T) {
 	}
 	if tokenID != 0 || model != "" || inTok != 0 {
 		t.Fatalf("topup row carries attribution: token=%d model=%q input=%d", tokenID, model, inTok)
+	}
+}
+
+// Per-key caps must only see charges attributed to that key. A user's sibling
+// keys and unattributed legacy rows must not consume its allowance.
+func TestSumChargeSinceForTokenIsScopedToToken(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+	uid := mkUser(t, d, "token-scope@example.com")
+	wsID, err := d.PersonalWorkspaceID(ctx, uid)
+	if err != nil {
+		t.Fatalf("personal ws: %v", err)
+	}
+
+	first, err := d.CreateUserToken(ctx, uid, TokenParams{Name: "first"})
+	if err != nil {
+		t.Fatalf("create first token: %v", err)
+	}
+	second, err := d.CreateUserToken(ctx, uid, TokenParams{Name: "second"})
+	if err != nil {
+		t.Fatalf("create second token: %v", err)
+	}
+
+	charge := func(amount float64, tokenID int64) {
+		t.Helper()
+		if _, _, err := d.ChargeWorkspaceWithFloor(
+			ctx, wsID, uid, TxKindCharge, amount, "token-scope", "", 0,
+			ChargeMeta{TokenID: tokenID},
+		); err != nil {
+			t.Fatalf("charge token %d: %v", tokenID, err)
+		}
+	}
+	charge(3, first.ID)
+	charge(7, second.ID)
+	charge(11, 0) // deliberately unattributed
+
+	since := time.Unix(0, 0)
+	if got, err := d.SumChargeSinceForToken(ctx, uid, first.ID, since); err != nil || !approxEq(got, 3) {
+		t.Fatalf("first token spend = %v, err=%v; want 3", got, err)
+	}
+	if got, err := d.SumChargeSinceForToken(ctx, uid, second.ID, since); err != nil || !approxEq(got, 7) {
+		t.Fatalf("second token spend = %v, err=%v; want 7", got, err)
+	}
+	if got, err := d.SumChargeSince(ctx, uid, since); err != nil || !approxEq(got, 21) {
+		t.Fatalf("user spend = %v, err=%v; want 21", got, err)
+	}
+	if got, err := d.SumChargeSinceForWorkspace(ctx, wsID, since); err != nil || !approxEq(got, 21) {
+		t.Fatalf("workspace spend = %v, err=%v; want 21", got, err)
+	}
+	if got, err := d.SumChargeSinceForMember(ctx, wsID, uid, since); err != nil || !approxEq(got, 21) {
+		t.Fatalf("member spend = %v, err=%v; want 21", got, err)
 	}
 }
 

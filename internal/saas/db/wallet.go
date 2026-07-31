@@ -411,6 +411,19 @@ func (db *DB) SumChargeSince(ctx context.Context, userID int64, since time.Time)
 	return sum.Float64, nil
 }
 
+// SumChargeSinceForToken returns total USD charged to one API token since
+// `since`. userID is included in the predicate both as a tenancy guard and to
+// use the (user_id, token_id, created_at) ledger index.
+func (db *DB) SumChargeSinceForToken(ctx context.Context, userID, tokenID int64, since time.Time) (float64, error) {
+	var sum sql.NullFloat64
+	err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(-amount_usd), 0) FROM wallet_tx WHERE user_id = ? AND token_id = ? AND kind = 'charge' AND created_at >= ?`,
+		userID, tokenID, since.Unix()).Scan(&sum)
+	if err != nil {
+		return 0, err
+	}
+	return sum.Float64, nil
+}
+
 // SumChargeSinceForWorkspace returns total USD charged against a workspace's
 // pool since `since`. Powers the workspace daily/monthly caps.
 func (db *DB) SumChargeSinceForWorkspace(ctx context.Context, workspaceID int64, since time.Time) (float64, error) {
