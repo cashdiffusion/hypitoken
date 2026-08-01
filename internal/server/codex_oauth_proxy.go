@@ -166,6 +166,11 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 
 	var counts usage.Counts
 	var streamErr string
+	// Status recorded in the request log. Defaults to the upstream's, but a
+	// mid-stream client hang-up overrides it to 499 — the response was 200 on
+	// the wire, yet logging it as a success with an error attached hides it
+	// from every "client canceled" view.
+	logStatus := resp.StatusCode
 	switch {
 	case isCompactPath:
 		// /codex/responses/compact returns a single JSON object — no SSE.
@@ -219,6 +224,13 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			// Anthropic path) and name each for what it is.
 			if isClientDisconnect(ctx, rerr) {
 				streamErr = "client canceled"
+				// 499 + MarkClientCancel match the pre-stream disconnect branch
+				// above, so a mid-stream hang-up lands in the same bucket as one
+				// that happened a second earlier instead of as a 200 carrying an
+				// error string. MarkClientCancel is health-neutral by design —
+				// the credential did nothing wrong.
+				logStatus = 499
+				a.MarkClientCancel("client canceled mid-stream")
 				log.Infof("codex oauth: client canceled mid-stream via %s", a.ID)
 			} else {
 				streamErr = "stream truncated before terminal event"
@@ -292,7 +304,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		CostUSD:     costUSD,
 		UserID:      userID,
 		Multiplier:  multiplier,
-		Status:      resp.StatusCode,
+		Status:      logStatus,
 		DurationMs:  time.Since(start).Milliseconds(),
 		Stream:      stream,
 		Path:        path,

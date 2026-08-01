@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +57,7 @@ func TestStreamSSECodexBackendTruncated(t *testing.T) {
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 
 	var counts usage.Counts
-	if sawTerminal := streamSSECodexBackend(c, resp, &counts); sawTerminal {
+	if sawTerminal, _ := streamSSECodexBackend(c, resp, &counts); sawTerminal {
 		t.Error("stream without a terminal event should report sawTerminal=false")
 	}
 	if !strings.Contains(w.Body.String(), "response.output_text.delta") {
@@ -72,7 +74,7 @@ func TestStreamSSECodexBackendCompleted(t *testing.T) {
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 
 	var counts usage.Counts
-	if sawTerminal := streamSSECodexBackend(c, resp, &counts); !sawTerminal {
+	if sawTerminal, _ := streamSSECodexBackend(c, resp, &counts); !sawTerminal {
 		t.Error("stream ending in response.completed should report sawTerminal=true")
 	}
 	if !strings.Contains(w.Body.String(), "response.completed") {
@@ -80,5 +82,65 @@ func TestStreamSSECodexBackendCompleted(t *testing.T) {
 	}
 	if counts.OutputTokens != 5 || counts.InputTokens != 10 {
 		t.Errorf("usage must be extracted from response.completed, got in=%d out=%d", counts.InputTokens, counts.OutputTokens)
+	}
+}
+
+// TestClientCancelIsNotUpstreamTruncation pins the distinction that a
+// production log audit showed was being lost: a stream ending without a
+// terminal event has two very different causes, and only one of them is a
+// fault.
+//
+// Codex CLI aborts the in-flight request when the user hits Ctrl-C / ESC.
+// That cancels the request context and surfaces to the relay as a read error
+// — byte-for-byte the same signal as an upstream that hung up. Before the
+// context was consulted, every such cancellation was recorded as "stream
+// truncated before terminal event": ~90% of all Codex errors in production
+// were ordinary user behaviour wearing an upstream-incident label, which
+// buried the ~0.05% of real h2 truncations underneath them.
+func TestClientCancelIsNotUpstreamTruncation(t *testing.T) {
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cases := []struct {
+		name           string
+		ctx            context.Context
+		err            error
+		wantDisconnect bool
+	}{
+		{
+			name:           "client hung up mid-stream",
+			ctx:            cancelledCtx,
+			err:            context.Canceled,
+			wantDisconnect: true,
+		},
+		{
+			// The upstream really did go away: the context is still live, so
+			// this stays an upstream truncation and keeps its warning.
+			name:           "upstream h2 truncation",
+			ctx:            context.Background(),
+			err:            errors.New("stream error: stream ID 5; INTERNAL_ERROR; received from peer"),
+			wantDisconnect: false,
+		},
+		{
+			// A bare context.Canceled with a live context means the transport
+			// aborted on its own — an upstream fault, not the client leaving.
+			name:           "transport-level cancel with live context",
+			ctx:            context.Background(),
+			err:            context.Canceled,
+			wantDisconnect: false,
+		},
+		{
+			name:           "clean end of stream",
+			ctx:            cancelledCtx,
+			err:            nil,
+			wantDisconnect: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isClientDisconnect(tc.ctx, tc.err); got != tc.wantDisconnect {
+				t.Fatalf("isClientDisconnect = %v, want %v", got, tc.wantDisconnect)
+			}
+		})
 	}
 }
