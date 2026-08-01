@@ -204,8 +204,26 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		// tracking). A truncated upstream (no terminal event) is surfaced in the
 		// request log instead of looking like a clean stream end.
 		writeResponseHeaders(c, resp)
-		if !streamSSECodexBackend(c, resp, &counts) {
-			streamErr = "stream truncated before terminal event"
+		if sawTerminal, rerr := streamSSECodexBackend(c, resp, &counts); !sawTerminal {
+			// A stream that ends without a terminal event is only an upstream
+			// fault when the upstream is what went away. The far more common
+			// cause is the client hanging up mid-turn — Codex CLI aborts the
+			// request on Ctrl-C / ESC — which cancels c.Request.Context() and
+			// surfaces here as a read error, indistinguishable from truncation
+			// unless the context is consulted.
+			//
+			// Conflating the two made ordinary user behaviour look like an
+			// upstream incident: in production this label accounted for ~90% of
+			// all recorded Codex errors, drowning out the ~0.05% of genuine h2
+			// truncations. Match the transport-error branch above (and the
+			// Anthropic path) and name each for what it is.
+			if isClientDisconnect(ctx, rerr) {
+				streamErr = "client canceled"
+				log.Infof("codex oauth: client canceled mid-stream via %s", a.ID)
+			} else {
+				streamErr = "stream truncated before terminal event"
+				log.Warnf("codex oauth: SSE stream ended before terminal event (truncated upstream) via %s: %v", a.ID, rerr)
+			}
 		}
 	default:
 		// Non-streaming client: aggregate SSE into a single response object
@@ -412,7 +430,7 @@ func codexTerminalEvent(payload []byte) bool {
 //
 // gin's ResponseWriter is not goroutine-safe, so the keepalive goroutine and the
 // read loop share one mutex around every Write/Flush.
-func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Counts) (sawTerminal bool) {
+func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Counts) (sawTerminal bool, streamErr error) {
 	flusher, _ := c.Writer.(http.Flusher)
 	reader := newLineReader(resp.Body)
 
@@ -445,10 +463,7 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 		KeepalivePayload: []byte(":\n\n"),
 		Next:             next,
 	})
-	if !r.SawTerminal {
-		log.Warnf("codex oauth: SSE stream ended before terminal event (truncated upstream): %v", r.Err)
-	}
-	return r.SawTerminal
+	return r.SawTerminal, r.Err
 }
 
 // extractCodexBackendUsageFromJSON reads usage from the ChatGPT Codex

@@ -20,10 +20,6 @@ endpoints:
     host: "0.0.0.0"
     port: 8318
     disabled: true    # opt-in: set to false after adding Codex credentials
-  market:
-    host: "0.0.0.0"
-    port: 8320
-    disabled: true    # opt-in: set false + market.enabled=true to run the campus marketplace
 
 # trace | debug | info | warn | error
 log_level: info
@@ -321,49 +317,6 @@ shop:
     password: ""
     from: "support@example.com"
     use_tls: true
-
-# ---------------------------------------------------------------------------
-# 校园集市 (campus marketplace) — a standalone storefront for selling physical
-# goods (二手/摆摊/预订) for a small *deposit*, fulfilled by self-pickup or dorm
-# delivery. Sibling of `shop` above: reuses the same SQLite file but its own
-# market_* tables, and collects the deposit via Z-Pay (Alipay/WeChat). Admin
-# pages reuse the top-level admin_token cookie. Mobile-first (photo capture).
-# Enable: endpoints.market.disabled=false + market.enabled=true.
-market:
-  enabled: false
-
-  # SQLite file — defaults to the shop's shop.db so both share one file
-  # (separate tables). Relative to this config's dir.
-  db_path: shop.db
-
-  # On-disk directory product photos are written to and served from.
-  # Relative paths resolve against this config's dir.
-  image_dir: market_images
-
-  # Site identity — shown in the page header.
-  site_name: "校园集市"
-  site_url: "https://market.example.com"
-
-  # Default deposit fraction collected at checkout (0 < r <= 1). Per-product
-  # overridable in the admin panel. 0.10 = 10%.
-  deposit_ratio: 0.10
-
-  # Self-pickup location shown to buyers who choose 自提.
-  pickup_location: "北京大学45甲楼下"
-
-  # Public HTTPS URL Z-Pay posts payment confirmations to (Caddy → :8320/notify).
-  notify_url: "https://market.example.com/notify"
-
-  # Pending orders older than this are expired by a sweeper (their reserved
-  # unit freed). Default 30m.
-  order_ttl: 30m
-
-  # Z-Pay merchant — the deposit always flows through Z-Pay. The key supports
-  # the @/path indirection to keep it out of committed YAML.
-  zpay:
-    base_url: "https://zpayz.cn"
-    pid: ""
-    key: ""            # 商户密钥 or @/path/to/secret
 
 # ---------------------------------------------------------------------------
 # Off-host disaster-recovery backup (the `backup` subcommand + systemd timer).
