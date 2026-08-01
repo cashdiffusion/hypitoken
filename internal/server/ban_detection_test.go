@@ -80,8 +80,10 @@ func TestParseUnifiedRatelimitRejected(t *testing.T) {
 	tests := []struct {
 		name       string
 		headers    http.Header
+		reqModel   string // client-requested model; drives model-scoped detection
 		wantOK     bool
 		wantBanned bool
+		wantScope  string        // "" = account-wide; "anthropic:fable" = fable-only
 		wantNear   time.Duration // |returned - expected| <= 5s; only checked when !wantBanned
 		expected   time.Time
 	}{
@@ -175,15 +177,70 @@ func TestParseUnifiedRatelimitRejected(t *testing.T) {
 			wantOK:     true,
 			wantBanned: true,
 		},
+		{
+			name: "fable request, top rejected, shared allowed → fable scope, not banned",
+			headers: http.Header{
+				"Anthropic-Ratelimit-Unified-Status":    []string{"rejected"},
+				"Anthropic-Ratelimit-Unified-5h-Status": []string{"allowed"},
+				"Anthropic-Ratelimit-Unified-7d-Status": []string{"allowed"},
+				"Anthropic-Ratelimit-Unified-Reset":     []string{itoa(in7d)},
+			},
+			reqModel:  "claude-fable-5",
+			wantOK:    true,
+			wantScope: "anthropic:fable",
+			wantNear:  5 * time.Second,
+			expected:  time.Unix(in7d, 0),
+		},
+		{
+			name: "fable request, top rejected, no reset → fable scope, 1h fallback (never banned)",
+			headers: http.Header{
+				"Anthropic-Ratelimit-Unified-Status": []string{"rejected"},
+			},
+			reqModel:  "claude-fable-5",
+			wantOK:    true,
+			wantScope: "anthropic:fable",
+			wantNear:  5 * time.Second,
+			expected:  now.Add(time.Hour),
+		},
+		{
+			name: "fable request but shared 7d rejected → account-wide wins (not scoped)",
+			headers: http.Header{
+				"Anthropic-Ratelimit-Unified-Status":    []string{"rejected"},
+				"Anthropic-Ratelimit-Unified-7d-Status": []string{"rejected"},
+				"Anthropic-Ratelimit-Unified-7d-Reset":  []string{itoa(in7d)},
+			},
+			reqModel:  "claude-fable-5",
+			wantOK:    true,
+			wantScope: "",
+			wantNear:  5 * time.Second,
+			expected:  time.Unix(in7d, 0),
+		},
+		{
+			name: "non-fable request, top rejected, shared allowed → account-wide (no scope to apply)",
+			headers: http.Header{
+				"Anthropic-Ratelimit-Unified-Status":    []string{"rejected"},
+				"Anthropic-Ratelimit-Unified-5h-Status": []string{"allowed"},
+				"Anthropic-Ratelimit-Unified-7d-Status": []string{"allowed"},
+				"Anthropic-Ratelimit-Unified-Reset":     []string{itoa(in1h)},
+			},
+			reqModel:  "claude-opus-5",
+			wantOK:    true,
+			wantScope: "",
+			wantNear:  5 * time.Second,
+			expected:  time.Unix(in1h, 0),
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, banned, ok := parseUnifiedRatelimitRejected(tc.headers)
+			got, scope, banned, ok := parseUnifiedRatelimitRejected(tc.headers, tc.reqModel)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}
 			if banned != tc.wantBanned {
 				t.Fatalf("banned = %v, want %v", banned, tc.wantBanned)
+			}
+			if scope != tc.wantScope {
+				t.Fatalf("scope = %q, want %q", scope, tc.wantScope)
 			}
 			if !ok || banned {
 				return

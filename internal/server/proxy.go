@@ -672,9 +672,17 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 			// Only (1) and (2) advance MarkUsageLimitReached (which deliberately
 			// does NOT touch the consecutive-429 counter — those are real quota
 			// signals, not stealth-ban candidates).
-			if resetAt, banned, ok := parseUnifiedRatelimitRejected(resp.Header); ok && !banned {
-				a.MarkUsageLimitReached(resetAt)
-				log.Warnf("auth: %s usage limit (unified-ratelimit rejected) — cooldown until %s", a.ID, resetAt.Format(time.RFC3339))
+			if resetAt, scope, banned, ok := parseUnifiedRatelimitRejected(resp.Header, model); ok && !banned {
+				if scope != "" {
+					// Model-scoped rejection (fable's weekly allotment): cool down
+					// only this model family so the credential keeps serving every
+					// other model instead of being flagged account-wide.
+					a.MarkModelRateLimited(scope, resetAt)
+					log.Warnf("auth: %s model-scoped limit (%s) — cooldown until %s", a.ID, scope, resetAt.Format(time.RFC3339))
+				} else {
+					a.MarkUsageLimitReached(resetAt)
+					log.Warnf("auth: %s usage limit (unified-ratelimit rejected) — cooldown until %s", a.ID, resetAt.Format(time.RFC3339))
+				}
 			} else if resetAt, ok := parseClaudeUsageLimitBody(errBody); ok {
 				a.MarkUsageLimitReached(resetAt)
 				log.Warnf("auth: %s subscription usage limit — cooldown until %s", a.ID, resetAt.Format(time.RFC3339))
@@ -1525,74 +1533,92 @@ func parseRetryAfter(h http.Header) time.Time {
 	return time.Time{}
 }
 
-// parseUnifiedRatelimitRejected reports whether Anthropic's
-// `anthropic-ratelimit-unified-*` headers signal that this credential is out
-// of quota right now. When yes, the returned time is when to try again
-// (parsed from `*-reset`, expressed as Unix seconds; falls back 1h ahead if
-// missing/unparseable).
+// parseUnifiedRatelimitRejected inspects Anthropic's `anthropic-ratelimit-
+// unified-*` headers and classifies a quota rejection.
 //
 // Real responses carry a snapshot like:
 //
 //	anthropic-ratelimit-unified-status: rejected           ← top-level decision
-//	anthropic-ratelimit-unified-5h-status: rejected        ← per-bucket states
-//	anthropic-ratelimit-unified-7d-status: allowed
-//	anthropic-ratelimit-unified-5h-reset: 1777824000       ← per-bucket reset
-//	anthropic-ratelimit-unified-7d-reset: 1778018400
-//	anthropic-ratelimit-unified-reset: 1777824000          ← top-level reset
+//	anthropic-ratelimit-unified-5h-status: allowed         ← shared 5h window
+//	anthropic-ratelimit-unified-7d-status: allowed         ← shared 7d window
+//	anthropic-ratelimit-unified-5h-reset / -7d-reset / -reset
 //	anthropic-ratelimit-unified-representative-claim: five_hour
 //
-// We treat ANY of `unified-status / unified-5h-status / unified-7d-status`
-// being "rejected" (or a prefix thereof, e.g. "rejected_*") as a quota signal.
-// For the reset time we prefer top-level `unified-reset`, else the latest of
-// the rejected per-bucket resets — that way a 7d rejection isn't released by
-// the (sooner) 5h reset.
+// The shared 5h/7d buckets are account-wide — every model draws on them. There
+// is NO per-model bucket header: a model-scoped window (e.g. fable's weekly
+// allotment, ~50% of weekly per unified-fallback-percentage) surfaces only in
+// the oauth/usage `limits[]` body, never in headers. So a scoped rejection is
+// inferred from the request MODEL — when the top level is rejected but neither
+// shared bucket is, and the failing request is for a model with its own scope
+// (fable), the cooldown is scoped to that family instead of the whole account.
+//
+// reqModel is the client-requested model driving this request.
 //
 // Returns:
 //   - ok=false: not rejected.
-//   - ok=true, banned=true: rejected but no usable FUTURE reset stamp
-//     (every parseable stamp is in the past, or there is no stamp at all).
-//     This shape — "you're rejected, recovery time = unknown / already past"
-//     — is the stealth-ban signature: a banned account stays "rejected"
-//     forever, so admin-panel users see "Quota exceeded → resets in now"
-//     looping. Caller must hard-fail the credential.
-//   - ok=true, banned=false: rejected with a real future reset stamp →
-//     normal quota cooldown until that time.
-func parseUnifiedRatelimitRejected(h http.Header) (resetAt time.Time, banned bool, ok bool) {
+//   - scope != "": model-family-scoped cooldown (never banned) — caller must
+//     use MarkModelRateLimited so the credential keeps serving other models.
+//   - scope == "", banned=false: account-wide cooldown until resetAt.
+//   - scope == "", banned=true: rejected with no usable FUTURE reset stamp —
+//     the stealth-ban signature (a banned account stays "rejected" forever with
+//     no recovery time). Caller escalates.
+func parseUnifiedRatelimitRejected(h http.Header, reqModel string) (resetAt time.Time, scope string, banned bool, ok bool) {
 	const statusPrefix = "rejected"
 	isRejected := func(headerName string) bool {
 		v := strings.ToLower(strings.TrimSpace(h.Get(headerName)))
 		return v != "" && strings.HasPrefix(v, statusPrefix)
 	}
 
-	bucketStatuses := []struct{ statusHdr, resetHdr string }{
+	// Shared 5h/7d buckets — a rejection here is account-wide.
+	sharedBuckets := []struct{ statusHdr, resetHdr string }{
 		{"Anthropic-Ratelimit-Unified-5h-Status", "Anthropic-Ratelimit-Unified-5h-Reset"},
 		{"Anthropic-Ratelimit-Unified-7d-Status", "Anthropic-Ratelimit-Unified-7d-Reset"},
 	}
-	rejected := isRejected("Anthropic-Ratelimit-Unified-Status")
-	var bucketReset time.Time
-	for _, b := range bucketStatuses {
+	sharedRejected := false
+	var sharedReset time.Time
+	for _, b := range sharedBuckets {
 		if !isRejected(b.statusHdr) {
 			continue
 		}
-		rejected = true
-		if t, parsed := parseUnixSecondsHeader(h.Get(b.resetHdr)); parsed && t.After(bucketReset) {
-			bucketReset = t
+		sharedRejected = true
+		if t, parsed := parseUnixSecondsHeader(h.Get(b.resetHdr)); parsed && t.After(sharedReset) {
+			sharedReset = t
 		}
 	}
-	if !rejected {
-		return time.Time{}, false, false
+
+	topRejected := isRejected("Anthropic-Ratelimit-Unified-Status")
+	if !sharedRejected && !topRejected {
+		return time.Time{}, "", false, false
 	}
+
 	now := time.Now()
-	if t, parsed := parseUnixSecondsHeader(h.Get("Anthropic-Ratelimit-Unified-Reset")); parsed && t.After(now) {
-		return clampReset(t), false, true
+	topReset, topOK := parseUnixSecondsHeader(h.Get("Anthropic-Ratelimit-Unified-Reset"))
+
+	// Model-scoped rejection: top-level rejected, shared buckets fine, and the
+	// request is for a model with its own quota scope. Cool down only that model
+	// family — never ban the whole credential. Fall back to a modest re-probe
+	// window if no reset stamp is present.
+	if !sharedRejected {
+		if s := auth.AnthropicModelScope(reqModel); s != "" {
+			if topOK && topReset.After(now) {
+				resetAt = clampReset(topReset)
+			} else {
+				resetAt = now.Add(time.Hour)
+			}
+			return resetAt, s, false, true
+		}
 	}
-	if !bucketReset.IsZero() && bucketReset.After(now) {
-		return clampReset(bucketReset), false, true
+
+	// Account-wide. Prefer the top-level reset, else the latest shared bucket
+	// reset — a 7d rejection isn't released by the (sooner) 5h reset.
+	if topOK && topReset.After(now) {
+		return clampReset(topReset), "", false, true
 	}
-	// Rejected with no future reset (every stamp is past, or missing entirely).
-	// This is what a banned subscription account looks like — Anthropic flags
-	// it "rejected" forever with no recovery time. Tell caller to hard-fail.
-	return time.Time{}, true, true
+	if !sharedReset.IsZero() && sharedReset.After(now) {
+		return clampReset(sharedReset), "", false, true
+	}
+	// Rejected with no future reset — the stealth-ban signature.
+	return time.Time{}, "", true, true
 }
 
 // parseUnixSecondsHeader parses an `epoch-seconds` integer header value into

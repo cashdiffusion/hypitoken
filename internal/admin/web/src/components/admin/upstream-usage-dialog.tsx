@@ -24,6 +24,21 @@ interface AnthropicResponse {
       seven_day_sonnet?: UsageWindow;
       seven_day_cowork?: UsageWindow;
       iguana_necktie?: UsageWindow;
+      // Newer authoritative structure. Fable's independent weekly allotment
+      // (~50% of weekly) is a weekly_scoped entry scoped to the Fable model —
+      // NOT a top-level window.
+      limits?: Array<{
+        kind?: string;
+        group?: string;
+        percent?: number; // already 0-100
+        severity?: string;
+        resets_at?: string | null;
+        is_active?: boolean;
+        scope?: {
+          model?: { id?: string | null; display_name?: string | null };
+          surface?: string | null;
+        } | null;
+      }>;
     };
   };
   profile?: {
@@ -170,7 +185,7 @@ function collectCodexWindows(
 }
 
 const ANTHROPIC_WINDOWS: [
-  keyof NonNullable<NonNullable<AnthropicResponse["usage"]>["body"]>,
+  Exclude<keyof NonNullable<NonNullable<AnthropicResponse["usage"]>["body"]>, "limits">,
   string,
 ][] = [
   ["five_hour", "5-hour"],
@@ -385,6 +400,38 @@ function AnthropicUsageBody({
               </div>
             );
           })}
+          {(() => {
+            // Fable's independent weekly allotment lives in limits[] as a
+            // weekly_scoped entry scoped to the Fable model — render it as one
+            // more row. percent is already 0-100.
+            const fable = (usageBody.limits || []).find(
+              (l) =>
+                (l?.scope?.model?.display_name || "").toLowerCase() === "fable" ||
+                (l?.kind === "weekly_scoped" && !!l?.scope?.model),
+            );
+            if (!fable) return null;
+            const label = `7-day ${fable.scope?.model?.display_name || "Fable"}`;
+            const { pct, color } = pctColorPct(fable.percent);
+            return (
+              <div key="fable-scoped" className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium">{label}</span>
+                  <span className="font-mono text-muted-foreground">
+                    {pct != null ? `${pct}%` : "—"}
+                    {fable.resets_at
+                      ? t("legacy.upstreamUsage.resetsIn", { when: fmtCountdown(fable.resets_at) })
+                      : ""}
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-muted">
+                  <div
+                    className={cn("h-full rounded-full", color)}
+                    style={{ width: `${pct ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
