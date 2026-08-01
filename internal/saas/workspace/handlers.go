@@ -69,9 +69,11 @@ func wsID(c *gin.Context) int64 {
 	return id
 }
 
+// monthStart is the opening instant of the current billing month. Pinned to
+// db.BillingZone, not the host's, so the member-cap rollups a space admin sees
+// cover exactly the month PreCheck enforces the cap over.
 func monthStart() time.Time {
-	now := time.Now()
-	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	return db.BillingMonthStart(time.Now())
 }
 
 // maskToken hides the secret body of a key, keeping only the recognizable

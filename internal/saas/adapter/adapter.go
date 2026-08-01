@@ -137,18 +137,19 @@ func (a *Adapter) PreCheck(ctx context.Context, info server.SaaSTokenInfo) *serv
 	if info.BalanceUSD <= 0 {
 		return &server.PreCheckError{Status: http.StatusPaymentRequired, Code: "insufficient_balance", Message: "The account balance is insufficient. Add funds before retrying.", Details: map[string]any{"balance_usd": info.BalanceUSD}}
 	}
-	// Both cap windows open at local midnight, so "daily" and "monthly" mean
-	// the same calendar to the customer reading them.
+	// Both cap windows open at midnight in db.BillingZone (UTC+8), so "daily"
+	// and "monthly" mean the same calendar to the customer reading them, and
+	// that calendar does not depend on how the host happens to be configured.
 	//
 	// dayStart used to be now.Truncate(24*time.Hour), which looks local but is
 	// not: Truncate operates on absolute time since the zero instant, so it
-	// always lands on UTC midnight whatever the server's zone. That was
-	// invisible while the host ran UTC and became wrong the moment it moved to
-	// Asia/Hong_Kong — a daily allowance resetting at 08:00 local, while the
-	// monthly one (which really does follow the zone) reset at 00:00.
+	// always lands on UTC midnight whatever the zone. That was invisible while
+	// the host ran UTC and would have gone wrong the moment it moved to
+	// Asia/Hong_Kong — a daily allowance resetting at 08:00, while the monthly
+	// one reset at 00:00.
 	now := time.Now()
-	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	dayStart := db.BillingDayStart(now)
+	monthStart := db.BillingMonthStart(now)
 
 	// Layer 1 — the shared workspace pool's own caps (no-op for personal spaces,
 	// whose caps are 0). Enforced against the workspace-scoped ledger.
