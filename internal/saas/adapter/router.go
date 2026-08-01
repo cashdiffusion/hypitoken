@@ -297,7 +297,16 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 		// figures the user truly paid, so the dashboard "累计消费" and this tab
 		// agree.
 		spentTotal, _ := store.SumChargeSince(c.Request.Context(), u.ID, time.Time{})
-		dayStart := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+		// spent_today opens at LOCAL midnight, matching the window PreCheck
+		// enforces the daily cap over (adapter.go). These two have to agree: if
+		// the cap counts a Hong Kong day while the dashboard counts a UTC one,
+		// a user rejected for exceeding their daily limit sees a "spent today"
+		// figure well under it and has no way to make sense of the refusal.
+		// (today_key/by_day below stay on UTC days — they index a requestlog
+		// aggregation keyed that way, and they measure official cost rather
+		// than charged amount.)
+		localNow := time.Now()
+		dayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, localNow.Location())
 		spentToday, _ := store.SumChargeSince(c.Request.Context(), u.ID, dayStart)
 		c.JSON(http.StatusOK, gin.H{
 			"total":       res.Summary,
