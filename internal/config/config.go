@@ -8,6 +8,7 @@ import (
 
 	"github.com/wjsoj/CPA-Claude/internal/saas"
 	"github.com/wjsoj/CPA-Claude/internal/shop"
+	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/pricing"
 	"gopkg.in/yaml.v3"
 )
@@ -244,6 +245,16 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	applyDefaults(cfg, path)
+	cfg.DefaultProxyURL = strings.TrimSpace(cfg.DefaultProxyURL)
+	if err := auth.ValidateProxyURL(cfg.DefaultProxyURL); err != nil {
+		return nil, fmt.Errorf("default_proxy_url: %w", err)
+	}
+	for i := range cfg.APIKeys {
+		cfg.APIKeys[i].ProxyURL = strings.TrimSpace(cfg.APIKeys[i].ProxyURL)
+		if err := auth.ValidateProxyURL(cfg.APIKeys[i].ProxyURL); err != nil {
+			return nil, fmt.Errorf("api_keys[%d].proxy_url: %w", i, err)
+		}
+	}
 	return cfg, nil
 }
 

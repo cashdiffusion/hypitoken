@@ -211,7 +211,15 @@ func (c *CredHandler) oauthFinish(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.Pool.AddOAuth(a)
+	if err := c.Pool.AddOAuth(a); err != nil {
+		if errors.Is(err, auth.ErrDuplicateClaudeAccountUUID) && a.FilePath != "" {
+			if removeErr := os.Remove(a.FilePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				log.Errorf("saas-admin: remove rejected duplicate OAuth file %s: %v", a.ID, removeErr)
+			}
+		}
+		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
 	ctx.JSON(http.StatusOK, gin.H{"id": a.ID, "email": a.Email})
 }
 
@@ -246,7 +254,15 @@ func (c *CredHandler) sessionCookie(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.Pool.AddOAuth(a)
+	if err := c.Pool.AddOAuth(a); err != nil {
+		if errors.Is(err, auth.ErrDuplicateClaudeAccountUUID) && a.FilePath != "" {
+			if removeErr := os.Remove(a.FilePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				log.Errorf("saas-admin: remove rejected duplicate OAuth file %s: %v", a.ID, removeErr)
+			}
+		}
+		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
 	ctx.JSON(http.StatusOK, gin.H{"id": a.ID, "email": a.Email})
 }
 

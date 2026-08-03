@@ -47,6 +47,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -631,6 +638,25 @@ function CredentialsTab() {
                                   {c.plan_type}
                                 </span>
                               )}
+                              {c.provider === "anthropic" && c.kind === "oauth" && (
+                                <span
+                                  className={cn(
+                                    "w-fit rounded border px-1.5 py-0.5 text-[10px] font-mono uppercase",
+                                    c.claude_identity_mode === "rewrite_strip"
+                                      ? "border-warning/30 bg-warning/15 text-warning"
+                                      : "border-success/30 bg-success/15 text-success",
+                                  )}
+                                  title={
+                                    c.claude_identity_mode === "rewrite_strip"
+                                      ? "Rewrite 实验组：重写上游账号身份，并删除无法重签的 CCH"
+                                      : "对照组：保留 Claude Code 原始请求和 CCH"
+                                  }
+                                >
+                                  {c.claude_identity_mode === "rewrite_strip"
+                                    ? "rewrite"
+                                    : "control"}
+                                </span>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell className="font-mono text-xs">{c.group || "—"}</TableCell>
@@ -948,6 +974,12 @@ function CredentialDetail({ c }: { c: Credential }) {
           )}
           <Row k="最大并发" v={c.max_concurrent > 0 ? String(c.max_concurrent) : "∞"} />
           <Row k="文件支撑" v={c.file_backed ? "是" : "否（config.yaml）"} />
+          {c.provider === "anthropic" && c.kind === "oauth" && (
+            <Row
+              k="身份模式"
+              v={c.claude_identity_mode === "rewrite_strip" ? "Rewrite 实验组" : "Preserve 对照组"}
+            />
+          )}
           {c.disabled && <Row k="状态" v={<span className="text-warning">已禁用</span>} />}
         </div>
       </div>
@@ -1044,6 +1076,7 @@ function EditCredentialDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const confirm = useConfirm();
   const [label, setLabel] = useState("");
   const [group, setGroup] = useState("");
   const [proxy, setProxy] = useState("");
@@ -1051,6 +1084,7 @@ function EditCredentialDialog({
   const [apiKey, setAPIKey] = useState("");
   const [maxC, setMaxC] = useState("");
   const [disabled, setDisabled] = useState(false);
+  const [identityMode, setIdentityMode] = useState<"preserve" | "rewrite_strip">("preserve");
   const [modelMap, setModelMap] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -1063,6 +1097,7 @@ function EditCredentialDialog({
       setAPIKey("");
       setMaxC(String(cred.max_concurrent ?? 0));
       setDisabled(!!cred.disabled);
+      setIdentityMode(cred.claude_identity_mode || "preserve");
       setModelMap(
         cred.model_map && Object.keys(cred.model_map).length > 0
           ? JSON.stringify(cred.model_map, null, 2)
@@ -1073,6 +1108,51 @@ function EditCredentialDialog({
 
   if (!cred) return null;
   const isAPIKey = cred.kind === "apikey";
+  const isClaudeOAuth = cred.provider === "anthropic" && cred.kind === "oauth";
+  const currentIdentityMode = cred.claude_identity_mode || "preserve";
+
+  const applyIdentityMode = async () => {
+    if (!isClaudeOAuth || identityMode === currentIdentityMode) return;
+    const targetLabel = identityMode === "rewrite_strip" ? "Rewrite 实验组" : "Preserve 对照组";
+    if (
+      !(await confirm({
+        title: `切换为 ${targetLabel}？`,
+        description:
+          identityMode === "rewrite_strip"
+            ? "前端会临时禁用账号，确认没有活跃会话后重写身份模式，并删除改写请求中无法重签的 CCH。切换成功后会恢复账号原来的启用状态。"
+            : "前端会临时禁用账号，确认没有活跃会话后切回原样透传模式。官方 Claude Code 的原始身份和 CCH 将被保留。",
+        confirmLabel: "确认切换",
+      }))
+    ) {
+      return;
+    }
+
+    setBusy(true);
+    let disabledForChange = false;
+    try {
+      if (!cred.disabled) {
+        await apiPatch(`/admin/credentials/${encodeURIComponent(cred.id)}`, { disabled: true });
+        disabledForChange = true;
+      }
+      await apiPatch(`/admin/credentials/${encodeURIComponent(cred.id)}`, {
+        claude_identity_mode: identityMode,
+      });
+      if (disabledForChange) {
+        await apiPatch(`/admin/credentials/${encodeURIComponent(cred.id)}`, { disabled: false });
+      }
+      toast.success(`已切换为 ${targetLabel}`);
+      onSaved();
+      onClose();
+    } catch (e) {
+      toast.error(
+        `${errMsg(e)}${disabledForChange ? "；账号已保持禁用，请等待槽位归零后重试" : ""}`,
+      );
+      onSaved();
+      if (disabledForChange) onClose();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const save = async () => {
     setBusy(true);
@@ -1204,6 +1284,43 @@ function EditCredentialDialog({
               </p>
             )}
           </div>
+          {isClaudeOAuth && (
+            <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+              <Label>Claude Code 身份模式</Label>
+              <Select
+                value={identityMode}
+                onValueChange={(value: "preserve" | "rewrite_strip") => setIdentityMode(value)}
+                disabled={busy}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="preserve">Preserve 对照组（保留原始 CCH）</SelectItem>
+                  <SelectItem value="rewrite_strip">
+                    Rewrite 实验组（重写身份并删除 CCH）
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                当前：
+                {currentIdentityMode === "rewrite_strip" ? "Rewrite 实验组" : "Preserve 对照组"}
+                {" · "}
+                活跃槽位 {cred.active_clients}/{cred.max_concurrent > 0 ? cred.max_concurrent : "∞"}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                模式切换独立于下方普通保存。切换时会自动临时禁用账号；若仍有活跃会话，账号会保持禁用，等待槽位归零后再重试。
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy || identityMode === currentIdentityMode}
+                onClick={applyIdentityMode}
+              >
+                {busy ? "切换中…" : "应用身份模式"}
+              </Button>
+            </div>
+          )}
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"

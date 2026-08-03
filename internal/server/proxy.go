@@ -248,9 +248,11 @@ func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clie
 		writeAPIError(c, provider, publicUpstreamError(d.status, d.body))
 		s.emitLog(requestlog.Record{
 			Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider,
-			AuthID: d.authID, Model: model, Status: d.status, Attempts: attempts,
+			AuthID: d.authID, AuthLabel: d.authLabel, AuthKind: d.authKind,
+			Model: model, Status: d.status, Attempts: attempts,
 			Stream: stream, Path: path, DurationMs: time.Since(start).Milliseconds(),
-			Error: fmt.Sprintf("upstream %d (all credentials exhausted)", d.status),
+			Error:       fmt.Sprintf("upstream %d (all credentials exhausted)", d.status),
+			ClaudeAudit: d.claudeAudit,
 		})
 	}
 
@@ -377,10 +379,13 @@ func flagStripThinking(a *auth.Auth) {
 // receives the genuine upstream status (e.g. a 429 with its Retry-After) and
 // backs off correctly. nil when nothing was withheld.
 type deferredResponse struct {
-	status int
-	header http.Header
-	body   []byte
-	authID string
+	status      int
+	header      http.Header
+	body        []byte
+	authID      string
+	authLabel   string
+	authKind    string
+	claudeAudit *requestlog.ClaudeAudit
 }
 
 func copySafeRetryHeaders(c *gin.Context, h http.Header) {
@@ -406,17 +411,62 @@ func copySafeRetryHeaders(c *gin.Context, h http.Header) {
 // blocking bootstrap-wait gate so a transparent credential switch doesn't
 // re-stack the ≤5s sidecar wait on every alternate credential.
 func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, slotID, clientName string, start time.Time, attempts int, isRetry bool) (retry bool, done bool, deferred *deferredResponse) {
-	// Mid-conversation account switch: drop prior `thinking` block
-	// signatures before forwarding. Both OAuth and API-key paths bind
-	// thinking signatures to the issuing account, so this runs ahead
-	// of the API-key branch. Scoped to /v1/messages — no other path
-	// carries multi-turn assistant history.
+	if a.Kind == auth.KindAPIKey {
+		// API-key relays keep the established thinking-signature behavior. The
+		// genuine preserve/rewrite policy applies only to Anthropic OAuth.
+		if path == "/v1/messages" {
+			switched := s.switchTracker.Check(clientToken, body, a.ID)
+			if switched || a.StripThinkingEnabled() {
+				if switched {
+					log.Infof("auth switch detected: clientToken=%s now on auth=%s — sanitizing prior thinking signatures",
+						maskClientToken(clientToken), a.ID)
+				}
+				body = thinkingsig.SanitizeForSwitch(body)
+			}
+		}
+		return s.doForwardAnthropicAPIKey(c, a, path, body, stream, model, clientToken, clientName, start, attempts)
+	}
+
+	accountKey := a.AccountKey()
+	var requestPolicy mimicry.RequestPolicy
+	rewriteStrip := false
 	if path == "/v1/messages" {
-		switched := s.switchTracker.Check(clientToken, body, a.ID)
-		// StripThinkingEnabled credentials (relays that rotate backend accounts
-		// per request) reject every echoed thinking signature, so sanitize ahead
-		// of the forward instead of failing once and replaying. The flag is set +
-		// persisted automatically on the first signature recovery (any provider).
+		requestClass := mimicry.ClassifyClaudeCodeRequest(body)
+		if requestClass == mimicry.RequestClassGenuine {
+			genuineMode, err := genuineModeForAuth(a)
+			if err != nil {
+				log.Errorf("proxy: invalid Claude identity mode via %s: %v", a.ID, err)
+				writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusInternalServerError, Code: "request_preparation_failed", Message: "The request could not be prepared. Please try again."})
+				return false, true, nil
+			}
+			rewriteStrip = genuineMode == mimicry.GenuineRequestRewriteStripCCH
+		}
+
+		// Preserve is the experiment's control arm: it deliberately runs the
+		// exact pre-policy request path below, including the legacy credential-ID
+		// switch key, thinking sanitization, body shaping, headers, and reactive
+		// signature recovery. Only rewrite_strip enters the new prepared path.
+		switchKey := a.ID
+		if rewriteStrip {
+			var err error
+			requestPolicy, err = mimicry.NewClaudeCodeRequestPolicy(requestClass, mimicry.GenuineRequestRewriteStripCCH)
+			if err != nil {
+				log.Warnf("proxy: classify Claude request via %s: %v", a.ID, err)
+				writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusBadRequest, Code: "invalid_request", Message: "The request body is not a valid Claude messages request."})
+				return false, true, nil
+			}
+			if strings.TrimSpace(c.GetHeader("Anthropic-Beta")) == "" {
+				// Main, 1M, and title requests carry different feature vectors. With
+				// no genuine downstream vector there is no safe 2.1.220 default.
+				writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusBadRequest, Code: "invalid_request", Message: "A genuine Claude Code request must include Anthropic-Beta."})
+				return false, true, nil
+			}
+			// Thinking signatures are tied to the real Anthropic account, not a
+			// credential filename, in the experimental identity-mapped path.
+			switchKey = accountKey
+		}
+
+		switched := s.switchTracker.Check(clientToken, body, switchKey)
 		if switched || a.StripThinkingEnabled() {
 			if switched {
 				log.Infof("auth switch detected: clientToken=%s now on auth=%s — sanitizing prior thinking signatures",
@@ -426,9 +476,6 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		}
 	}
 
-	if a.Kind == auth.KindAPIKey {
-		return s.doForwardAnthropicAPIKey(c, a, path, body, stream, model, clientToken, clientName, start, attempts)
-	}
 	baseURL := s.cfg.AnthropicBaseURL
 	// Per-credential base URL override (used for relay/midstream vendors on
 	// API-key credentials).
@@ -438,32 +485,33 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	url := baseURL + path + "?beta=true"
 	isAnthropicBase := strings.HasPrefix(strings.ToLower(baseURL), "https://api.anthropic.com")
 
-	// Per-credential model rewrite (API-key only, e.g. third-party relays
-	// that require a vendor-prefixed model name like "[0.1]a/claude-sonnet-4-6").
-	// Routing already filtered to credentials that accept this model; here we
-	// just substitute the body's "model" field if the map says so. The
-	// client-facing model string used for usage/pricing stays unchanged.
 	upstreamBody := body
-	if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
+	id := mimicry.SimIdentity{
+		AccountKey:  accountKey,
+		AccountUUID: a.AccountUUIDValue(),
+		ClientToken: clientToken,
+	}
+	var prepared mimicry.BodyTransformResult
+	if rewriteStrip {
+		var err error
+		prepared, err = prepareClaudeRewriteBody(body, model, a, id, requestPolicy)
+		if err != nil {
+			// Local preparation failures are neither credential failures nor a
+			// reason to fail over. In particular, rewrite_strip never degrades to
+			// preserve with a stale downstream identity/cch.
+			log.Errorf("proxy: prepare Claude request via %s: %v", a.ID, err)
+			writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusInternalServerError, Code: "request_preparation_failed", Message: "The request could not be prepared. Please try again."})
+			return false, true, nil
+		}
+		upstreamBody = prepared.Body()
+	} else if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
+		// Legacy path: preserve the pre-policy model rewrite behavior, including
+		// its best-effort fallback when a body cannot be decoded.
 		if rewritten, err := rewriteModelField(body, upstreamModel); err == nil {
 			upstreamBody = rewritten
 		} else {
 			log.Warnf("proxy: model rewrite (%s -> %s) failed via %s: %v", model, upstreamModel, a.ID, err)
 		}
-	}
-
-	// Body-layer Claude Code mimicry: rebuild system to match the real CC
-	// 4-block layout (billing block + "You are Claude Code..." + original
-	// system prompt with cache_control), inject metadata.user_id with a
-	// per-account device_id and a per-(account, clientToken, conversation)
-	// session_id, sign the cch billing hash. The client's prompt is
-	// preserved verbatim — only the surrounding wrapper is normalized.
-	// Only runs on /v1/messages (count_tokens isn't billed and shouldn't
-	// be modified). Haiku requests skip mimicry inside the function.
-	id := mimicry.SimIdentity{
-		AccountKey:  a.AccountKey(),
-		AccountUUID: a.AccountUUIDValue(),
-		ClientToken: clientToken,
 	}
 
 	// Sidecar: dispatch the per-session bootstrap+quota_probe the first
@@ -477,13 +525,11 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	// gate the first business request on it, capped at bootstrapWaitCap
 	// so a stuck sidecar can't hang user traffic.
 	bootstrapReady := s.sidecar.Notify(a, clientToken)
-	if path == "/v1/messages" {
+	if path == "/v1/messages" && !rewriteStrip {
+		// Exact legacy/control path. Genuine Claude Code requests are recognized
+		// inside ApplyClaudeCodeBodyMimicry and retain their existing non-zero
+		// cch, while every other legacy shaping rule stays unchanged.
 		upstreamBody = mimicry.ApplyClaudeCodeBodyMimicry(upstreamBody, model, id)
-		// Erase the client "Today's date is …" steganography beacon (3 bits:
-		// known-gateway / lab-keyword / China-timezone) real CC embeds once it
-		// detects our non-official base URL. Runs even for real-CC passthrough
-		// (which the body mimicry above skips) — the beacon rides the client's
-		// own body straight to Anthropic. See cc-core crack/cc2197/SPEC.md §6.
 		if normalized, changed := mimicry.NormalizeDateline(upstreamBody); changed {
 			upstreamBody = normalized
 		}
@@ -514,13 +560,22 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	copyForwardableHeaders(c.Request.Header, upReq.Header)
 	stripIngressHeaders(upReq.Header)
 
-	// Anthropic auth + Claude Code fingerprint headers. Pass the same
-	// SimIdentity so X-Claude-Code-Session-Id matches metadata.user_id.session_id.
-	applyAnthropicHeaders(upReq, a, stream, isAnthropicBase, id, upstreamBody)
+	// Only rewrite_strip consumes the new atomic prepared result. Preserve and
+	// all non-genuine traffic continue through the exact legacy header adapter.
+	if rewriteStrip {
+		if err := applyAnthropicPreparedHeaders(upReq, a, stream, isAnthropicBase, prepared); err != nil {
+			log.Errorf("proxy: prepare Claude headers via %s: %v", a.ID, err)
+			writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusInternalServerError, Code: "request_preparation_failed", Message: "The request could not be prepared. Please try again."})
+			return false, true, nil
+		}
+	} else {
+		applyAnthropicHeaders(upReq, a, stream, isAnthropicBase, id, upstreamBody)
+	}
 
 	client := auth.ClientFor(a.ProxyURL, s.cfg.UseUTLS)
 	resp, err := client.Do(upReq)
 	if err != nil {
+		claudeAudit := claudeRewriteAudit(prepared, nil, accountKey)
 		// Client went away (ctrl-C, closed connection, etc.) — not a
 		// credential fault. Record a non-fatal hint for the admin panel,
 		// skip retrying onto other credentials (they would all hit the
@@ -547,12 +602,21 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 				DurationMs:  time.Since(start).Milliseconds(),
 				Attempts:    attempts,
 				Error:       "client canceled",
+				ClaudeAudit: claudeAudit,
 			})
 			return false, true, nil
 		}
 		a.MarkFailure(err.Error())
 		log.Warnf("proxy: upstream error via %s: %v", a.ID, err)
-		return true, false, nil
+		s.emitLog(requestlog.Record{
+			Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.NormalizeProvider(a.Provider),
+			AuthID: a.ID, AuthLabel: a.Label, AuthKind: "oauth", Model: model, Status: http.StatusBadGateway,
+			Stream: stream, Path: path, Attempts: attempts, DurationMs: time.Since(start).Milliseconds(),
+			Error: "upstream transport error", AttemptOnly: true, ClaudeAudit: claudeAudit,
+		})
+		return true, false, &deferredResponse{
+			status: http.StatusBadGateway, authID: a.ID, authLabel: a.Label, authKind: "oauth", claudeAudit: claudeAudit,
+		}
 	}
 
 	// Decompress upstream gzip/br before reading anything — we asked for
@@ -582,25 +646,45 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 			sanitized := thinkingsig.SanitizeForSwitch(body)
 			if !bytes.Equal(sanitized, body) {
 				retryUpstream := sanitized
-				if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
-					if rewritten, err := rewriteModelField(retryUpstream, upstreamModel); err == nil {
-						retryUpstream = rewritten
+				var retryPrepared mimicry.BodyTransformResult
+				if rewriteStrip {
+					var prepErr error
+					retryPrepared, prepErr = prepareClaudeRewriteBody(sanitized, model, a, id, requestPolicy)
+					if prepErr != nil {
+						log.Warnf("proxy: %s signature retry preparation failed: %v", a.ID, prepErr)
+						goto signatureRecoveryDone
 					}
-				}
-				retryUpstream = mimicry.ApplyClaudeCodeBodyMimicry(retryUpstream, model, id)
-				if normalized, changed := mimicry.NormalizeDateline(retryUpstream); changed {
-					retryUpstream = normalized
+					retryUpstream = retryPrepared.Body()
+				} else {
+					// Exact legacy/control recovery path.
+					if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
+						if rewritten, rewriteErr := rewriteModelField(retryUpstream, upstreamModel); rewriteErr == nil {
+							retryUpstream = rewritten
+						}
+					}
+					retryUpstream = mimicry.ApplyClaudeCodeBodyMimicry(retryUpstream, model, id)
+					if normalized, changed := mimicry.NormalizeDateline(retryUpstream); changed {
+						retryUpstream = normalized
+					}
 				}
 				log.Warnf("proxy: %s returned 400 signature-in-thinking — sanitizing and retrying once on same credential", a.ID)
 				if retryReq, rerr := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(retryUpstream)); rerr == nil {
 					copyForwardableHeaders(c.Request.Header, retryReq.Header)
 					stripIngressHeaders(retryReq.Header)
-					applyAnthropicHeaders(retryReq, a, stream, isAnthropicBase, id, retryUpstream)
+					if rewriteStrip {
+						if headerErr := applyAnthropicPreparedHeaders(retryReq, a, stream, isAnthropicBase, retryPrepared); headerErr != nil {
+							log.Warnf("proxy: %s signature retry header preparation failed: %v", a.ID, headerErr)
+							goto signatureRecoveryDone
+						}
+					} else {
+						applyAnthropicHeaders(retryReq, a, stream, isAnthropicBase, id, retryUpstream)
+					}
 					if retryResp, rderr := client.Do(retryReq); rderr == nil {
 						ccstream.Decompress(retryResp)
 						if retryResp.StatusCode < 400 {
 							log.Infof("proxy: %s signature retry succeeded", a.ID)
 							resp = retryResp
+							prepared = retryPrepared
 							recovered = true
 							flagStripThinking(a)
 						} else {
@@ -613,6 +697,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 				}
 			}
 		}
+	signatureRecoveryDone:
 		if recovered {
 			goto recoveredFromSignature
 		}
@@ -735,6 +820,10 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		case resp.StatusCode == 529, resp.StatusCode >= 500:
 			a.MarkFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
 		}
+		claudeAudit := claudeRewriteAudit(prepared, resp.Header, accountKey)
+		if claudeAudit != nil {
+			claudeAudit.CredentialHardFailed = a.IsHardFailed()
+		}
 
 		authKind := "oauth"
 		if a.Kind == auth.KindAPIKey {
@@ -745,20 +834,21 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		s.pool.Unstick(auth.NormalizeProvider(a.Provider), clientToken, slotID)
 
 		if retryable {
-			// Withhold the response and signal the caller to switch
-			// credentials. We deliberately do NOT emitLog here: the request
-			// hasn't reached the client yet, and logging a 429 row for an
-			// attempt the user never saw would inflate the error dashboard and
-			// mislead billing. The final outcome (a success on another
-			// credential, or the surfaced error once the pool is exhausted)
-			// logs the authoritative row. The journald warn line below keeps
-			// per-credential visibility for ops.
+			// Withhold the response and signal the caller to switch credentials.
+			// The attempt-only row is excluded from normal dashboard aggregates,
+			// but preserves per-account 401/403/429 and hard-failure evidence for
+			// the seven-day experiment.
 			log.Warnf("proxy: %s returned %d — retrying on another credential. body=%s", a.ID, resp.StatusCode, truncate(errBody, 500))
+			s.emitLog(requestlog.Record{
+				Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.NormalizeProvider(a.Provider),
+				AuthID: a.ID, AuthLabel: a.Label, AuthKind: authKind, Model: model, Status: resp.StatusCode,
+				Stream: stream, Path: path, Attempts: attempts, DurationMs: time.Since(start).Milliseconds(),
+				Error:       fmt.Sprintf("upstream %d (credential attempt withheld)", resp.StatusCode),
+				AttemptOnly: true, ClaudeAudit: claudeAudit,
+			})
 			return true, false, &deferredResponse{
-				status: resp.StatusCode,
-				header: resp.Header.Clone(),
-				body:   errBody,
-				authID: a.ID,
+				status: resp.StatusCode, header: resp.Header.Clone(), body: errBody,
+				authID: a.ID, authLabel: a.Label, authKind: authKind, claudeAudit: claudeAudit,
 			}
 		}
 
@@ -776,6 +866,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 			Path:        path,
 			Attempts:    attempts,
 			Error:       fmt.Sprintf("upstream %d", resp.StatusCode),
+			ClaudeAudit: claudeAudit,
 		})
 
 		copySafeRetryHeaders(c, resp.Header)
@@ -789,6 +880,7 @@ recoveredFromSignature:
 	if a.Kind == auth.KindAPIKey {
 		authKind = "apikey"
 	}
+	claudeAudit := claudeRewriteAudit(prepared, resp.Header, accountKey)
 
 	var counts usage.Counts
 	var sub advisor.SubUsage
@@ -800,6 +892,7 @@ recoveredFromSignature:
 	// model field on message_start to correlate conversation turns; a
 	// vendor-prefixed name breaks multi-turn continuation.
 	var rewriteClientModel string
+	terminalError := ""
 	if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
 		rewriteClientModel = model
 	}
@@ -817,16 +910,26 @@ recoveredFromSignature:
 					Client: clientName, ClientToken: maskClientToken(clientToken),
 					Provider: auth.NormalizeProvider(a.Provider), AuthID: a.ID, AuthLabel: a.Label,
 					AuthKind: authKind, Model: model, Status: 499, Stream: stream, Path: path, Attempts: attempts,
-					DurationMs: time.Since(start).Milliseconds(), Error: "client canceled before first event",
+					DurationMs: time.Since(start).Milliseconds(), Error: "client canceled before first event", ClaudeAudit: claudeAudit,
 				})
 				return false, true, nil
 			}
 			log.Warnf("proxy: stream broke before any output via %s (attempt %d, %s): %v — retrying on another credential",
 				a.ID, attempts, time.Since(start).Round(time.Millisecond), res.err)
-			return true, false, nil
+			a.MarkFailure("stream broke before first event: " + errString(res.err))
+			s.emitLog(requestlog.Record{
+				Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.NormalizeProvider(a.Provider),
+				AuthID: a.ID, AuthLabel: a.Label, AuthKind: authKind, Model: model, Status: http.StatusBadGateway,
+				Stream: stream, Path: path, Attempts: attempts, DurationMs: time.Since(start).Milliseconds(),
+				Error: "stream broke before first event", AttemptOnly: true, ClaudeAudit: claudeAudit,
+			})
+			return true, false, &deferredResponse{
+				status: http.StatusBadGateway, authID: a.ID, authLabel: a.Label, authKind: authKind, claudeAudit: claudeAudit,
+			}
 		}
 		a.MarkSuccess()
 		if !res.sawTerminal {
+			terminalError = "stream truncated before terminal event"
 			log.Warnf("proxy: SSE truncated mid-stream via %s (attempt %d, events=%d, bytes=%d, %s): %v",
 				a.ID, attempts, res.events, res.bytes, time.Since(start).Round(time.Millisecond), res.err)
 		}
@@ -879,6 +982,20 @@ recoveredFromSignature:
 		}
 		s.usage.RecordClient(clientToken, clientName, clientCounts, costUSD+advisorCost)
 	}
+	if claudeAudit != nil {
+		log.Infof(
+			"claude-chain-audit: account=%s class=%s mode=%s identity_mapped=%t cch_stripped=%t cc_prev_present=%t cc_prev_preserved=%t cc_prev_hash=%s response_request_hash=%s",
+			claudeAudit.AccountHash,
+			claudeAudit.RequestClass,
+			claudeAudit.IdentityMode,
+			claudeAudit.AccountIdentityMapped,
+			claudeAudit.CCHStripped,
+			claudeAudit.CCPrevReqPresent,
+			claudeAudit.CCPrevReqPreserved,
+			claudeAudit.CCPrevReqHash,
+			claudeAudit.ResponseRequestIDHash,
+		)
+	}
 	s.emitLog(requestlog.Record{
 		Client:      clientName,
 		ClientToken: maskClientToken(clientToken),
@@ -897,8 +1014,10 @@ recoveredFromSignature:
 		Stream:      stream,
 		Path:        path,
 		Attempts:    attempts,
+		Error:       terminalError,
 		UserID:      userID,
 		Multiplier:  multiplier,
+		ClaudeAudit: claudeAudit,
 	})
 	return false, true, nil
 }
@@ -1264,6 +1383,41 @@ func writeResponseHeaders(c *gin.Context, resp *http.Response) {
 func applyAnthropicHeaders(req *http.Request, a *auth.Auth, stream, isAnthropicBase bool, id mimicry.SimIdentity, body []byte) {
 	token, kind := a.Credentials()
 	mimicry.ApplyClaudeCodeHeaders(req, token, kindToMimicry(kind), stream, isAnthropicBase, id, body)
+}
+
+func applyAnthropicPreparedHeaders(req *http.Request, a *auth.Auth, stream, isAnthropicBase bool, prepared mimicry.BodyTransformResult) error {
+	token, kind := a.Credentials()
+	return mimicry.ApplyClaudeCodePreparedRequest(req, token, a.AccountKey(), kindToMimicry(kind), stream, isAnthropicBase, prepared)
+}
+
+func genuineModeForAuth(a *auth.Auth) (mimicry.GenuineRequestMode, error) {
+	mode := a.ClaudeIdentityModeValue()
+	switch mode {
+	case auth.ClaudeIdentityModePreserve:
+		return mimicry.GenuineRequestPreserve, nil
+	case auth.ClaudeIdentityModeRewriteStripCCH:
+		return mimicry.GenuineRequestRewriteStripCCH, nil
+	default:
+		return mimicry.GenuineRequestModeUnspecified, fmt.Errorf("unsupported account mode %q", mode)
+	}
+}
+
+func prepareClaudeRewriteBody(body []byte, model string, a *auth.Auth, id mimicry.SimIdentity, policy mimicry.RequestPolicy) (mimicry.BodyTransformResult, error) {
+	working := body
+	// Any permitted body edits happen before the atomic transform. The rewrite
+	// subsequently strips cch, so these exact-byte edits cannot leave a stale
+	// signature behind.
+	if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
+		rewritten, err := rewriteModelFieldPreservingBytes(working, upstreamModel)
+		if err != nil {
+			return mimicry.BodyTransformResult{}, fmt.Errorf("model rewrite (%s -> %s): %w", model, upstreamModel, err)
+		}
+		working = rewritten
+	}
+	if normalized, changed := mimicry.NormalizeDateline(working); changed {
+		working = normalized
+	}
+	return mimicry.PrepareClaudeCodeRequest(working, model, id, policy, kindToMimicry(a.Kind))
 }
 
 func kindToMimicry(k auth.Kind) string {
@@ -1791,11 +1945,9 @@ func truncate(b []byte, n int) string {
 	return string(b[:n]) + "...(truncated)"
 }
 
-// rewriteModelField returns a copy of the JSON request body with its top-level
-// "model" string set to upstream. Used when an API-key credential has a
-// model_map entry that rewrites the client's model name to a vendor-specific
-// one (e.g. "claude-opus-4-6" -> "[0.16]稳定喵/claude-opus-4-6"). Falls back
-// to leaving the body alone if the JSON can't be parsed as an object.
+// rewriteModelField is the legacy best-effort model mapper. It intentionally
+// retains the pre-policy map decode/remarshal behavior because Preserve is the
+// experiment's behavior-for-behavior control path.
 func rewriteModelField(body []byte, upstream string) ([]byte, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(body, &obj); err != nil {
@@ -1810,6 +1962,87 @@ func rewriteModelField(body []byte, upstream string) ([]byte, error) {
 	}
 	obj["model"] = mb
 	return json.Marshal(obj)
+}
+
+// rewriteModelFieldPreservingBytes is restricted to rewrite_strip. It changes
+// only the top-level model value so the subsequent identity rewrite can verify
+// and atomically install the resulting genuine Claude Code request.
+func rewriteModelFieldPreservingBytes(body []byte, upstream string) ([]byte, error) {
+	span, err := requireTopLevelJSONFieldSpan(body, "model")
+	if err != nil {
+		return nil, err
+	}
+	var current string
+	if err = json.Unmarshal(body[span.start:span.end], &current); err != nil {
+		return nil, errors.New("top-level model is not a JSON string")
+	}
+	mb, err := json.Marshal(upstream)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, len(body)-span.end+span.start+len(mb))
+	out = append(out, body[:span.start]...)
+	out = append(out, mb...)
+	out = append(out, body[span.end:]...)
+	return out, nil
+}
+
+type jsonFieldSpan struct {
+	start int
+	end   int
+}
+
+func requireTopLevelJSONFieldSpan(body []byte, name string) (jsonFieldSpan, error) {
+	if !json.Valid(body) {
+		return jsonFieldSpan{}, errors.New("request body is not valid JSON")
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	opening, err := dec.Token()
+	if err != nil || opening != json.Delim('{') {
+		return jsonFieldSpan{}, errors.New("request body is not a JSON object")
+	}
+
+	var found jsonFieldSpan
+	count := 0
+	for dec.More() {
+		keyToken, tokenErr := dec.Token()
+		if tokenErr != nil {
+			return jsonFieldSpan{}, tokenErr
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return jsonFieldSpan{}, errors.New("JSON object key is not a string")
+		}
+
+		before := int(dec.InputOffset())
+		var raw json.RawMessage
+		if decodeErr := dec.Decode(&raw); decodeErr != nil {
+			return jsonFieldSpan{}, decodeErr
+		}
+		after := int(dec.InputOffset())
+		if before < 0 || after < before || after > len(body) || len(raw) == 0 {
+			return jsonFieldSpan{}, errors.New("invalid JSON decoder offsets")
+		}
+		relativeStart := bytes.LastIndex(body[before:after], raw)
+		if relativeStart < 0 {
+			return jsonFieldSpan{}, errors.New("could not locate raw JSON value")
+		}
+		if key == name {
+			count++
+			start := before + relativeStart
+			found = jsonFieldSpan{start: start, end: start + len(raw)}
+		}
+	}
+	if _, err = dec.Token(); err != nil {
+		return jsonFieldSpan{}, err
+	}
+	if count == 0 {
+		return jsonFieldSpan{}, fmt.Errorf("JSON object has no %q field", name)
+	}
+	if count != 1 {
+		return jsonFieldSpan{}, fmt.Errorf("JSON object has duplicate %q fields", name)
+	}
+	return found, nil
 }
 
 // rewriteResponseModel substitutes the client-facing model name into the
