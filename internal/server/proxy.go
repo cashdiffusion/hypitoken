@@ -433,19 +433,11 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	if path == "/v1/messages" {
 		requestClass := mimicry.ClassifyClaudeCodeRequest(body)
 		if requestClass == mimicry.RequestClassGenuine {
-			genuineMode, err := genuineModeForAuth(a)
-			if err != nil {
-				log.Errorf("proxy: invalid Claude identity mode via %s: %v", a.ID, err)
-				writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusInternalServerError, Code: "request_preparation_failed", Message: "The request could not be prepared. Please try again."})
-				return false, true, nil
-			}
-			rewrite = genuineMode == mimicry.GenuineRequestRewrite
+			rewrite = true
 		}
 
-		// Preserve is the experiment's control arm: it deliberately runs the
-		// exact pre-policy request path below, including the legacy credential-ID
-		// switch key, thinking sanitization, body shaping, headers, and reactive
-		// signature recovery. Only rewrite enters the new prepared path.
+		// Genuine Claude Code OAuth traffic always enters the account-bound
+		// prepared path. Generic callers retain the established shaping path.
 		switchKey := a.ID
 		if rewrite {
 			var err error
@@ -526,9 +518,7 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	// so a stuck sidecar can't hang user traffic.
 	bootstrapReady := s.sidecar.Notify(a, clientToken)
 	if path == "/v1/messages" && !rewrite {
-		// Exact legacy/control path. Genuine Claude Code requests are recognized
-		// inside ApplyClaudeCodeBodyMimicry and retain their existing non-zero
-		// cch, while every other legacy shaping rule stays unchanged.
+		// Generic callers retain the established body-shaping behavior.
 		upstreamBody = mimicry.ApplyClaudeCodeBodyMimicry(upstreamBody, model, id)
 		if normalized, changed := mimicry.NormalizeDateline(upstreamBody); changed {
 			upstreamBody = normalized
@@ -560,8 +550,8 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	copyForwardableHeaders(c.Request.Header, upReq.Header)
 	stripIngressHeaders(upReq.Header)
 
-	// Only rewrite consumes the new atomic prepared result. Preserve and
-	// all non-genuine traffic continue through the exact legacy header adapter.
+	// Genuine requests consume the atomic prepared result. Generic traffic
+	// continues through the established header adapter.
 	if rewrite {
 		if err := applyAnthropicPreparedHeaders(upReq, a, stream, isAnthropicBase, prepared); err != nil {
 			log.Errorf("proxy: prepare Claude headers via %s: %v", a.ID, err)
@@ -1385,18 +1375,6 @@ func applyAnthropicPreparedHeaders(req *http.Request, a *auth.Auth, stream, isAn
 	return mimicry.ApplyClaudeCodePreparedRequest(req, token, a.AccountKey(), kindToMimicry(kind), stream, isAnthropicBase, prepared)
 }
 
-func genuineModeForAuth(a *auth.Auth) (mimicry.GenuineRequestMode, error) {
-	mode := a.ClaudeIdentityModeValue()
-	switch mode {
-	case auth.ClaudeIdentityModePreserve:
-		return mimicry.GenuineRequestPreserve, nil
-	case auth.ClaudeIdentityModeRewrite:
-		return mimicry.GenuineRequestRewrite, nil
-	default:
-		return mimicry.GenuineRequestModeUnspecified, fmt.Errorf("unsupported account mode %q", mode)
-	}
-}
-
 func prepareClaudeRewriteBody(body []byte, model string, a *auth.Auth, id mimicry.SimIdentity, policy mimicry.RequestPolicy) (mimicry.BodyTransformResult, error) {
 	working := body
 	// Any permitted body edits happen before the atomic transform. The rewrite
@@ -1940,9 +1918,8 @@ func truncate(b []byte, n int) string {
 	return string(b[:n]) + "...(truncated)"
 }
 
-// rewriteModelField is the legacy best-effort model mapper. It intentionally
-// retains the pre-policy map decode/remarshal behavior because Preserve is the
-// experiment's behavior-for-behavior control path.
+// rewriteModelField is the established best-effort model mapper used for
+// generic callers that do not enter the genuine Claude Code prepared path.
 func rewriteModelField(body []byte, upstream string) ([]byte, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(body, &obj); err != nil {

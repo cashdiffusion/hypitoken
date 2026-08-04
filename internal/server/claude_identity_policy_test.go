@@ -23,17 +23,14 @@ func genuineServerPolicyBody(model string) []byte {
 	return []byte(`{"model":"` + model + `","messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>Today’s date is 2026/07/30.</system-reminder>"}]},{"role":"assistant","content":[{"type":"thinking","thinking":"old","signature":"old-signature"}]}],"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.214.abc; cc_entrypoint=cli;"},{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}],"metadata":{"user_id":"{\"device_id\":\"downstream-device\",\"account_uuid\":\"downstream-account\",\"session_id\":\"` + identityPolicySession + `\"}"},"stream":true}`)
 }
 
-func rewritePolicyForCredential(t *testing.T, body []byte, credential *auth.Auth) mimicry.RequestPolicy {
+func genericServerPolicyBody(model string) []byte {
+	return []byte(`{"model":"` + model + `","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]},{"role":"assistant","content":[{"type":"thinking","thinking":"old","signature":"old-signature"}]}],"system":[{"type":"text","text":"ordinary API caller"}],"stream":true}`)
+}
+
+func rewritePolicyForBody(t *testing.T, body []byte) mimicry.RequestPolicy {
 	t.Helper()
-	mode, err := genuineModeForAuth(credential)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mode != mimicry.GenuineRequestRewrite {
-		t.Fatalf("credential mode = %s, want rewrite", mode)
-	}
 	class := mimicry.ClassifyClaudeCodeRequest(body)
-	policy, err := mimicry.NewClaudeCodeRequestPolicy(class, mode)
+	policy, err := mimicry.NewClaudeCodeRequestPolicy(class, mimicry.GenuineRequestRewrite)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,11 +49,8 @@ func TestClientSlotIDRetainsLegacyHeaderAuthority(t *testing.T) {
 func TestPrepareClaudeMessagesBodyRewriteAlignsAccount(t *testing.T) {
 	credential := oauthTestCred()
 	credential.SetModelMap(map[string]string{"claude-opus-4-7": "claude-opus-4-8"})
-	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
-		t.Fatal(err)
-	}
 	body := genuineServerPolicyBody("claude-opus-4-7")
-	policy := rewritePolicyForCredential(t, body, credential)
+	policy := rewritePolicyForBody(t, body)
 	id := mimicry.SimIdentity{AccountKey: credential.AccountKey(), AccountUUID: credential.AccountUUIDValue(), ClientToken: "client-token"}
 	prepared, err := prepareClaudeRewriteBody(body, "claude-opus-4-7", credential, id, policy)
 	if err != nil {
@@ -76,11 +70,8 @@ func TestPrepareClaudeMessagesBodyRewriteAlignsAccount(t *testing.T) {
 
 func TestClaudeRewriteAuditMapsAnonymizedAccount(t *testing.T) {
 	credential := oauthTestCred()
-	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
-		t.Fatal(err)
-	}
 	body := genuineServerPolicyBody("claude-opus-5")
-	policy := rewritePolicyForCredential(t, body, credential)
+	policy := rewritePolicyForBody(t, body)
 	id := mimicry.SimIdentity{
 		AccountKey: credential.AccountKey(), AccountUUID: credential.AccountUUIDValue(), ClientToken: "client-token",
 	}
@@ -123,8 +114,8 @@ func TestRewriteModelFieldPreservingBytesRejectsDuplicateModel(t *testing.T) {
 	}
 }
 
-func TestDoForwardGenuinePreserveUsesLegacyBodyHeadersAndSignatureRetry(t *testing.T) {
-	body := genuineServerPolicyBody("claude-sonnet-5")
+func TestDoForwardGenericRequestUsesEstablishedBodyHeadersAndSignatureRetry(t *testing.T) {
+	body := genericServerPolicyBody("claude-sonnet-5")
 	var calls atomic.Int32
 	type capturedRequest struct {
 		body    []byte
@@ -149,7 +140,7 @@ func TestDoForwardGenuinePreserveUsesLegacyBodyHeadersAndSignatureRetry(t *testi
 	}))
 	defer upstream.Close()
 
-	credential := oauthTestCred() // absent mode => preserve
+	credential := oauthTestCred()
 	s := newDoForwardTestServer(t, upstream.URL, credential)
 	c, recorder := newMessagesContext(t, body)
 	c.Request.Header.Set("User-Agent", "claude-cli/2.1.214 (external, cli)")
@@ -162,7 +153,7 @@ func TestDoForwardGenuinePreserveUsesLegacyBodyHeadersAndSignatureRetry(t *testi
 		t.Fatalf("unexpected result: retry=%v done=%v status=%d", retry, done, recorder.Code)
 	}
 	if got := calls.Load(); got != 2 {
-		t.Fatalf("preserve signature recovery sent %d upstream calls, want legacy 2", got)
+		t.Fatalf("generic signature recovery sent %d upstream calls, want 2", got)
 	}
 	id := mimicry.SimIdentity{
 		AccountKey: credential.AccountKey(), AccountUUID: credential.AccountUUIDValue(), ClientToken: "tok-abcdef123456",
@@ -177,10 +168,10 @@ func TestDoForwardGenuinePreserveUsesLegacyBodyHeadersAndSignatureRetry(t *testi
 		wantRetry = normalized
 	}
 	if !bytes.Equal(captured[0].body, wantFirst) {
-		t.Fatalf("preserve first request diverged from legacy body pipeline\nwant: %s\n got: %s", wantFirst, captured[0].body)
+		t.Fatalf("generic first request diverged from established body pipeline\nwant: %s\n got: %s", wantFirst, captured[0].body)
 	}
 	if !bytes.Equal(captured[1].body, wantRetry) {
-		t.Fatalf("preserve retry diverged from legacy body pipeline\nwant: %s\n got: %s", wantRetry, captured[1].body)
+		t.Fatalf("generic retry diverged from established body pipeline\nwant: %s\n got: %s", wantRetry, captured[1].body)
 	}
 	for i, request := range captured {
 		if request.accept != "text/event-stream" {
@@ -202,9 +193,6 @@ func TestDoForwardRewriteRejectsMissingBetaBeforeUpstream(t *testing.T) {
 	defer upstream.Close()
 
 	credential := oauthTestCred()
-	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
-		t.Fatal(err)
-	}
 	s := newDoForwardTestServer(t, upstream.URL, credential)
 	c, recorder := newMessagesContext(t, body)
 	c.Request.Header.Set("User-Agent", "claude-cli/2.1.214 (external, cli)")
@@ -220,6 +208,31 @@ func TestDoForwardRewriteRejectsMissingBetaBeforeUpstream(t *testing.T) {
 	}
 }
 
+func TestDoForwardGenuineRequestRejectsMissingAccountUUIDBeforeUpstream(t *testing.T) {
+	body := genuineServerPolicyBody("claude-sonnet-5")
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	credential := oauthTestCred()
+	credential.AccountUUID = ""
+	s := newDoForwardTestServer(t, upstream.URL, credential)
+	c, recorder := newMessagesContext(t, body)
+	c.Request.Header.Set("Anthropic-Beta", identityPolicyMainBeta)
+
+	retry, done, _ := s.doForward(c, credential, "/v1/messages", body, true,
+		"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false)
+	if retry || !done || recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("unexpected result: retry=%v done=%v status=%d", retry, done, recorder.Code)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("missing account UUID reached upstream %d times", got)
+	}
+}
+
 func TestDoForwardRewriteFailureCarriesModeAndAccountAudit(t *testing.T) {
 	body := genuineServerPolicyBody("claude-sonnet-5")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -230,9 +243,6 @@ func TestDoForwardRewriteFailureCarriesModeAndAccountAudit(t *testing.T) {
 	defer upstream.Close()
 
 	credential := oauthTestCred()
-	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
-		t.Fatal(err)
-	}
 	s := newDoForwardTestServer(t, upstream.URL, credential)
 	c, _ := newMessagesContext(t, body)
 	c.Request.Header.Set("Anthropic-Beta", identityPolicyMainBeta)
@@ -267,11 +277,6 @@ func TestDoForwardThinkingSwitchTracksRealAccountNotCredentialFile(t *testing.T)
 	credentialB := oauthTestCred()
 	credentialB.ID = "different-file-for-same-account"
 	credentialB.AccessToken = "second-token"
-	for _, credential := range []*auth.Auth{credentialA, credentialB} {
-		if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
-			t.Fatal(err)
-		}
-	}
 	s := newDoForwardTestServer(t, upstream.URL, credentialA)
 	for _, credential := range []*auth.Auth{credentialA, credentialB} {
 		c, _ := newMessagesContext(t, body)
@@ -292,9 +297,6 @@ func TestDoForwardThinkingSwitchTracksRealAccountNotCredentialFile(t *testing.T)
 	captured = nil
 	replacement := oauthTestCred()
 	replacement.AccountUUID = "22222222-2222-2222-2222-222222222222"
-	if err := replacement.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
-		t.Fatal(err)
-	}
 	s.switchTracker = thinkingsig.NewSwitchTracker()
 	for _, credential := range []*auth.Auth{credentialA, replacement} {
 		c, _ := newMessagesContext(t, body)
@@ -311,8 +313,8 @@ func TestDoForwardThinkingSwitchTracksRealAccountNotCredentialFile(t *testing.T)
 	}
 }
 
-func TestDoForwardGenuinePreserveRetainsLegacyCredentialFileSwitchKey(t *testing.T) {
-	body := genuineServerPolicyBody("claude-sonnet-5")
+func TestDoForwardGenericRequestRetainsCredentialFileSwitchKey(t *testing.T) {
+	body := genericServerPolicyBody("claude-sonnet-5")
 	var captured [][]byte
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestBody, _ := io.ReadAll(r.Body)
@@ -341,10 +343,10 @@ func TestDoForwardGenuinePreserveRetainsLegacyCredentialFileSwitchKey(t *testing
 		t.Fatalf("captured %d requests, want 2", len(captured))
 	}
 	if !strings.Contains(string(captured[0]), "old-signature") {
-		t.Fatal("first preserve request was unexpectedly sanitized")
+		t.Fatal("first generic request was unexpectedly sanitized")
 	}
 	if strings.Contains(string(captured[1]), "old-signature") {
-		t.Fatal("preserve stopped using the legacy credential-file switch key")
+		t.Fatal("generic request stopped using the credential-file switch key")
 	}
 }
 
@@ -374,9 +376,6 @@ func TestDoForwardRewriteRepreparesSignatureRetry(t *testing.T) {
 	defer upstream.Close()
 
 	credential := oauthTestCred()
-	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
-		t.Fatal(err)
-	}
 	s := newDoForwardTestServer(t, upstream.URL, credential)
 	c, recorder := newMessagesContext(t, body)
 	c.Request.Header.Set("User-Agent", "claude-cli/2.1.214 (external, cli)")

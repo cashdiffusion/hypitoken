@@ -71,10 +71,8 @@ type Handler struct {
 	reqCacheMu sync.Mutex
 	reqCache   map[string]reqCacheEntry
 
-	// Serializes credential PATCH handlers. In particular, a disable/enable
-	// edit cannot race an identity-mode switch between its safety checks and
-	// persistence. Pool.UpdateClaudeIdentityMode separately serializes against
-	// OAuth replacement from either the legacy or SaaS login paths.
+	// Serializes credential PATCH and upload handlers so concurrent admin
+	// mutations cannot overwrite one another's persisted fields.
 	authMutationMu sync.Mutex
 
 	// kiro is the Kiro side-channel access plug. nil = Kiro disabled.
@@ -324,11 +322,10 @@ type authRow struct {
 	// doesn't affect Healthy or trigger any cooldown. Used by the panel to
 	// show a low-tone "client canceled" hint distinct from upstream
 	// failures.
-	LastClientCancel   *time.Time              `json:"last_client_cancel,omitempty"`
-	ClientCancelReason string                  `json:"client_cancel_reason,omitempty"`
-	ModelMap           map[string]string       `json:"model_map,omitempty"`
-	ClaudeIdentityMode auth.ClaudeIdentityMode `json:"claude_identity_mode,omitempty"`
-	Usage              *usageSummary           `json:"usage,omitempty"`
+	LastClientCancel   *time.Time        `json:"last_client_cancel,omitempty"`
+	ClientCancelReason string            `json:"client_cancel_reason,omitempty"`
+	ModelMap           map[string]string `json:"model_map,omitempty"`
+	Usage              *usageSummary     `json:"usage,omitempty"`
 	// CodexRateLimits holds the latest x-codex-* response headers from
 	// chatgpt.com — primary/secondary window used-percent, resets etc.
 	// Empty for non-OAuth / non-Codex credentials or until first call.
@@ -482,7 +479,6 @@ func (h *Handler) buildAuthRows() []authRow {
 			LastClientCancel:       cancelAt,
 			ClientCancelReason:     cancelReason,
 			ModelMap:               st.Auth.ModelMap,
-			ClaudeIdentityMode:     st.Auth.ClaudeIdentityMode,
 			Usage:                  u,
 			CodexRateLimits: func() map[string]string {
 				if live == nil {
@@ -703,15 +699,14 @@ func (h *Handler) resolveClientTokenLabels(tokens []string) []string {
 }
 
 type patchAuthBody struct {
-	Disabled           *bool              `json:"disabled"`
-	MaxConcurrent      *int               `json:"max_concurrent"`
-	ProxyURL           *string            `json:"proxy_url"`
-	BaseURL            *string            `json:"base_url"`
-	APIKey             *string            `json:"api_key"`
-	Label              *string            `json:"label"`
-	Group              *string            `json:"group"`
-	ModelMap           *map[string]string `json:"model_map"`
-	ClaudeIdentityMode *string            `json:"claude_identity_mode"`
+	Disabled      *bool              `json:"disabled"`
+	MaxConcurrent *int               `json:"max_concurrent"`
+	ProxyURL      *string            `json:"proxy_url"`
+	BaseURL       *string            `json:"base_url"`
+	APIKey        *string            `json:"api_key"`
+	Label         *string            `json:"label"`
+	Group         *string            `json:"group"`
+	ModelMap      *map[string]string `json:"model_map"`
 }
 
 func (h *Handler) handlePatchAuth(c *gin.Context) {
@@ -733,41 +728,6 @@ func (h *Handler) handlePatchAuth(c *gin.Context) {
 	var body patchAuthBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if body.ClaudeIdentityMode != nil {
-		// A mode change deliberately cannot be bundled with disabling (or any
-		// other edit). The operator must take the credential out of rotation
-		// first, let existing requests finish, then make this standalone change.
-		if body.Disabled != nil || body.MaxConcurrent != nil || body.ProxyURL != nil ||
-			body.BaseURL != nil || body.APIKey != nil || body.Label != nil ||
-			body.Group != nil || body.ModelMap != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "claude_identity_mode must be updated by itself; disable the credential first, wait for active sessions to drain, then change the mode"})
-			return
-		}
-		mode, err := auth.ParseClaudeIdentityMode(*body.ClaudeIdentityMode)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if err := h.pool.UpdateClaudeIdentityMode(id, mode); err != nil {
-			switch {
-			case errors.Is(err, auth.ErrClaudeIdentityModeAuthNotFound):
-				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "auth not found"})
-			case errors.Is(err, auth.ErrClaudeIdentityModeNotApplicable):
-				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			case errors.Is(err, auth.ErrClaudeIdentityModeMissingAccountUUID):
-				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "rewrite requires an OAuth account UUID; re-login this credential before enabling it"})
-			case errors.Is(err, auth.ErrClaudeIdentityModeCredentialEnabled):
-				c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "disable the credential before changing claude_identity_mode"})
-			case errors.Is(err, auth.ErrClaudeIdentityModeCredentialActive):
-				c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "the credential still has active sessions; keep it disabled and wait for its active window to drain before changing claude_identity_mode"})
-			default:
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "persist identity mode failed: " + err.Error()})
-			}
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 		return
 	}
 	if body.APIKey != nil {
@@ -985,9 +945,8 @@ func (h *Handler) handleUpload(c *gin.Context) {
 	if g := auth.NormalizeGroup(body.Group); g != "" {
 		merged["group"] = g
 	}
-	// Upload/re-login is not an identity-mode switch. A same-account replace
-	// preserves the installed mode inside cc-core; a new account always starts
-	// in preserve and must pass the disabled/drained switch endpoint explicitly.
+	// The per-account mode experiment is retired. Ignore stale flags from older
+	// uploaded files; genuine Claude Code OAuth traffic always uses Rewrite.
 	delete(merged, "claude_identity_mode")
 
 	// Derive target filename. Prefix with provider so the auths/ directory

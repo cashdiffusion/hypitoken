@@ -299,7 +299,6 @@ export interface Credential {
   failure_reason?: string;
   refresh_suspended?: boolean;
   refresh_suspended_reason?: string;
-  claude_identity_mode?: "preserve" | "rewrite";
   last_client_cancel?: string;
   client_cancel_reason?: string;
   model_map?: Record<string, string>;
