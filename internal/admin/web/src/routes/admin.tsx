@@ -642,19 +642,17 @@ function CredentialsTab() {
                                 <span
                                   className={cn(
                                     "w-fit rounded border px-1.5 py-0.5 text-[10px] font-mono uppercase",
-                                    c.claude_identity_mode === "rewrite_strip"
+                                    c.claude_identity_mode === "rewrite"
                                       ? "border-warning/30 bg-warning/15 text-warning"
                                       : "border-success/30 bg-success/15 text-success",
                                   )}
                                   title={
-                                    c.claude_identity_mode === "rewrite_strip"
-                                      ? "Rewrite 实验组：重写上游账号身份，并删除无法重签的 CCH"
-                                      : "对照组：保留 Claude Code 原始请求和 CCH"
+                                    c.claude_identity_mode === "rewrite"
+                                      ? "Rewrite：将请求身份映射到实际选中的上游账号"
+                                      : "Preserve：使用原有转发路径"
                                   }
                                 >
-                                  {c.claude_identity_mode === "rewrite_strip"
-                                    ? "rewrite"
-                                    : "control"}
+                                  {c.claude_identity_mode === "rewrite" ? "rewrite" : "control"}
                                 </span>
                               )}
                             </div>
@@ -975,10 +973,7 @@ function CredentialDetail({ c }: { c: Credential }) {
           <Row k="最大并发" v={c.max_concurrent > 0 ? String(c.max_concurrent) : "∞"} />
           <Row k="文件支撑" v={c.file_backed ? "是" : "否（config.yaml）"} />
           {c.provider === "anthropic" && c.kind === "oauth" && (
-            <Row
-              k="身份模式"
-              v={c.claude_identity_mode === "rewrite_strip" ? "Rewrite 实验组" : "Preserve 对照组"}
-            />
+            <Row k="身份模式" v={c.claude_identity_mode === "rewrite" ? "Rewrite" : "Preserve"} />
           )}
           {c.disabled && <Row k="状态" v={<span className="text-warning">已禁用</span>} />}
         </div>
@@ -1084,7 +1079,7 @@ function EditCredentialDialog({
   const [apiKey, setAPIKey] = useState("");
   const [maxC, setMaxC] = useState("");
   const [disabled, setDisabled] = useState(false);
-  const [identityMode, setIdentityMode] = useState<"preserve" | "rewrite_strip">("preserve");
+  const [identityMode, setIdentityMode] = useState<"preserve" | "rewrite">("preserve");
   const [modelMap, setModelMap] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -1113,14 +1108,14 @@ function EditCredentialDialog({
 
   const applyIdentityMode = async () => {
     if (!isClaudeOAuth || identityMode === currentIdentityMode) return;
-    const targetLabel = identityMode === "rewrite_strip" ? "Rewrite 实验组" : "Preserve 对照组";
+    const targetLabel = identityMode === "rewrite" ? "Rewrite" : "Preserve";
     if (
       !(await confirm({
         title: `切换为 ${targetLabel}？`,
         description:
-          identityMode === "rewrite_strip"
-            ? "前端会临时禁用账号，确认没有活跃会话后重写身份模式，并删除改写请求中无法重签的 CCH。切换成功后会恢复账号原来的启用状态。"
-            : "前端会临时禁用账号，确认没有活跃会话后切回原样透传模式。官方 Claude Code 的原始身份和 CCH 将被保留。",
+          identityMode === "rewrite"
+            ? "前端会临时禁用账号，确认没有活跃会话后启用上游账号身份映射。切换成功后会恢复账号原来的启用状态。"
+            : "前端会临时禁用账号，确认没有活跃会话后切回原有转发路径。",
         confirmLabel: "确认切换",
       }))
     ) {
@@ -1289,22 +1284,20 @@ function EditCredentialDialog({
               <Label>Claude Code 身份模式</Label>
               <Select
                 value={identityMode}
-                onValueChange={(value: "preserve" | "rewrite_strip") => setIdentityMode(value)}
+                onValueChange={(value: "preserve" | "rewrite") => setIdentityMode(value)}
                 disabled={busy}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="preserve">Preserve 对照组（保留原始 CCH）</SelectItem>
-                  <SelectItem value="rewrite_strip">
-                    Rewrite 实验组（重写身份并删除 CCH）
-                  </SelectItem>
+                  <SelectItem value="preserve">Preserve（原有转发路径）</SelectItem>
+                  <SelectItem value="rewrite">Rewrite（映射上游账号身份）</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">
                 当前：
-                {currentIdentityMode === "rewrite_strip" ? "Rewrite 实验组" : "Preserve 对照组"}
+                {currentIdentityMode === "rewrite" ? "Rewrite" : "Preserve"}
                 {" · "}
                 活跃槽位 {cred.active_clients}/{cred.max_concurrent > 0 ? cred.max_concurrent : "∞"}
               </p>

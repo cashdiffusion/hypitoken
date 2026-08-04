@@ -757,7 +757,7 @@ func (h *Handler) handlePatchAuth(c *gin.Context) {
 			case errors.Is(err, auth.ErrClaudeIdentityModeNotApplicable):
 				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			case errors.Is(err, auth.ErrClaudeIdentityModeMissingAccountUUID):
-				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "rewrite_strip requires an OAuth account UUID; re-login this credential before enabling it"})
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "rewrite requires an OAuth account UUID; re-login this credential before enabling it"})
 			case errors.Is(err, auth.ErrClaudeIdentityModeCredentialEnabled):
 				c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "disable the credential before changing claude_identity_mode"})
 			case errors.Is(err, auth.ErrClaudeIdentityModeCredentialActive):

@@ -20,7 +20,7 @@ const identityPolicySession = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const identityPolicyMainBeta = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07"
 
 func genuineServerPolicyBody(model string) []byte {
-	return []byte(`{"model":"` + model + `","messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>Today’s date is 2026/07/30.</system-reminder>"}]},{"role":"assistant","content":[{"type":"thinking","thinking":"old","signature":"old-signature"}]}],"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.214.abc; cc_entrypoint=cli; cch=1a2b3; cc_prev_req=req-old;"},{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}],"metadata":{"user_id":"{\"device_id\":\"downstream-device\",\"account_uuid\":\"downstream-account\",\"session_id\":\"` + identityPolicySession + `\"}"},"stream":true}`)
+	return []byte(`{"model":"` + model + `","messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>Today’s date is 2026/07/30.</system-reminder>"}]},{"role":"assistant","content":[{"type":"thinking","thinking":"old","signature":"old-signature"}]}],"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.214.abc; cc_entrypoint=cli;"},{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}],"metadata":{"user_id":"{\"device_id\":\"downstream-device\",\"account_uuid\":\"downstream-account\",\"session_id\":\"` + identityPolicySession + `\"}"},"stream":true}`)
 }
 
 func rewritePolicyForCredential(t *testing.T, body []byte, credential *auth.Auth) mimicry.RequestPolicy {
@@ -29,8 +29,8 @@ func rewritePolicyForCredential(t *testing.T, body []byte, credential *auth.Auth
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode != mimicry.GenuineRequestRewriteStripCCH {
-		t.Fatalf("credential mode = %s, want rewrite_strip", mode)
+	if mode != mimicry.GenuineRequestRewrite {
+		t.Fatalf("credential mode = %s, want rewrite", mode)
 	}
 	class := mimicry.ClassifyClaudeCodeRequest(body)
 	policy, err := mimicry.NewClaudeCodeRequestPolicy(class, mode)
@@ -49,10 +49,10 @@ func TestClientSlotIDRetainsLegacyHeaderAuthority(t *testing.T) {
 	}
 }
 
-func TestPrepareClaudeMessagesBodyRewriteAlignsAccountAndStripsCCH(t *testing.T) {
+func TestPrepareClaudeMessagesBodyRewriteAlignsAccount(t *testing.T) {
 	credential := oauthTestCred()
 	credential.SetModelMap(map[string]string{"claude-opus-4-7": "claude-opus-4-8"})
-	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewriteStripCCH); err != nil {
+	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
 		t.Fatal(err)
 	}
 	body := genuineServerPolicyBody("claude-opus-4-7")
@@ -63,11 +63,8 @@ func TestPrepareClaudeMessagesBodyRewriteAlignsAccountAndStripsCCH(t *testing.T)
 		t.Fatal(err)
 	}
 	out := string(prepared.Body())
-	if strings.Contains(out, "cch=1a2b3") {
-		t.Fatalf("rewrite retained cch: %s", out)
-	}
 	if !strings.Contains(out, "Today's date is 2026-07-30") {
-		t.Fatalf("rewrite did not normalize dateline before stripping cch: %s", out)
+		t.Fatalf("rewrite did not normalize dateline: %s", out)
 	}
 	if !strings.Contains(out, `"model":"claude-opus-4-8"`) {
 		t.Fatalf("rewrite did not apply selected-account model policy: %s", out)
@@ -77,9 +74,9 @@ func TestPrepareClaudeMessagesBodyRewriteAlignsAccountAndStripsCCH(t *testing.T)
 	}
 }
 
-func TestClaudeRewriteAuditHashesAndPreservesPreviousRequest(t *testing.T) {
+func TestClaudeRewriteAuditMapsAnonymizedAccount(t *testing.T) {
 	credential := oauthTestCred()
-	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewriteStripCCH); err != nil {
+	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
 		t.Fatal(err)
 	}
 	body := genuineServerPolicyBody("claude-opus-5")
@@ -91,50 +88,15 @@ func TestClaudeRewriteAuditHashesAndPreservesPreviousRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	header := make(http.Header)
-	header.Set("Request-Id", "req-response")
-	audit := claudeRewriteAudit(prepared, header, credential.AccountKey())
+	audit := claudeIdentityAudit(prepared, credential.AccountKey())
 	if audit == nil {
 		t.Fatal("missing Claude rewrite audit")
 	}
 	if audit.AccountHash == "" || audit.AccountHash == credential.AccountKey() {
 		t.Fatalf("account identity was not anonymized: %q", audit.AccountHash)
 	}
-	if !audit.AccountIdentityMapped || !audit.CCHStripped ||
-		!audit.CCPrevReqPresent || !audit.CCPrevReqPreserved {
+	if !audit.AccountIdentityMapped || audit.IdentityMode != "rewrite" {
 		t.Fatalf("unexpected audit flags: %+v", audit)
-	}
-	if got, want := audit.CCPrevReqHash, mimicry.HashClaudeRequestID("req-old"); got != want || got == "req-old" {
-		t.Fatalf("cc_prev_req hash: got %q want %q", got, want)
-	}
-	if got, want := audit.ResponseRequestIDHash, mimicry.HashClaudeRequestID("req-response"); got != want || got == "req-response" {
-		t.Fatalf("response request-id hash: got %q want %q", got, want)
-	}
-}
-
-func TestClaudeRewriteAuditFirstTurnHasNoPreviousRequestHash(t *testing.T) {
-	credential := oauthTestCred()
-	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewriteStripCCH); err != nil {
-		t.Fatal(err)
-	}
-	body := bytes.Replace(
-		genuineServerPolicyBody("claude-opus-5"),
-		[]byte(" cc_prev_req=req-old;"),
-		nil,
-		1,
-	)
-	policy := rewritePolicyForCredential(t, body, credential)
-	id := mimicry.SimIdentity{
-		AccountKey: credential.AccountKey(), AccountUUID: credential.AccountUUIDValue(), ClientToken: "client-token",
-	}
-	prepared, err := prepareClaudeRewriteBody(body, "claude-opus-5", credential, id, policy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	audit := claudeRewriteAudit(prepared, make(http.Header), credential.AccountKey())
-	if audit == nil || audit.CCPrevReqPresent || audit.CCPrevReqHash != "" ||
-		!audit.CCPrevReqPreserved || audit.ResponseRequestIDHash != "" {
-		t.Fatalf("unexpected first-turn audit: %+v", audit)
 	}
 }
 
@@ -240,7 +202,7 @@ func TestDoForwardRewriteRejectsMissingBetaBeforeUpstream(t *testing.T) {
 	defer upstream.Close()
 
 	credential := oauthTestCred()
-	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewriteStripCCH); err != nil {
+	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
 		t.Fatal(err)
 	}
 	s := newDoForwardTestServer(t, upstream.URL, credential)
@@ -258,7 +220,7 @@ func TestDoForwardRewriteRejectsMissingBetaBeforeUpstream(t *testing.T) {
 	}
 }
 
-func TestDoForwardRewriteFailureCarriesModeAccountAndChainAudit(t *testing.T) {
+func TestDoForwardRewriteFailureCarriesModeAndAccountAudit(t *testing.T) {
 	body := genuineServerPolicyBody("claude-sonnet-5")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Request-Id", "req-failed-response")
@@ -268,7 +230,7 @@ func TestDoForwardRewriteFailureCarriesModeAccountAndChainAudit(t *testing.T) {
 	defer upstream.Close()
 
 	credential := oauthTestCred()
-	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewriteStripCCH); err != nil {
+	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
 		t.Fatal(err)
 	}
 	s := newDoForwardTestServer(t, upstream.URL, credential)
@@ -281,9 +243,8 @@ func TestDoForwardRewriteFailureCarriesModeAccountAndChainAudit(t *testing.T) {
 		t.Fatalf("missing deferred failure audit: retry=%v done=%v deferred=%+v", retry, done, deferred)
 	}
 	audit := deferred.claudeAudit
-	if audit.IdentityMode != "rewrite_strip" || audit.AccountHash == "" || audit.AccountHash == credential.AccountKey() ||
-		!audit.CCPrevReqPresent || !audit.CCPrevReqPreserved || audit.CCPrevReqHash == "" ||
-		audit.ResponseRequestIDHash != mimicry.HashClaudeRequestID("req-failed-response") || !audit.CredentialHardFailed {
+	if audit.IdentityMode != "rewrite" || audit.AccountHash == "" || audit.AccountHash == credential.AccountKey() ||
+		!audit.AccountIdentityMapped || !audit.CredentialHardFailed {
 		t.Fatalf("incomplete failure audit: %+v", audit)
 	}
 	if !credential.IsHardFailed() {
@@ -307,7 +268,7 @@ func TestDoForwardThinkingSwitchTracksRealAccountNotCredentialFile(t *testing.T)
 	credentialB.ID = "different-file-for-same-account"
 	credentialB.AccessToken = "second-token"
 	for _, credential := range []*auth.Auth{credentialA, credentialB} {
-		if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewriteStripCCH); err != nil {
+		if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -331,7 +292,7 @@ func TestDoForwardThinkingSwitchTracksRealAccountNotCredentialFile(t *testing.T)
 	captured = nil
 	replacement := oauthTestCred()
 	replacement.AccountUUID = "22222222-2222-2222-2222-222222222222"
-	if err := replacement.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewriteStripCCH); err != nil {
+	if err := replacement.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
 		t.Fatal(err)
 	}
 	s.switchTracker = thinkingsig.NewSwitchTracker()
@@ -387,7 +348,7 @@ func TestDoForwardGenuinePreserveRetainsLegacyCredentialFileSwitchKey(t *testing
 	}
 }
 
-func TestDoForwardRewriteStripRepreparesSignatureRetry(t *testing.T) {
+func TestDoForwardRewriteRepreparesSignatureRetry(t *testing.T) {
 	body := genuineServerPolicyBody("claude-sonnet-5")
 	type capturedRequest struct {
 		body    []byte
@@ -413,7 +374,7 @@ func TestDoForwardRewriteStripRepreparesSignatureRetry(t *testing.T) {
 	defer upstream.Close()
 
 	credential := oauthTestCred()
-	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewriteStripCCH); err != nil {
+	if err := credential.SetClaudeIdentityMode(auth.ClaudeIdentityModeRewrite); err != nil {
 		t.Fatal(err)
 	}
 	s := newDoForwardTestServer(t, upstream.URL, credential)
@@ -433,8 +394,8 @@ func TestDoForwardRewriteStripRepreparesSignatureRetry(t *testing.T) {
 	}
 	for i, request := range captured {
 		out := string(request.body)
-		if strings.Contains(out, "cch=1a2b3") || strings.Contains(out, "downstream-account") {
-			t.Fatalf("request %d retained stale cch/account: %s", i+1, out)
+		if strings.Contains(out, "downstream-account") {
+			t.Fatalf("request %d retained downstream account: %s", i+1, out)
 		}
 		if !strings.Contains(out, credential.AccountUUIDValue()) {
 			t.Fatalf("request %d missing selected account UUID: %s", i+1, out)
