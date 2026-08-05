@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,15 @@ func apiKeyTestCred(id string) *auth.Auth {
 		Provider:    "anthropic",
 		Label:       id,
 		AccessToken: "sk-ant-" + id,
+	}
+}
+
+func TestStripAnthropicOAuthBetaForPreparationFallback(t *testing.T) {
+	h := http.Header{"Anthropic-Beta": []string{"claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14"}}
+	stripAnthropicOAuthBeta(h)
+	got := h.Get("Anthropic-Beta")
+	if strings.Contains(got, "oauth-") || !strings.Contains(got, "claude-code-20250219") || !strings.Contains(got, "interleaved-thinking-2025-05-14") {
+		t.Fatalf("fallback beta sanitization = %q", got)
 	}
 }
 

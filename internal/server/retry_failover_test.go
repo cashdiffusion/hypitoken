@@ -2,8 +2,11 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/thinkingsig"
 
 	"github.com/wjsoj/CPA-Claude/internal/config"
@@ -52,9 +56,145 @@ func newMessagesContext(t *testing.T, body []byte) (*gin.Context, *httptest.Resp
 	return c, w
 }
 
-// Haiku body skips Claude Code mimicry, keeping the request untouched — the
-// failover decision under test is independent of body shaping.
+// Generic Haiku body used across failover and strict-synthesis tests.
 var haikuBody = []byte(`{"model":"claude-haiku-4-5-20251001","messages":[{"role":"user","content":"hi"}]}`)
+
+func TestForwardPreparationFailureFallsBackToAPIKeyWithOriginalBodyAndAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var oauthCalls, apiKeyCalls int
+	var apiKeyBody []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			oauthCalls++
+		}
+		if r.Header.Get("x-api-key") != "" {
+			apiKeyCalls++
+			apiKeyBody, _ = io.ReadAll(r.Body)
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"test stop"}}`))
+	}))
+	defer upstream.Close()
+
+	oauthCred := oauthTestCred()
+	oauthCred.AccountUUID = "" // deterministic local preparation failure
+	apiKeyCred := apiKeyTestCred("fallback")
+	logDir := t.TempDir()
+	writer, err := requestlog.Open(logDir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		cfg:           &config.Config{AnthropicBaseURL: upstream.URL, UseUTLS: false},
+		pool:          auth.NewPool([]*auth.Auth{oauthCred}, []*auth.Auth{apiKeyCred}, 10*time.Minute, false, ""),
+		switchTracker: thinkingsig.NewSwitchTracker(),
+		reqLog:        writer,
+	}
+	c, recorder := newMessagesContext(t, haikuBody)
+	s.forwardWithFailover(c, auth.ProviderAnthropic, "/v1/messages",
+		"claude-haiku-4-5-20251001", "tok-abcdef123456", "", "client", "slot-1", haikuBody, false, time.Now())
+	writer.Close()
+
+	if oauthCalls != 0 {
+		t.Fatalf("preparation failure reached OAuth upstream %d times", oauthCalls)
+	}
+	if apiKeyCalls != 1 || !bytes.Equal(apiKeyBody, haikuBody) {
+		t.Fatalf("API-key fallback calls=%d body=%s want original=%s", apiKeyCalls, apiKeyBody, haikuBody)
+	}
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("fallback response status=%d", recorder.Code)
+	}
+	files, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, file := range files {
+		raw, readErr := os.ReadFile(logDir + "/" + file.Name())
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		for _, line := range bytes.Split(raw, []byte{'\n'}) {
+			var record requestlog.Record
+			if json.Unmarshal(line, &record) != nil {
+				continue
+			}
+			if record.AttemptOnly && record.ClaudeAudit != nil && record.ClaudeAudit.PreparationFailed {
+				found = record.ClaudeAudit.RequestClass == "generic" &&
+					record.ClaudeAudit.PreparationError == "missing_account_uuid" &&
+					record.ClaudeAudit.Fallback == "apikey"
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing structured preparation-fallback audit")
+	}
+}
+
+func TestForwardGenuineMissingBetaFallsBackToAPIKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var oauthCalls, apiKeyCalls int
+	var apiKeyBody []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			oauthCalls++
+		}
+		if r.Header.Get("x-api-key") != "" {
+			apiKeyCalls++
+			apiKeyBody, _ = io.ReadAll(r.Body)
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"test stop"}}`))
+	}))
+	defer upstream.Close()
+
+	oauthCred := oauthTestCred()
+	apiKeyCred := apiKeyTestCred("fallback-genuine")
+	s := &Server{
+		cfg:           &config.Config{AnthropicBaseURL: upstream.URL, UseUTLS: false},
+		pool:          auth.NewPool([]*auth.Auth{oauthCred}, []*auth.Auth{apiKeyCred}, 10*time.Minute, false, ""),
+		switchTracker: thinkingsig.NewSwitchTracker(),
+	}
+	body := genuineServerPolicyBody("claude-sonnet-5")
+	c, recorder := newMessagesContext(t, body) // deliberately no Anthropic-Beta
+	s.forwardWithFailover(c, auth.ProviderAnthropic, "/v1/messages",
+		"claude-sonnet-5", "tok-abcdef123456", "", "client", identityPolicySession, body, false, time.Now())
+
+	if oauthCalls != 0 || apiKeyCalls != 1 || !bytes.Equal(apiKeyBody, body) {
+		t.Fatalf("oauth=%d apikey=%d body_preserved=%v", oauthCalls, apiKeyCalls, bytes.Equal(apiKeyBody, body))
+	}
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("fallback response status=%d", recorder.Code)
+	}
+}
+
+func TestForwardPreparationFailureWithoutAPIKeyReturns503WithoutOAuthCall(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var upstreamCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	oauthCred := oauthTestCred()
+	oauthCred.AccountUUID = ""
+	s := &Server{
+		cfg:           &config.Config{AnthropicBaseURL: upstream.URL, UseUTLS: false},
+		pool:          auth.NewPool([]*auth.Auth{oauthCred}, nil, 10*time.Minute, false, ""),
+		switchTracker: thinkingsig.NewSwitchTracker(),
+	}
+	c, recorder := newMessagesContext(t, haikuBody)
+	s.forwardWithFailover(c, auth.ProviderAnthropic, "/v1/messages",
+		"claude-haiku-4-5-20251001", "tok-abcdef123456", "", "client", "slot-1", haikuBody, false, time.Now())
+
+	if upstreamCalls != 0 {
+		t.Fatalf("preparation failure reached upstream %d times", upstreamCalls)
+	}
+	if recorder.Code != http.StatusServiceUnavailable || recorder.Header().Get("X-Error-Code") != "service_temporarily_unavailable" {
+		t.Fatalf("status=%d error_code=%q body=%q", recorder.Code, recorder.Header().Get("X-Error-Code"), recorder.Body.String())
+	}
+}
 
 // TestDoForwardWithholdsRetryableCredentialError verifies the core failover
 // contract: a credential-level 429 (quota) is NOT written to the client; it is

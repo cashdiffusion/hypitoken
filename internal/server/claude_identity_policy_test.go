@@ -91,6 +91,23 @@ func TestClaudeRewriteAuditMapsAnonymizedAccount(t *testing.T) {
 	}
 }
 
+func TestClaudeGenericSynthesisAuditMapsAnonymizedAccount(t *testing.T) {
+	credential := oauthTestCred()
+	body := genericServerPolicyBody("claude-haiku-4-5-20251001")
+	id := mimicry.SimIdentity{
+		AccountKey: credential.AccountKey(), AccountUUID: credential.AccountUUIDValue(), ClientToken: "client-token",
+	}
+	prepared, err := prepareClaudePreparedBody(body, "claude-haiku-4-5-20251001", credential, id, mimicry.NewGenericClaudeCodeSynthesizePolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := claudeIdentityAudit(prepared, credential.AccountKey())
+	if audit == nil || audit.RequestClass != "generic" || audit.IdentityMode != "synthesize" ||
+		!audit.AccountIdentityMapped || audit.AccountHash == "" || audit.AccountHash == credential.AccountKey() {
+		t.Fatalf("unexpected generic audit: %+v", audit)
+	}
+}
+
 func TestRewriteModelFieldPreservingBytesChangesOnlyModel(t *testing.T) {
 	body := []byte("{\n  \"metadata\": {\"literal\":\"<>&\\u2028\"},\n  \"model\" : \"claude-opus-4-7\",\n  \"messages\": [ { \"role\": \"user\", \"content\": \"\u4e2d文\" } ]\n}\n")
 	want := bytes.Replace(body, []byte(`"claude-opus-4-7"`), []byte(`"vendor/claude-opus-4-8"`), 1)
@@ -114,7 +131,7 @@ func TestRewriteModelFieldPreservingBytesRejectsDuplicateModel(t *testing.T) {
 	}
 }
 
-func TestDoForwardGenericRequestUsesEstablishedBodyHeadersAndSignatureRetry(t *testing.T) {
+func TestDoForwardGenericRequestUsesStrictPreparedBodyHeadersAndSignatureRetry(t *testing.T) {
 	body := genericServerPolicyBody("claude-sonnet-5")
 	var calls atomic.Int32
 	type capturedRequest struct {
@@ -158,15 +175,18 @@ func TestDoForwardGenericRequestUsesEstablishedBodyHeadersAndSignatureRetry(t *t
 	id := mimicry.SimIdentity{
 		AccountKey: credential.AccountKey(), AccountUUID: credential.AccountUUIDValue(), ClientToken: "tok-abcdef123456",
 	}
-	wantFirst := mimicry.ApplyClaudeCodeBodyMimicry(body, "claude-sonnet-5", id)
-	if normalized, changed := mimicry.NormalizeDateline(wantFirst); changed {
-		wantFirst = normalized
+	policy := mimicry.NewGenericClaudeCodeSynthesizePolicy()
+	firstPrepared, err := prepareClaudePreparedBody(body, "claude-sonnet-5", credential, id, policy)
+	if err != nil {
+		t.Fatal(err)
 	}
+	wantFirst := firstPrepared.Body()
 	wantRetry := thinkingsig.SanitizeForSwitch(body)
-	wantRetry = mimicry.ApplyClaudeCodeBodyMimicry(wantRetry, "claude-sonnet-5", id)
-	if normalized, changed := mimicry.NormalizeDateline(wantRetry); changed {
-		wantRetry = normalized
+	retryPrepared, err := prepareClaudePreparedBody(wantRetry, "claude-sonnet-5", credential, id, policy)
+	if err != nil {
+		t.Fatal(err)
 	}
+	wantRetry = retryPrepared.Body()
 	if !bytes.Equal(captured[0].body, wantFirst) {
 		t.Fatalf("generic first request diverged from established body pipeline\nwant: %s\n got: %s", wantFirst, captured[0].body)
 	}
@@ -174,11 +194,11 @@ func TestDoForwardGenericRequestUsesEstablishedBodyHeadersAndSignatureRetry(t *t
 		t.Fatalf("generic retry diverged from established body pipeline\nwant: %s\n got: %s", wantRetry, captured[1].body)
 	}
 	for i, request := range captured {
-		if request.accept != "text/event-stream" {
-			t.Fatalf("request %d Accept = %q, want legacy text/event-stream", i+1, request.accept)
+		if request.accept != "application/json" {
+			t.Fatalf("request %d Accept = %q, want prepared application/json", i+1, request.accept)
 		}
-		if request.session != "legacy-header-session" {
-			t.Fatalf("request %d session = %q, want legacy ingress header", i+1, request.session)
+		if request.session != firstPrepared.SessionID() {
+			t.Fatalf("request %d session = %q, want account-bound %q", i+1, request.session, firstPrepared.SessionID())
 		}
 	}
 }
@@ -313,7 +333,7 @@ func TestDoForwardThinkingSwitchTracksRealAccountNotCredentialFile(t *testing.T)
 	}
 }
 
-func TestDoForwardGenericRequestRetainsCredentialFileSwitchKey(t *testing.T) {
+func TestDoForwardGenericRequestTracksRealAccountNotCredentialFile(t *testing.T) {
 	body := genericServerPolicyBody("claude-sonnet-5")
 	var captured [][]byte
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -345,8 +365,8 @@ func TestDoForwardGenericRequestRetainsCredentialFileSwitchKey(t *testing.T) {
 	if !strings.Contains(string(captured[0]), "old-signature") {
 		t.Fatal("first generic request was unexpectedly sanitized")
 	}
-	if strings.Contains(string(captured[1]), "old-signature") {
-		t.Fatal("generic request stopped using the credential-file switch key")
+	if !strings.Contains(string(captured[1]), "old-signature") {
+		t.Fatal("same Anthropic account was treated as a switch because its credential filename changed")
 	}
 }
 

@@ -239,6 +239,8 @@ func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clie
 	tried := make(map[string]bool)
 	attempts := 0
 	var lastDeferred *deferredResponse
+	apiKeyOnly := false
+	preparationFallbackPending := false
 
 	// Convert withheld service errors to the gateway's stable public taxonomy.
 	// Raw bodies remain in operator logs because they may identify a vendor,
@@ -261,7 +263,11 @@ func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clie
 		for id := range tried {
 			excludeIDs = append(excludeIDs, id)
 		}
-		a := s.pool.Acquire(c.Request.Context(), provider, clientToken, clientGroup, model, slotID, excludeIDs...)
+		a := s.pool.AcquireWithOptions(c.Request.Context(), provider, clientToken, clientGroup, model, slotID, auth.AcquireOptions{
+			AllowAPIKeyFallback: true,
+			APIKeyOnly:          apiKeyOnly,
+			ExcludeIDs:          excludeIDs,
+		})
 		if a == nil {
 			// No healthy/untried credential left. If we withheld an upstream
 			// error on the way here, surface that genuine status; otherwise
@@ -271,7 +277,9 @@ func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clie
 				return
 			}
 			msg := "no upstream credentials available"
-			if len(tried) > 0 {
+			if preparationFallbackPending {
+				msg = "claude request preparation failed and no API-key fallback was available"
+			} else if len(tried) > 0 {
 				msg = "all upstream credentials exhausted"
 			}
 			writeAPIError(c, provider, APIError{Status: http.StatusServiceUnavailable, Code: "service_temporarily_unavailable", Message: "The requested model is temporarily unavailable. Please try again shortly."})
@@ -284,6 +292,53 @@ func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clie
 		}
 		tried[a.ID] = true
 		attempts++
+		var preflightPrepared mimicry.BodyTransformResult
+
+		// OAuth preparation is entirely local and deterministic. Validate it
+		// before any sidecar or business request reaches Anthropic. A failure is
+		// about request/identity binding rather than credential health, so switch
+		// directly to an API key with the untouched original body.
+		if auth.NormalizeProvider(a.Provider) == auth.ProviderAnthropic && a.Kind == auth.KindOAuth && path == "/v1/messages" {
+			requestClass := mimicry.ClassifyClaudeCodeRequest(body)
+			var prepErr error
+			preflightPrepared, prepErr = prepareClaudeOAuthBody(body, model, a, mimicry.SimIdentity{
+				AccountKey: a.AccountKey(), AccountUUID: a.AccountUUIDValue(), ClientToken: clientToken,
+			})
+			if prepErr == nil {
+				// Validate the credential binding and complete header policy too. This
+				// catches missing genuine betas, empty credentials, and any future
+				// prepared-header invariant before sidecars or business traffic begin.
+				preflightReq := &http.Request{Header: c.Request.Header.Clone()}
+				stripIngressHeaders(preflightReq.Header)
+				baseURL := s.cfg.AnthropicBaseURL
+				if override := strings.TrimRight(a.Snapshot().BaseURL, "/"); override != "" {
+					baseURL = override
+				}
+				prepErr = applyAnthropicPreparedHeaders(preflightReq, a, stream,
+					strings.HasPrefix(strings.ToLower(baseURL), "https://api.anthropic.com"), preflightPrepared)
+			}
+			if prepErr != nil {
+				reason := claudePreparationFailureReason(prepErr)
+				audit := claudePreparationFailureAudit(requestClass, a.AccountKey(), reason)
+				log.Errorf("proxy: Claude %s preparation failed before upstream (account_hash=%s model=%s reason=%s fallback=apikey)",
+					requestClass.String(), audit.AccountHash, model, reason)
+				s.emitLog(requestlog.Record{
+					Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider,
+					AuthID: a.ID, AuthLabel: a.Label, AuthKind: "oauth", Model: model,
+					Stream: stream, Path: path, Attempts: attempts, DurationMs: time.Since(start).Milliseconds(),
+					Error: "claude request preparation failed; fallback=apikey", AttemptOnly: true, ClaudeAudit: audit,
+				})
+				apiKeyOnly = true
+				preparationFallbackPending = true
+				lastDeferred = nil
+				continue
+			}
+		}
+		if preparationFallbackPending && a.Kind == auth.KindAPIKey {
+			log.Warnf("proxy: Claude preparation fallback selected API-key credential %s", a.ID)
+			c.Set(claudePreparationAPIKeyFallbackKey, true)
+			preparationFallbackPending = false
+		}
 
 		var retry, done bool
 		var deferred *deferredResponse
@@ -293,7 +348,7 @@ func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clie
 		default:
 			// attempt > 0 ⇒ this is a transparent retry; doForward skips the
 			// blocking bootstrap-wait so the credential switch stays fast.
-			retry, done, deferred = s.doForward(c, a, path, body, stream, model, clientToken, slotID, clientName, start, attempts, attempt > 0)
+			retry, done, deferred = s.doForwardPrepared(c, a, path, body, stream, model, clientToken, slotID, clientName, start, attempts, attempt > 0, preflightPrepared)
 		}
 		if done {
 			s.pool.Release(provider, clientToken, slotID)
@@ -388,6 +443,8 @@ type deferredResponse struct {
 	claudeAudit *requestlog.ClaudeAudit
 }
 
+const claudePreparationAPIKeyFallbackKey = "claude_preparation_apikey_fallback"
+
 func copySafeRetryHeaders(c *gin.Context, h http.Header) {
 	for _, key := range []string{"Retry-After", "X-RateLimit-Reset"} {
 		if value := h.Get(key); value != "" {
@@ -411,6 +468,10 @@ func copySafeRetryHeaders(c *gin.Context, h http.Header) {
 // blocking bootstrap-wait gate so a transparent credential switch doesn't
 // re-stack the ≤5s sidecar wait on every alternate credential.
 func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, slotID, clientName string, start time.Time, attempts int, isRetry bool) (retry bool, done bool, deferred *deferredResponse) {
+	return s.doForwardPrepared(c, a, path, body, stream, model, clientToken, slotID, clientName, start, attempts, isRetry, mimicry.BodyTransformResult{})
+}
+
+func (s *Server) doForwardPrepared(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, slotID, clientName string, start time.Time, attempts int, isRetry bool, preflightPrepared mimicry.BodyTransformResult) (retry bool, done bool, deferred *deferredResponse) {
 	if a.Kind == auth.KindAPIKey {
 		// API-key relays keep the established thinking-signature behavior. The
 		// genuine preserve/rewrite policy applies only to Anthropic OAuth.
@@ -427,19 +488,15 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		return s.doForwardAnthropicAPIKey(c, a, path, body, stream, model, clientToken, clientName, start, attempts)
 	}
 
+	originalBody := body
 	accountKey := a.AccountKey()
 	var requestPolicy mimicry.RequestPolicy
-	rewrite := false
+	preparedPath := false
 	if path == "/v1/messages" {
 		requestClass := mimicry.ClassifyClaudeCodeRequest(body)
+		preparedPath = true
+		switchKey := accountKey
 		if requestClass == mimicry.RequestClassGenuine {
-			rewrite = true
-		}
-
-		// Genuine Claude Code OAuth traffic always enters the account-bound
-		// prepared path. Generic callers retain the established shaping path.
-		switchKey := a.ID
-		if rewrite {
 			var err error
 			requestPolicy, err = mimicry.NewClaudeCodeRequestPolicy(requestClass, mimicry.GenuineRequestRewrite)
 			if err != nil {
@@ -453,9 +510,8 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 				writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusBadRequest, Code: "invalid_request", Message: "A genuine Claude Code request must include Anthropic-Beta."})
 				return false, true, nil
 			}
-			// Thinking signatures are tied to the real Anthropic account, not a
-			// credential filename, in the experimental identity-mapped path.
-			switchKey = accountKey
+		} else if requestClass == mimicry.RequestClassGeneric {
+			requestPolicy = mimicry.NewGenericClaudeCodeSynthesizePolicy()
 		}
 
 		switched := s.switchTracker.Check(clientToken, body, switchKey)
@@ -484,26 +540,21 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 		ClientToken: clientToken,
 	}
 	var prepared mimicry.BodyTransformResult
-	if rewrite {
+	if preparedPath {
 		var err error
-		prepared, err = prepareClaudeRewriteBody(body, model, a, id, requestPolicy)
+		if preflightPrepared.IsValid() && bytes.Equal(body, originalBody) {
+			prepared = preflightPrepared
+		} else {
+			prepared, err = prepareClaudePreparedBody(body, model, a, id, requestPolicy)
+		}
 		if err != nil {
-			// Local preparation failures are neither credential failures nor a
-			// reason to fail over. In particular, rewrite never degrades to
-			// preserve with a stale downstream identity.
+			// Production preflights this path before doForward so it can switch to
+			// an API key. Keep the direct-call guard fail-closed as a final backstop.
 			log.Errorf("proxy: prepare Claude request via %s: %v", a.ID, err)
 			writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusInternalServerError, Code: "request_preparation_failed", Message: "The request could not be prepared. Please try again."})
 			return false, true, nil
 		}
 		upstreamBody = prepared.Body()
-	} else if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
-		// Legacy path: preserve the pre-policy model rewrite behavior, including
-		// its best-effort fallback when a body cannot be decoded.
-		if rewritten, err := rewriteModelField(body, upstreamModel); err == nil {
-			upstreamBody = rewritten
-		} else {
-			log.Warnf("proxy: model rewrite (%s -> %s) failed via %s: %v", model, upstreamModel, a.ID, err)
-		}
 	}
 
 	// Sidecar: dispatch the per-session bootstrap+quota_probe the first
@@ -517,13 +568,6 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	// gate the first business request on it, capped at bootstrapWaitCap
 	// so a stuck sidecar can't hang user traffic.
 	bootstrapReady := s.sidecar.Notify(a, clientToken)
-	if path == "/v1/messages" && !rewrite {
-		// Generic callers retain the established body-shaping behavior.
-		upstreamBody = mimicry.ApplyClaudeCodeBodyMimicry(upstreamBody, model, id)
-		if normalized, changed := mimicry.NormalizeDateline(upstreamBody); changed {
-			upstreamBody = normalized
-		}
-	}
 
 	ctx := c.Request.Context()
 	// Skip the blocking bootstrap-wait on retries: a transparent credential
@@ -550,9 +594,9 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 	copyForwardableHeaders(c.Request.Header, upReq.Header)
 	stripIngressHeaders(upReq.Header)
 
-	// Genuine requests consume the atomic prepared result. Generic traffic
-	// continues through the established header adapter.
-	if rewrite {
+	// Genuine and generic OAuth requests consume the same atomic prepared
+	// result; generic synthesis pins its own trusted feature/profile vector.
+	if preparedPath {
 		if err := applyAnthropicPreparedHeaders(upReq, a, stream, isAnthropicBase, prepared); err != nil {
 			log.Errorf("proxy: prepare Claude headers via %s: %v", a.ID, err)
 			writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusInternalServerError, Code: "request_preparation_failed", Message: "The request could not be prepared. Please try again."})
@@ -637,31 +681,20 @@ func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byt
 			if !bytes.Equal(sanitized, body) {
 				retryUpstream := sanitized
 				var retryPrepared mimicry.BodyTransformResult
-				if rewrite {
+				if preparedPath {
 					var prepErr error
-					retryPrepared, prepErr = prepareClaudeRewriteBody(sanitized, model, a, id, requestPolicy)
+					retryPrepared, prepErr = prepareClaudePreparedBody(sanitized, model, a, id, requestPolicy)
 					if prepErr != nil {
 						log.Warnf("proxy: %s signature retry preparation failed: %v", a.ID, prepErr)
 						goto signatureRecoveryDone
 					}
 					retryUpstream = retryPrepared.Body()
-				} else {
-					// Exact legacy/control recovery path.
-					if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
-						if rewritten, rewriteErr := rewriteModelField(retryUpstream, upstreamModel); rewriteErr == nil {
-							retryUpstream = rewritten
-						}
-					}
-					retryUpstream = mimicry.ApplyClaudeCodeBodyMimicry(retryUpstream, model, id)
-					if normalized, changed := mimicry.NormalizeDateline(retryUpstream); changed {
-						retryUpstream = normalized
-					}
 				}
 				log.Warnf("proxy: %s returned 400 signature-in-thinking — sanitizing and retrying once on same credential", a.ID)
 				if retryReq, rerr := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(retryUpstream)); rerr == nil {
 					copyForwardableHeaders(c.Request.Header, retryReq.Header)
 					stripIngressHeaders(retryReq.Header)
-					if rewrite {
+					if preparedPath {
 						if headerErr := applyAnthropicPreparedHeaders(retryReq, a, stream, isAnthropicBase, retryPrepared); headerErr != nil {
 							log.Warnf("proxy: %s signature retry header preparation failed: %v", a.ID, headerErr)
 							goto signatureRecoveryDone
@@ -1072,7 +1105,11 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	copyForwardableHeaders(c.Request.Header, upReq.Header)
 	stripIngressHeaders(upReq.Header)
 	token, _ := a.Credentials()
+	upReq.Header.Del("Authorization")
 	upReq.Header.Set("x-api-key", token)
+	if c.GetBool(claudePreparationAPIKeyFallbackKey) {
+		stripAnthropicOAuthBeta(upReq.Header)
+	}
 
 	client := auth.ClientFor(a.ProxyURL, false)
 	resp, err := client.Do(upReq)
@@ -1312,6 +1349,27 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	return false, true, nil
 }
 
+func stripAnthropicOAuthBeta(h http.Header) {
+	value := h.Get("Anthropic-Beta")
+	if value == "" {
+		return
+	}
+	parts := strings.Split(value, ",")
+	kept := parts[:0]
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || strings.HasPrefix(part, "oauth-") {
+			continue
+		}
+		kept = append(kept, part)
+	}
+	if len(kept) == 0 {
+		h.Del("Anthropic-Beta")
+		return
+	}
+	h.Set("Anthropic-Beta", strings.Join(kept, ","))
+}
+
 // stripIngressHeaders removes headers that describe the *ingress path* into
 // our server before forwarding upstream. Critical when the server sits
 // behind Cloudflare Tunnel: cloudflared injects Cdn-Loop: cloudflare plus a
@@ -1375,7 +1433,25 @@ func applyAnthropicPreparedHeaders(req *http.Request, a *auth.Auth, stream, isAn
 	return mimicry.ApplyClaudeCodePreparedRequest(req, token, a.AccountKey(), kindToMimicry(kind), stream, isAnthropicBase, prepared)
 }
 
-func prepareClaudeRewriteBody(body []byte, model string, a *auth.Auth, id mimicry.SimIdentity, policy mimicry.RequestPolicy) (mimicry.BodyTransformResult, error) {
+func prepareClaudeOAuthBody(body []byte, model string, a *auth.Auth, id mimicry.SimIdentity) (mimicry.BodyTransformResult, error) {
+	requestClass := mimicry.ClassifyClaudeCodeRequest(body)
+	var policy mimicry.RequestPolicy
+	switch requestClass {
+	case mimicry.RequestClassGenuine:
+		var err error
+		policy, err = mimicry.NewClaudeCodeRequestPolicy(requestClass, mimicry.GenuineRequestRewrite)
+		if err != nil {
+			return mimicry.BodyTransformResult{}, err
+		}
+	case mimicry.RequestClassGeneric:
+		policy = mimicry.NewGenericClaudeCodeSynthesizePolicy()
+	default:
+		return mimicry.BodyTransformResult{}, fmt.Errorf("unsupported Claude request class %s", requestClass)
+	}
+	return prepareClaudePreparedBody(body, model, a, id, policy)
+}
+
+func prepareClaudePreparedBody(body []byte, model string, a *auth.Auth, id mimicry.SimIdentity, policy mimicry.RequestPolicy) (mimicry.BodyTransformResult, error) {
 	working := body
 	// Any permitted body edits happen before the atomic transform. The rewrite
 	// subsequently validates the prepared body, so these exact-byte edits cannot
@@ -1391,6 +1467,38 @@ func prepareClaudeRewriteBody(body []byte, model string, a *auth.Auth, id mimicr
 		working = normalized
 	}
 	return mimicry.PrepareClaudeCodeRequest(working, model, id, policy, kindToMimicry(a.Kind))
+}
+
+// prepareClaudeRewriteBody is retained for focused genuine-policy tests and
+// downstream source compatibility. New request handling uses the class-neutral
+// prepareClaudePreparedBody helper above.
+func prepareClaudeRewriteBody(body []byte, model string, a *auth.Auth, id mimicry.SimIdentity, policy mimicry.RequestPolicy) (mimicry.BodyTransformResult, error) {
+	return prepareClaudePreparedBody(body, model, a, id, policy)
+}
+
+func claudePreparationFailureReason(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "account uuid"):
+		return "missing_account_uuid"
+	case strings.Contains(message, "anthropic-beta"):
+		return "missing_anthropic_beta"
+	case strings.Contains(message, "messages array"):
+		return "invalid_messages"
+	case strings.Contains(message, "json object"), strings.Contains(message, "request class"):
+		return "invalid_json_body"
+	case strings.Contains(message, "metadata"):
+		return "metadata_rewrite_failed"
+	case strings.Contains(message, "billing"):
+		return "billing_rewrite_failed"
+	case strings.Contains(message, "model rewrite"):
+		return "model_rewrite_failed"
+	default:
+		return "request_preparation_failed"
+	}
 }
 
 func kindToMimicry(k auth.Kind) string {
