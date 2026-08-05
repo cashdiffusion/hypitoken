@@ -42,7 +42,7 @@ jobs:
       - name: Build admin SPA
         run: make web
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
 

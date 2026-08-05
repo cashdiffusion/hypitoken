@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/thinkingsig"
 
@@ -216,8 +217,8 @@ func TestDoForwardWithholdsRetryableCredentialError(t *testing.T) {
 	s := newDoForwardTestServer(t, upstream.URL, cred)
 	c, w := newMessagesContext(t, haikuBody)
 
-	retry, done, deferred := s.doForward(c, cred, "/v1/messages", haikuBody, false,
-		"claude-haiku-4-5-20251001", "tok-abcdef123456", "slot-1", "client", time.Now(), 1, false)
+	retry, done, deferred := s.doForwardPrepared(c, cred, "/v1/messages", haikuBody, false,
+		"claude-haiku-4-5-20251001", "tok-abcdef123456", "slot-1", "client", time.Now(), 1, false, mimicry.BodyTransformResult{})
 
 	if !retry || done {
 		t.Fatalf("retryable 429 should yield (retry=true, done=false); got retry=%v done=%v", retry, done)
@@ -357,8 +358,8 @@ func TestDoForwardForwardsNonRetryableErrors(t *testing.T) {
 			s := newDoForwardTestServer(t, upstream.URL, cred)
 			c, w := newMessagesContext(t, haikuBody)
 
-			retry, done, deferred := s.doForward(c, cred, "/v1/messages", haikuBody, false,
-				"claude-haiku-4-5-20251001", "tok-abcdef123456", "slot-1", "client", time.Now(), 1, false)
+			retry, done, deferred := s.doForwardPrepared(c, cred, "/v1/messages", haikuBody, false,
+				"claude-haiku-4-5-20251001", "tok-abcdef123456", "slot-1", "client", time.Now(), 1, false, mimicry.BodyTransformResult{})
 
 			if retry || !done {
 				t.Fatalf("non-retryable %d should yield (retry=false, done=true); got retry=%v done=%v", tc.status, retry, done)

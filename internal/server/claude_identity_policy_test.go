@@ -164,8 +164,8 @@ func TestDoForwardGenericRequestUsesStrictPreparedBodyHeadersAndSignatureRetry(t
 	c.Request.Header.Set("Accept", "application/json")
 	c.Request.Header.Set("X-Claude-Code-Session-Id", "legacy-header-session")
 
-	retry, done, _ := s.doForward(c, credential, "/v1/messages", body, true,
-		"claude-sonnet-5", "tok-abcdef123456", "legacy-header-session", "client", time.Now(), 1, false)
+	retry, done, _ := s.doForwardPrepared(c, credential, "/v1/messages", body, true,
+		"claude-sonnet-5", "tok-abcdef123456", "legacy-header-session", "client", time.Now(), 1, false, mimicry.BodyTransformResult{})
 	if retry || !done || recorder.Code != http.StatusBadRequest {
 		t.Fatalf("unexpected result: retry=%v done=%v status=%d", retry, done, recorder.Code)
 	}
@@ -218,8 +218,8 @@ func TestDoForwardRewriteRejectsMissingBetaBeforeUpstream(t *testing.T) {
 	c.Request.Header.Set("User-Agent", "claude-cli/2.1.214 (external, cli)")
 	c.Request.Header.Set("Accept", "application/json")
 
-	retry, done, _ := s.doForward(c, credential, "/v1/messages", body, true,
-		"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false)
+	retry, done, _ := s.doForwardPrepared(c, credential, "/v1/messages", body, true,
+		"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false, mimicry.BodyTransformResult{})
 	if retry || !done || recorder.Code != http.StatusBadRequest {
 		t.Fatalf("unexpected result: retry=%v done=%v status=%d", retry, done, recorder.Code)
 	}
@@ -243,8 +243,8 @@ func TestDoForwardGenuineRequestRejectsMissingAccountUUIDBeforeUpstream(t *testi
 	c, recorder := newMessagesContext(t, body)
 	c.Request.Header.Set("Anthropic-Beta", identityPolicyMainBeta)
 
-	retry, done, _ := s.doForward(c, credential, "/v1/messages", body, true,
-		"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false)
+	retry, done, _ := s.doForwardPrepared(c, credential, "/v1/messages", body, true,
+		"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false, mimicry.BodyTransformResult{})
 	if retry || !done || recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("unexpected result: retry=%v done=%v status=%d", retry, done, recorder.Code)
 	}
@@ -267,8 +267,8 @@ func TestDoForwardRewriteFailureCarriesModeAndAccountAudit(t *testing.T) {
 	c, _ := newMessagesContext(t, body)
 	c.Request.Header.Set("Anthropic-Beta", identityPolicyMainBeta)
 
-	retry, done, deferred := s.doForward(c, credential, "/v1/messages", body, true,
-		"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false)
+	retry, done, deferred := s.doForwardPrepared(c, credential, "/v1/messages", body, true,
+		"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false, mimicry.BodyTransformResult{})
 	if !retry || done || deferred == nil || deferred.claudeAudit == nil {
 		t.Fatalf("missing deferred failure audit: retry=%v done=%v deferred=%+v", retry, done, deferred)
 	}
@@ -302,8 +302,8 @@ func TestDoForwardThinkingSwitchTracksRealAccountNotCredentialFile(t *testing.T)
 		c, _ := newMessagesContext(t, body)
 		c.Request.Header.Set("Accept", "application/json")
 		c.Request.Header.Set("Anthropic-Beta", identityPolicyMainBeta)
-		_, done, _ := s.doForward(c, credential, "/v1/messages", body, true,
-			"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false)
+		_, done, _ := s.doForwardPrepared(c, credential, "/v1/messages", body, true,
+			"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false, mimicry.BodyTransformResult{})
 		if !done {
 			t.Fatal("request did not finish")
 		}
@@ -322,8 +322,8 @@ func TestDoForwardThinkingSwitchTracksRealAccountNotCredentialFile(t *testing.T)
 		c, _ := newMessagesContext(t, body)
 		c.Request.Header.Set("Accept", "application/json")
 		c.Request.Header.Set("Anthropic-Beta", identityPolicyMainBeta)
-		_, done, _ := s.doForward(c, credential, "/v1/messages", body, true,
-			"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false)
+		_, done, _ := s.doForwardPrepared(c, credential, "/v1/messages", body, true,
+			"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false, mimicry.BodyTransformResult{})
 		if !done {
 			t.Fatal("request did not finish")
 		}
@@ -353,8 +353,8 @@ func TestDoForwardGenericRequestTracksRealAccountNotCredentialFile(t *testing.T)
 	for _, credential := range []*auth.Auth{credentialA, credentialB} {
 		c, _ := newMessagesContext(t, body)
 		c.Request.Header.Set("X-Claude-Code-Session-Id", identityPolicySession)
-		_, done, _ := s.doForward(c, credential, "/v1/messages", body, true,
-			"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false)
+		_, done, _ := s.doForwardPrepared(c, credential, "/v1/messages", body, true,
+			"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false, mimicry.BodyTransformResult{})
 		if !done {
 			t.Fatal("request did not finish")
 		}
@@ -403,8 +403,8 @@ func TestDoForwardRewriteRepreparesSignatureRetry(t *testing.T) {
 	c.Request.Header.Set("Anthropic-Beta", identityPolicyMainBeta)
 	c.Request.Header.Set("X-Claude-Code-Session-Id", identityPolicySession)
 
-	retry, done, _ := s.doForward(c, credential, "/v1/messages", body, true,
-		"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false)
+	retry, done, _ := s.doForwardPrepared(c, credential, "/v1/messages", body, true,
+		"claude-sonnet-5", "tok-abcdef123456", identityPolicySession, "client", time.Now(), 1, false, mimicry.BodyTransformResult{})
 	if retry || !done || recorder.Code != http.StatusBadRequest {
 		t.Fatalf("unexpected result: retry=%v done=%v status=%d", retry, done, recorder.Code)
 	}

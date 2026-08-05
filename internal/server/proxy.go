@@ -467,10 +467,6 @@ func copySafeRetryHeaders(c *gin.Context, h http.Header) {
 // isRetry is true on the 2nd+ attempt of a request; it suppresses the
 // blocking bootstrap-wait gate so a transparent credential switch doesn't
 // re-stack the ≤5s sidecar wait on every alternate credential.
-func (s *Server) doForward(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, slotID, clientName string, start time.Time, attempts int, isRetry bool) (retry bool, done bool, deferred *deferredResponse) {
-	return s.doForwardPrepared(c, a, path, body, stream, model, clientToken, slotID, clientName, start, attempts, isRetry, mimicry.BodyTransformResult{})
-}
-
 func (s *Server) doForwardPrepared(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, slotID, clientName string, start time.Time, attempts int, isRetry bool, preflightPrepared mimicry.BodyTransformResult) (retry bool, done bool, deferred *deferredResponse) {
 	if a.Kind == auth.KindAPIKey {
 		// API-key relays keep the established thinking-signature behavior. The
@@ -496,7 +492,8 @@ func (s *Server) doForwardPrepared(c *gin.Context, a *auth.Auth, path string, bo
 		requestClass := mimicry.ClassifyClaudeCodeRequest(body)
 		preparedPath = true
 		switchKey := accountKey
-		if requestClass == mimicry.RequestClassGenuine {
+		switch requestClass {
+		case mimicry.RequestClassGenuine:
 			var err error
 			requestPolicy, err = mimicry.NewClaudeCodeRequestPolicy(requestClass, mimicry.GenuineRequestRewrite)
 			if err != nil {
@@ -510,7 +507,7 @@ func (s *Server) doForwardPrepared(c *gin.Context, a *auth.Auth, path string, bo
 				writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusBadRequest, Code: "invalid_request", Message: "A genuine Claude Code request must include Anthropic-Beta."})
 				return false, true, nil
 			}
-		} else if requestClass == mimicry.RequestClassGeneric {
+		case mimicry.RequestClassGeneric:
 			requestPolicy = mimicry.NewGenericClaudeCodeSynthesizePolicy()
 		}
 
