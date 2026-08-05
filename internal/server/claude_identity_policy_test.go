@@ -27,7 +27,7 @@ func genericServerPolicyBody(model string) []byte {
 	return []byte(`{"model":"` + model + `","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]},{"role":"assistant","content":[{"type":"thinking","thinking":"old","signature":"old-signature"}]}],"system":[{"type":"text","text":"ordinary API caller"}],"stream":true}`)
 }
 
-func rewritePolicyForBody(t *testing.T, body []byte) mimicry.RequestPolicy {
+func rewritePolicyForBody(t testing.TB, body []byte) mimicry.RequestPolicy {
 	t.Helper()
 	class := mimicry.ClassifyClaudeCodeRequest(body)
 	policy, err := mimicry.NewClaudeCodeRequestPolicy(class, mimicry.GenuineRequestRewrite)
@@ -79,7 +79,14 @@ func TestClaudeRewriteAuditMapsAnonymizedAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	audit := claudeIdentityAudit(prepared, credential.AccountKey())
+	credential.ProxyURL = "http://user:secret@proxy.example:8080"
+	req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", nil)
+	req.Header.Set("Anthropic-Beta", identityPolicyMainBeta)
+	req.Header.Set("X-Debug-Trace", "not-recorded")
+	if err := applyAnthropicPreparedHeaders(req, credential, true, true, prepared); err != nil {
+		t.Fatal(err)
+	}
+	audit := claudeIdentityAudit(prepared, credential.AccountKey(), req.Header, credential.ProxyURL)
 	if audit == nil {
 		t.Fatal("missing Claude rewrite audit")
 	}
@@ -88,6 +95,22 @@ func TestClaudeRewriteAuditMapsAnonymizedAccount(t *testing.T) {
 	}
 	if !audit.AccountIdentityMapped || audit.IdentityMode != "rewrite" {
 		t.Fatalf("unexpected audit flags: %+v", audit)
+	}
+	if audit.BodyBytes != len(prepared.Body()) || len(audit.BodySHA256) != 64 || audit.SessionBinding != "match" ||
+		audit.BillingValidation != "verified" || audit.BetaHash == "" || audit.ProfileHash == "" || audit.ProxyConfigHash == "" {
+		t.Fatalf("missing lightweight audit summary: %+v", audit)
+	}
+	if audit.ExtraHeaderCount != 1 || len(audit.ExtraHeaderNames) != 1 || audit.ExtraHeaderNames[0] != "x-debug-trace" {
+		t.Fatalf("unexpected header inventory: %+v", audit)
+	}
+	rawAudit, err := json.Marshal(audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"test-token", "user:secret", "not-recorded", credential.AccountUUIDValue(), "downstream-account"} {
+		if bytes.Contains(rawAudit, []byte(secret)) {
+			t.Fatalf("lightweight audit leaked %q: %s", secret, rawAudit)
+		}
 	}
 }
 
@@ -101,10 +124,53 @@ func TestClaudeGenericSynthesisAuditMapsAnonymizedAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	audit := claudeIdentityAudit(prepared, credential.AccountKey())
+	req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", nil)
+	if err := applyAnthropicPreparedHeaders(req, credential, true, true, prepared); err != nil {
+		t.Fatal(err)
+	}
+	audit := claudeIdentityAudit(prepared, credential.AccountKey(), req.Header, credential.ProxyURL)
 	if audit == nil || audit.RequestClass != "generic" || audit.IdentityMode != "synthesize" ||
 		!audit.AccountIdentityMapped || audit.AccountHash == "" || audit.AccountHash == credential.AccountKey() {
 		t.Fatalf("unexpected generic audit: %+v", audit)
+	}
+	if audit.SessionBinding != "match" || audit.BillingValidation != "verified" || audit.BodySHA256 == "" {
+		t.Fatalf("missing generic lightweight summary: %+v", audit)
+	}
+}
+
+func TestProxyConfigHashIgnoresAuthentication(t *testing.T) {
+	first := proxyConfigHash("http://alice:secret-a@proxy.example:8080")
+	second := proxyConfigHash("http://bob:secret-b@proxy.example:8080")
+	if first == "" || first != second {
+		t.Fatalf("same proxy endpoint hashes differ: %q != %q", first, second)
+	}
+	if first == proxyConfigHash("http://proxy-other.example:8080") {
+		t.Fatal("different proxy endpoints share a hash")
+	}
+}
+
+func BenchmarkClaudeIdentityAudit(b *testing.B) {
+	credential := oauthTestCred()
+	body := genuineServerPolicyBody("claude-opus-5")
+	policy := rewritePolicyForBody(b, body)
+	id := mimicry.SimIdentity{
+		AccountKey: credential.AccountKey(), AccountUUID: credential.AccountUUIDValue(), ClientToken: "client-token",
+	}
+	prepared, err := prepareClaudeRewriteBody(body, "claude-opus-5", credential, id, policy)
+	if err != nil {
+		b.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", nil)
+	req.Header.Set("Anthropic-Beta", identityPolicyMainBeta)
+	if err := applyAnthropicPreparedHeaders(req, credential, true, true, prepared); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if audit := claudeIdentityAudit(prepared, credential.AccountKey(), req.Header, credential.ProxyURL); audit == nil {
+			b.Fatal("missing audit")
+		}
 	}
 }
 

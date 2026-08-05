@@ -123,7 +123,11 @@ func TestForwardPreparationFailureFallsBackToAPIKeyWithOriginalBodyAndAudit(t *t
 			if record.AttemptOnly && record.ClaudeAudit != nil && record.ClaudeAudit.PreparationFailed {
 				found = record.ClaudeAudit.RequestClass == "generic" &&
 					record.ClaudeAudit.PreparationError == "missing_account_uuid" &&
-					record.ClaudeAudit.Fallback == "apikey"
+					record.ClaudeAudit.Fallback == "apikey" &&
+					record.ClaudeAudit.BodyBytes == len(haikuBody) &&
+					len(record.ClaudeAudit.BodySHA256) == 64 &&
+					record.ClaudeAudit.SessionBinding == "unavailable" &&
+					record.ClaudeAudit.BillingValidation == "failed"
 			}
 		}
 	}

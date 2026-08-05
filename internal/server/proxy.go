@@ -319,7 +319,7 @@ func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clie
 			}
 			if prepErr != nil {
 				reason := claudePreparationFailureReason(prepErr)
-				audit := claudePreparationFailureAudit(requestClass, a.AccountKey(), reason)
+				audit := claudePreparationFailureAudit(requestClass, a.AccountKey(), reason, body, c.Request.Header, a.ProxyURL)
 				log.Errorf("proxy: Claude %s preparation failed before upstream (account_hash=%s model=%s reason=%s fallback=apikey)",
 					requestClass.String(), audit.AccountHash, model, reason)
 				s.emitLog(requestlog.Record{
@@ -603,10 +603,10 @@ func (s *Server) doForwardPrepared(c *gin.Context, a *auth.Auth, path string, bo
 		applyAnthropicHeaders(upReq, a, stream, isAnthropicBase, id, upstreamBody)
 	}
 
+	claudeAudit := claudeIdentityAudit(prepared, accountKey, upReq.Header, a.ProxyURL)
 	client := auth.ClientFor(a.ProxyURL, s.cfg.UseUTLS)
 	resp, err := client.Do(upReq)
 	if err != nil {
-		claudeAudit := claudeIdentityAudit(prepared, accountKey)
 		// Client went away (ctrl-C, closed connection, etc.) — not a
 		// credential fault. Record a non-fatal hint for the admin panel,
 		// skip retrying onto other credentials (they would all hit the
@@ -704,7 +704,7 @@ func (s *Server) doForwardPrepared(c *gin.Context, a *auth.Auth, path string, bo
 						if retryResp.StatusCode < 400 {
 							log.Infof("proxy: %s signature retry succeeded", a.ID)
 							resp = retryResp
-							prepared = retryPrepared
+							claudeAudit = claudeIdentityAudit(retryPrepared, accountKey, retryReq.Header, a.ProxyURL)
 							recovered = true
 							flagStripThinking(a)
 						} else {
@@ -840,7 +840,6 @@ func (s *Server) doForwardPrepared(c *gin.Context, a *auth.Auth, path string, bo
 		case resp.StatusCode == 529, resp.StatusCode >= 500:
 			a.MarkFailure(fmt.Sprintf("upstream %d", resp.StatusCode))
 		}
-		claudeAudit := claudeIdentityAudit(prepared, accountKey)
 		if claudeAudit != nil {
 			claudeAudit.CredentialHardFailed = a.IsHardFailed()
 		}
@@ -900,8 +899,6 @@ recoveredFromSignature:
 	if a.Kind == auth.KindAPIKey {
 		authKind = "apikey"
 	}
-	claudeAudit := claudeIdentityAudit(prepared, accountKey)
-
 	var counts usage.Counts
 	var sub advisor.SubUsage
 	counts.Requests = 1
