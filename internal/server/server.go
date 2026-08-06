@@ -73,11 +73,6 @@ type Server struct {
 	// would 400 with "signature in thinking" on the new account).
 	switchTracker *thinkingsig.SwitchTracker
 
-	// kiro carries the Kiro-side state (credentials, PKCE sessions, dispatcher).
-	// nil when no token_groups declare upstream=kiro — that's the OSS path.
-	// Initialized via Server.InitKiro after construction.
-	kiro *KiroState
-
 	// codexRespAccount binds a Codex response id to the credential that produced
 	// it, namespaced by credential group. Backs the cross-group previous_response_id
 	// safety boundary on the WS path. Always initialized (cheap; janitor goroutine).

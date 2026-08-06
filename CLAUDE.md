@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-hypitoken (Go module still named `CPA-Claude`, binary `bin/hypitoken`) is a Go reverse-proxy that fans client requests across multiple upstream Anthropic / OpenAI / Kiro credentials (OAuth + API keys) on **two proxy endpoints** — Claude on `:8317` (`/v1/messages`), Codex on `:8318` (`/v1/chat/completions`, `/v1/responses`) — plus an optional **发卡网 (shop)** listener on `:8319`. On top of the raw proxy sit two optional product layers: a **SaaS multi-tenant billing layer** (`/api/v2/*`, user accounts + USD wallet) and the embedded **admin/landing/console SPA**.
+hypitoken (Go module still named `CPA-Claude`, binary `bin/hypitoken`) is a Go reverse-proxy that fans client requests across multiple upstream Anthropic / OpenAI credentials (OAuth + API keys) on **two proxy endpoints** — Claude on `:8317` (`/v1/messages`), Codex on `:8318` (`/v1/chat/completions`, `/v1/responses`) — plus an optional **发卡网 (shop)** listener on `:8319`. On top of the raw proxy sit two optional product layers: a **SaaS multi-tenant billing layer** (`/api/v2/*`, user accounts + USD wallet) and the embedded **admin/landing/console SPA**.
 
-The reusable proxy core (credential pool, usage ledger, pricing, client tokens, request log, rate limiting, the CC mimicry/sidecar fingerprint, thinking-signature handling, and the whole Kiro bridge) lives in the external module **`github.com/wjsoj/cc-core`**. This repo is the application layer that wires those pieces into endpoints and adds SaaS, shop, Kiro credential management, and the admin panel. **CPA-Claude (`/home/wjs/Documents/project/Go/CPA-Claude`) is a sibling fork that consumes the same cc-core** — fingerprint/mimicry/sidecar changes land in cc-core only (both forks import `cc-core/{mimicry,sidecar}` directly), then both bump the dependency.
+The reusable proxy core (credential pool, usage ledger, pricing, client tokens, request log, rate limiting, the CC mimicry/sidecar fingerprint, and thinking-signature handling) lives in the external module **`github.com/wjsoj/cc-core`**. This repo is the application layer that wires those pieces into endpoints and adds SaaS, shop, and the admin panel. **CPA-Claude (`/home/wjs/Documents/project/Go/CPA-Claude`) is a sibling fork that consumes the same cc-core** — fingerprint/mimicry/sidecar changes land in cc-core only (both forks import `cc-core/{mimicry,sidecar}` directly), then both bump the dependency.
 
 Derivative of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT). The Anthropic OAuth refresh, Codex JWT parsing, and uTLS Chrome transport originated upstream and now live in cc-core.
 
@@ -35,7 +35,7 @@ The admin SPA at `internal/admin/web/` (**React 18 + React Router 7 + Vite + Tai
 
 ## The cc-core boundary (read this first)
 
-`internal/` contains almost no credential/usage/pricing logic — those are cc-core packages imported and wired here. The server package imports: `cc-core/{auth, clienttoken, clientguard, pricing, ratelimit, requestlog, usage, thinkingsig, mimicry, sidecar, kiroapi, kirobridge}`. So when a path below says `auth.Pool` / `usage.Store` / `pricing.Catalog` / `clienttoken.Store` / `requestlog.Writer` / `mimicry.SimIdentity` / `sidecar.Manager`, the **type lives in cc-core**, not this repo. There is no `internal/auth/` directory any more.
+`internal/` contains almost no credential/usage/pricing logic — those are cc-core packages imported and wired here. The server package imports: `cc-core/{auth, clienttoken, clientguard, pricing, ratelimit, requestlog, usage, thinkingsig, mimicry, sidecar}`. So when a path below says `auth.Pool` / `usage.Store` / `pricing.Catalog` / `clienttoken.Store` / `requestlog.Writer` / `mimicry.SimIdentity` / `sidecar.Manager`, the **type lives in cc-core**, not this repo. There is no `internal/auth/` directory any more.
 
 **Fingerprint code is NOT duplicated** (as of cc-core v0.8.19). The Claude header + body mimicry and the bootstrap/heartbeat sidecar both live in `cc-core/{mimicry,sidecar}` and are imported directly — exactly like CPA-Claude. `applyAnthropicHeaders` in `proxy.go` is now a thin adapter over `mimicry.ApplyClaudeCodeHeaders`; `s.sidecar` is a `*sidecar.Manager`. hypitoken used to keep a vendored copy in `internal/server/{fingerprint,mimicry,sidecar}.go` — those are gone. Bumping the CC fingerprint target is a **cc-core edit + dependency bump**, nothing in this repo. The current target is **Claude Code 2.1.206** (ground truth in `cc-core/crack/cc2206/`). The Codex OAuth path still has its own inline `codex*` fingerprint constants in `codex_oauth_proxy.go` (its body/transport shape diverged from `cc-core/mimicry.ApplyCodexCLIHeaders`); only the Claude path is shared.
 
@@ -45,7 +45,7 @@ The admin SPA at `internal/admin/web/` (**React 18 + React Router 7 + Vite + Tai
 
 `internal/server/server.go` constructs **N gin engines, one per enabled endpoint**. Each engine is bound to one provider (`auth.ProviderAnthropic` or `auth.ProviderOpenAI`) and serves only the routes that make sense for it. The "primary" endpoint (Claude if enabled, else Codex) additionally hosts the admin panel, public `/status`, the embedded SPA, and (when enabled) the SaaS `/api/v2/*` routes. The shop endpoint is an independent gin engine on its own listener.
 
-The shared pieces (`auth.Pool`, `usage.Store`, `clienttoken.Store`, `pricing.Catalog`, `requestlog.Writer`, `ratelimit.RPM`/`Concurrency`, the `sidecarMgr`, the SaaS adapter, the Kiro state) live on `Server` and are injected into the engines. The split-by-engine matters because per-provider stickiness, concurrency budgets, and RPM limits all key on `(provider | clientToken)` — Claude saturation must NOT block a client's Codex traffic.
+The shared pieces (`auth.Pool`, `usage.Store`, `clienttoken.Store`, `pricing.Catalog`, `requestlog.Writer`, `ratelimit.RPM`/`Concurrency`, the `sidecarMgr`, the SaaS adapter) live on `Server` and are injected into the engines. The split-by-engine matters because per-provider stickiness, concurrency budgets, and RPM limits all key on `(provider | clientToken)` — Claude saturation must NOT block a client's Codex traffic.
 
 ### Credential pool & sticky sessions (`cc-core/auth`)
 
@@ -61,7 +61,7 @@ Health states live on `auth.Auth`: `MarkSuccess` / `MarkFailure` / `MarkHardFail
 
 ### Anthropic forward path (`internal/server/proxy.go`)
 
-`forward()` is the per-request entry: SaaS pre-check (balance/caps) → legacy weekly-USD budget → RPM gate → concurrency gate → Kiro routing attempt (`tryKiro`, see below) → `forwardWithFailover`. `forwardWithFailover` is the retry loop — up to **`maxAttempts = 12` rounds** on *different* credentials (backstop, not a target; it normally stops as soon as a healthy credential succeeds or all are excluded). Per attempt, `doForward` (OAuth) or `doForwardAnthropicAPIKey` (API key) talks to upstream; the last credential-level error is withheld and replayed if every credential is exhausted.
+`forward()` is the per-request entry: SaaS pre-check (balance/caps) → legacy weekly-USD budget → RPM gate → concurrency gate → `forwardWithFailover`. `forwardWithFailover` is the retry loop — up to **`maxAttempts = 12` rounds** on *different* credentials (backstop, not a target; it normally stops as soon as a healthy credential succeeds or all are excluded). Per attempt, `doForward` (OAuth) or `doForwardAnthropicAPIKey` (API key) talks to upstream; the last credential-level error is withheld and replayed if every credential is exhausted.
 
 The OAuth path applies **two layers of mimicry** to look like a real Claude Code **2.1.206** client:
 
@@ -90,10 +90,6 @@ Thinking-block signatures are sanitized via `cc-core/thinkingsig` (account-switc
 
 A `bootstrapSessionID` is shared by all streams. GC evicts virtual sessions idle > 30 min; heartbeats self-stop after idle. `Server.Shutdown` cancels every live session's context. **API-key credentials never trigger sidecars** — the third-party-detection signal only applies to OAuth subscription accounts. `internal/server/sidecar_test.go` runs against a live `httptest.Server` with real timing (~23s); its `wants` map asserts each endpoint's `User-Agent` + `Anthropic-Beta`.
 
-### Kiro path (`internal/kirocreds` + `internal/kiroupstream` + `internal/server/kiro.go`)
-
-A second upstream: AWS CodeWhisperer / **Kiro**, exposed Anthropic-compatibly. `forward()` calls `tryKiro` *before* `forwardWithFailover` — if the client token's groups contain a `token_group` with `upstream: kiro` (`config.UpstreamKiro`) that accepts the model, the request is converted via `cc-core/kirobridge` (`Origin: KIRO_CLI` fingerprint), forwarded with `cc-core/kiroapi`, and the SSE stream translated back to Anthropic shape. Billing applies the group's `discount` (default `0.05`, i.e. 5% of official). Credentials are PKCE-OAuth, managed by `internal/kirocreds` (store = one JSON file per account under `kiro_auths/`, id = `sha256(access|refresh)[:12]`), selected round-robin by `internal/kiroupstream` with a 60s quota cache. Admin CRUD + PKCE login at `/admin/api/kiro/*` (`internal/admin/kiro.go`).
-
 ### SaaS multi-tenant layer (`internal/saas`, optional)
 
 Enabled via `saas.enabled`. Mounts `/api/v2/*` on every engine and re-serves the SPA at `/`. Plugs into the proxy through the `SaaSAdapter` interface (`internal/server/saas_adapter.go`): `Lookup(token)` → user/wallet, `PreCheck` (balance + daily/monthly USD caps), `Charge` (official cost × pricing-group multiplier, default Claude 0.3 / Codex 0.05), `CredentialGroup`. Email+password auth (OTP verify) + JWT; USD wallet in a `wallet_tx` ledger; top-ups via Z-Pay / Alipay direct / Stripe Payment Element. Single SQLite DB (`internal/saas/db`, migrations v1–v4). SaaS admins can SSO into the legacy `/admin/api/*` with their JWT (GET = any authed user, writes = `role=admin`).
@@ -118,7 +114,7 @@ Legal pages (Terms of Service, Privacy Policy) are **SPA routes**, not server-re
 
 ### Capture archive — lives in `cc-core/crack/`
 
-Ground truth for every fingerprint constant now lives **next to the constants it pins, in `cc-core/crack/`** (consolidated there v0.8.19 — this repo no longer carries a `crack/` dir). The current Claude target is **2.1.206** in `cc-core/crack/cc2206/` (`SPEC.md` = authoritative diff + edit checklist; `rows/` = structurally-redacted requests); `codex/`, `kiro/`, `oauth/`, `apikey/`, `login/` cover the other paths. Live-session captures use `crack/scripts/extract_live.py` (keeps fingerprint-bearing *structure*, `<masked>`s all identity + prose); raw whistle dumps are never committed.
+Ground truth for every fingerprint constant now lives **next to the constants it pins, in `cc-core/crack/`** (consolidated there v0.8.19 — this repo no longer carries a `crack/` dir). The current Claude target is **2.1.206** in `cc-core/crack/cc2206/` (`SPEC.md` = authoritative diff + edit checklist; `rows/` = structurally-redacted requests); `codex/`, `oauth/`, `apikey/`, `login/` cover the other paths. Live-session captures use `crack/scripts/extract_live.py` (keeps fingerprint-bearing *structure*, `<masked>`s all identity + prose); raw whistle dumps are never committed.
 
 **When bumping the CC version target:** this is entirely a cc-core change — capture a fresh whistle dump → `extract_live.py <dump> crack/cc<ver>/rows` → write `crack/cc<ver>/SPEC.md` → update the constants in `cc-core/{mimicry,sidecar}` → tag a cc-core release → bump the `cc-core` dependency in hypitoken **and** CPA-Claude. No fingerprint code lives in this repo anymore. See `cc-core/crack/cc2206/SPEC.md` for the current target's authoritative constants + diff.
 

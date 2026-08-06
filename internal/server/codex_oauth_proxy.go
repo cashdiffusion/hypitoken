@@ -270,12 +270,14 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	_ = resp.Body.Close()
 
 	s.usage.Record(a.ID, a.Label, counts)
-	var costUSD float64
+	// CostUSD = official upstream price, BilledUSD = wallet debit.
+	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
 		official := s.pricing.Cost(auth.ProviderOpenAI, model, counts)
 		costUSD = official
+		billedUSD = official
 		// Same single-funnel as Anthropic: hand the official cost to the
 		// SaaS adapter, get back the billed amount, log/charge with it.
 		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
@@ -283,12 +285,12 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			if err != nil {
 				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 			} else {
-				costUSD = billed
+				billedUSD = billed
 				userID = info.UserID
 				multiplier = s.saas.MultiplierFor(info, auth.ProviderOpenAI)
 			}
 		}
-		s.usage.RecordClient(clientToken, clientName, counts, costUSD)
+		s.usage.RecordClient(clientToken, clientName, counts, billedUSD)
 	}
 	s.emitLog(requestlog.Record{
 		Client:      clientName,
@@ -302,6 +304,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		Output:      counts.OutputTokens,
 		CacheRead:   counts.CacheReadTokens,
 		CostUSD:     costUSD,
+		BilledUSD:   billedUSD,
 		UserID:      userID,
 		Multiplier:  multiplier,
 		Status:      logStatus,

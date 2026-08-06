@@ -293,9 +293,11 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 		today := nowUTC.Format("2006-01-02")
 		// Actual spend comes from the wallet ledger (charge rows = official ×
 		// pricing-group multiplier), NOT requestlog.CostUSD, which records the
-		// *official* price before the discount. spent_total/spent_today are the
-		// figures the user truly paid, so the dashboard "累计消费" and this tab
-		// agree.
+		// *official* price before the discount — requestlog.BilledUSD is the
+		// post-discount figure, and Record.BilledOrCost() reads it with a
+		// fallback for rows written before the two were separate columns.
+		// spent_total/spent_today are the figures the user truly paid, so the
+		// dashboard "累计消费" and this tab agree.
 		spentTotal, _ := store.SumChargeSince(c.Request.Context(), u.ID, time.Time{})
 		// spent_today opens on the same billing day PreCheck enforces the daily
 		// cap over (adapter.go). These two have to agree: if the cap counts a
@@ -314,6 +316,29 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			"balance_usd": u.BalanceUSD,
 			"spent_total": spentTotal,
 			"spent_today": spentToday,
+		})
+	})
+
+	// Public price catalogue (read-only, used by the landing /pricing page).
+	//
+	// The page used to carry its own hardcoded copy of this table. That is a
+	// second source of truth for the one number customers check before paying,
+	// and it drifted: claude-opus-5 and claude-fable-5 were being billed at
+	// $5/$25 and $10/$50 while appearing nowhere on the published price list,
+	// and the gpt-5.6 tiers advertised no cache-write rate although the
+	// catalogue charges one. Serving the catalogue itself means a model can be
+	// priced but unlisted only if it is also absent from the billing path.
+	//
+	// Shape mirrors the operator panel's `pricing` block so both consume one
+	// serialization. Unauthenticated by design — these are list prices, already
+	// public on the vendors' own sites, and the page is reachable logged-out.
+	// Nothing here is per-account: the multiplier that turns a list price into
+	// what a given user pays comes from /groups.
+	v2.GET("/pricing", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"default":           catalog.Default(),
+			"provider_defaults": catalog.ProviderDefaults(),
+			"models":            catalog.Models(),
 		})
 	})
 

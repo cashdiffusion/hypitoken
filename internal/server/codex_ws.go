@@ -442,23 +442,25 @@ func codexTurnDelta(cur, billed usage.Counts) usage.Counts {
 // double-counts it. One request-log row is emitted per turn, so the admin panel
 // shows each turn's real cost as it happens rather than one hour-long row.
 func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToken, clientName string, turn usage.Counts, dur time.Duration) {
-	var costUSD float64
+	// CostUSD = official upstream price, BilledUSD = wallet debit.
+	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
 	if turn.Requests > 0 && clientToken != "" {
 		official := s.pricing.Cost(auth.ProviderOpenAI, model, turn)
 		costUSD = official
+		billedUSD = official
 		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
 			billed, err := s.saas.Charge(c.Request.Context(), info, auth.ProviderOpenAI, model, turn, official)
 			if err != nil {
 				log.Warnf("saas: ws charge failed for token user=%d: %v", info.UserID, err)
 			} else {
-				costUSD = billed
+				billedUSD = billed
 				userID = info.UserID
 				multiplier = s.saas.MultiplierFor(info, auth.ProviderOpenAI)
 			}
 		}
-		s.usage.RecordClient(clientToken, clientName, turn, costUSD)
+		s.usage.RecordClient(clientToken, clientName, turn, billedUSD)
 	}
 	s.emitLog(requestlog.Record{
 		Client:      clientName,
@@ -472,6 +474,7 @@ func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToke
 		Output:      turn.OutputTokens,
 		CacheRead:   turn.CacheReadTokens,
 		CostUSD:     costUSD,
+		BilledUSD:   billedUSD,
 		UserID:      userID,
 		Multiplier:  multiplier,
 		Status:      200,

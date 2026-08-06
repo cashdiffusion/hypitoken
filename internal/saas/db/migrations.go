@@ -147,8 +147,8 @@ WHERE  is_default = 1
 	// 4: per-user-token priority-ordered group list. Stored as a JSON
 	//    array column on user_tokens. Empty / NULL → uses the user's
 	//    pricing group (legacy behavior). Non-empty → the token-side
-	//    priority list takes over for credential routing (e.g. drop
-	//    through Kiro → official Anthropic). Billing still happens
+	//    priority list takes over for credential routing (fall through
+	//    a chain of groups in order). Billing still happens
 	//    via the resolved group's discount, so existing rate cards
 	//    continue to apply unchanged.
 	`

@@ -151,11 +151,6 @@ type Config struct {
 	// upstream supports).
 	TokenGroups []TokenGroup `yaml:"token_groups,omitempty"`
 
-	// KiroAuthDir holds Kiro PKCE credential JSON files added via the
-	// admin panel. Defaults to <dir>/kiro_auths. Each file is one
-	// credentials.json (kiroauth.File format).
-	KiroAuthDir string `yaml:"kiro_auth_dir,omitempty"`
-
 	// SaaS multi-tenant layer (commercial mode). Disabled by default; the
 	// proxy behaves exactly like the OSS build when SaaS.Enabled is false.
 	SaaS saas.Config `yaml:"saas"`
@@ -198,10 +193,9 @@ type TokenGroup struct {
 	// Required; canonicalized via auth.NormalizeGroup at load time.
 	Name string `yaml:"name"`
 
-	// Upstream selects the channel: "anthropic" (existing OAuth/API-key
-	// path to api.anthropic.com) or "kiro" (kirobridge + kiroapi against
-	// q.us-east-1.amazonaws.com via Kiro credentials).
-	// Defaults to "anthropic".
+	// Upstream selects the channel. Only "anthropic" (the OAuth/API-key path
+	// to api.anthropic.com) exists today; the field is retained so future
+	// channels can be added without a config migration. Defaults to "anthropic".
 	Upstream string `yaml:"upstream,omitempty"`
 
 	// Discount is a multiplier applied to the official Anthropic price
@@ -210,16 +204,13 @@ type TokenGroup struct {
 	Discount float64 `yaml:"discount,omitempty"`
 
 	// Models is an optional whitelist (Anthropic-side model names). Empty
-	// = accept any model the upstream supports. For Kiro this typically
-	// lists the Claude family only since DeepSeek / Minimax / GLM / Qwen
-	// are not exposed to end users (per business decision).
+	// = accept any model the upstream supports.
 	Models []string `yaml:"models,omitempty"`
 }
 
 // Upstream constants for TokenGroup.Upstream.
 const (
 	UpstreamAnthropic = "anthropic"
-	UpstreamKiro      = "kiro"
 )
 
 // AcceptsModel reports whether g's whitelist allows model (empty list = wildcard).
@@ -334,19 +325,12 @@ func applyDefaults(c *Config, path string) {
 		c.Shop.DBPath = filepath.Join(filepath.Dir(path), c.Shop.DBPath)
 	}
 
-	if c.KiroAuthDir == "" {
-		c.KiroAuthDir = filepath.Join(dir, "kiro_auths")
-	} else if !filepath.IsAbs(c.KiroAuthDir) {
-		c.KiroAuthDir = filepath.Join(dir, c.KiroAuthDir)
-	}
 	c.Backup.applyDefaults()
 	c.applyTokenGroupDefaults()
 }
 
-// applyTokenGroupDefaults seeds the two built-in groups if the config
-// omits them entirely: claude-official (no discount, anthropic upstream)
-// and kiro-anthropic (5% of official price, kiro upstream, Claude-family
-// whitelist).
+// applyTokenGroupDefaults seeds the built-in claude-official group (no
+// discount, anthropic upstream) if the config omits it entirely.
 func (c *Config) applyTokenGroupDefaults() {
 	have := make(map[string]bool, len(c.TokenGroups))
 	for i := range c.TokenGroups {
@@ -367,22 +351,6 @@ func (c *Config) applyTokenGroupDefaults() {
 			Name:     "claude-official",
 			Upstream: UpstreamAnthropic,
 			Discount: 1.0,
-		})
-	}
-	if !have["kiro-anthropic"] {
-		c.TokenGroups = append(c.TokenGroups, TokenGroup{
-			Name:     "kiro-anthropic",
-			Upstream: UpstreamKiro,
-			Discount: 0.05,
-			Models: []string{
-				"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5",
-				"claude-sonnet-4-6", "claude-sonnet-4-5", "claude-sonnet-4",
-				"claude-haiku-4-5",
-				// Dated variants common in client SDKs.
-				"claude-sonnet-4-5-20250929",
-				"claude-haiku-4-5-20251001",
-				"claude-opus-4-1-20250805",
-			},
 		})
 	}
 }

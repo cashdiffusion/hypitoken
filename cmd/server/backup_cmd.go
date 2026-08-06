@@ -235,7 +235,6 @@ func buildManifest(ctx context.Context, cfg *config.Config, configPath, tmpDir s
 
 	// Upstream credential dirs (refresh_tokens — unrecoverable if lost).
 	entries = append(entries, dirEntries(cfg.AuthDir, "auths")...)
-	entries = append(entries, dirEntries(cfg.KiroAuthDir, "kiro_auths")...)
 
 	// In-config-dir secrets/ folder (if used).
 	configDir := filepath.Dir(configPath)

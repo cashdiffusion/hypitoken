@@ -321,7 +321,7 @@ shop:
 # ---------------------------------------------------------------------------
 # Off-host disaster-recovery backup (the `backup` subcommand + systemd timer).
 # Daily, the binary snapshots the critical state (saas.db + jwt_secret, shop.db,
-# tokens.json, auths/, kiro_auths/, config.yaml, payment secrets), encrypts it
+# tokens.json, auths/, config.yaml, payment secrets), encrypts it
 # to an X25519 PUBLIC key, and uploads it to an S3-compatible bucket as
 # <prefix>YYYY-MM-DD.tar.gz.enc, pruning anything older than retention_days.
 #

@@ -166,15 +166,6 @@ func main() {
 
 	s := server.New(cfg, pool, store, reqLog, clientTokens)
 
-	// Kiro side-channel (anthropic-format → kirobridge → kiroapi). Initialized
-	// only when a token_group declares upstream=kiro; nil-safe otherwise.
-	if err := s.InitKiro(); err != nil {
-		log.Fatalf("kiro: init: %v", err)
-	}
-	if k := s.KiroAccess(); k != nil {
-		s.LegacyAdmin().SetKiroAccess(k)
-	}
-
 	// SaaS layer (multi-tenant). Wires SQLite-backed user/token resolution +
 	// wallet billing on top of the proxy. Disabled by default — when off,
 	// nothing changes from the OSS build.
