@@ -16,10 +16,14 @@ export function SpotlightCard({
   children,
   className,
   tiltDeg = 2.5,
+  padded = true,
 }: {
   children: ReactNode;
   className?: string;
   tiltDeg?: number;
+  /** Set false when the content needs to bleed to the card's edges (full-width
+   * banners, footers). The caller then owns all internal spacing. */
+  padded?: boolean;
 }) {
   const reduce = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
@@ -57,7 +61,8 @@ export function SpotlightCard({
       }}
       style={reduce ? undefined : { rotateX: rx, rotateY: ry, transformPerspective: 1000 }}
       className={cn(
-        "glass group relative overflow-hidden rounded-2xl p-6 transition-shadow duration-300 hover:shadow-[0_20px_60px_-24px_color-mix(in_oklch,var(--primary)_45%,transparent)]",
+        "glass group relative overflow-hidden rounded-2xl transition-shadow duration-300 hover:shadow-[0_20px_60px_-24px_color-mix(in_oklch,var(--primary)_45%,transparent)]",
+        padded && "p-6",
         className,
       )}
     >
@@ -75,7 +80,10 @@ export function SpotlightCard({
             "linear-gradient(90deg, transparent, color-mix(in oklch, var(--primary) 60%, transparent), transparent)",
         }}
       />
-      <div className="relative">{children}</div>
+      {/* Unpadded cards own their layout end-to-end, so the wrapper has to
+          forward the flex column — otherwise a child's `mt-auto` has nothing to
+          push against and short cards leave dead space in a stretched grid. */}
+      <div className={cn("relative", !padded && "flex h-full flex-col")}>{children}</div>
     </motion.div>
   );
 }

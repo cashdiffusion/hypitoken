@@ -196,7 +196,7 @@ export interface SpendRow {
 // Powers the per-token "渠道" dropdown so users only see options that
 // actually have credentials behind them.
 export interface Channel {
-  name: string; // group filter name ("default", "kiro-anthropic", ...)
+  name: string; // group filter name ("default", "claude-official", ...)
   providers: string[]; // distinct providers backing this channel
   count: number; // usable credential count
 }
@@ -305,9 +305,11 @@ export interface Credential {
   usage?: CredentialUsage;
   codex_rate_limits?: Record<string, string>;
   codex_rate_limits_at?: string;
-  // Kiro-specific extras surfaced on the same row.
-  active?: number;
-  plan?: string;
+  /** Last actively-probed chatgpt.com/backend-api/wham/usage snapshot. Shape
+   * mirrors cc-core auth.CodexUsageInfo; only read by the upstream-quota panel,
+   * which narrows it itself. */
+  codex_usage?: unknown;
+  codex_usage_at?: string;
 }
 
 // AdminOrder mirrors the Go db.AlipayOrder struct (no json tags → PascalCase)

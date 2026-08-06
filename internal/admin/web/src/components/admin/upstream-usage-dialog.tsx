@@ -249,8 +249,16 @@ interface Props {
   onClose: () => void;
 }
 
-export function UpstreamUsageDialog({ authId, authLabel, provider = "anthropic", onClose }: Props) {
-  const { t } = useTranslation();
+/* UpstreamUsagePanel — the probe body without any dialog chrome, so it can be
+ * embedded in a larger surface (the credential detail dialog) without nesting
+ * one Dialog inside another. */
+export function UpstreamUsagePanel({
+  authId,
+  provider = "anthropic",
+}: {
+  authId: string | null;
+  provider?: "anthropic" | "openai";
+}) {
   const [data, setData] = useState<AnthropicResponse | CodexUsageResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -282,6 +290,26 @@ export function UpstreamUsageDialog({ authId, authLabel, provider = "anthropic",
     }
   }, [authId, provider]);
 
+  return provider === "openai" ? (
+    <CodexUsageBody
+      authId={authId}
+      data={data as CodexUsageResponse | null}
+      busy={busy}
+      err={err}
+      onRefresh={run}
+    />
+  ) : (
+    <AnthropicUsageBody
+      data={data as AnthropicResponse | null}
+      busy={busy}
+      err={err}
+      onRefresh={run}
+    />
+  );
+}
+
+export function UpstreamUsageDialog({ authId, authLabel, provider = "anthropic", onClose }: Props) {
+  const { t } = useTranslation();
   return (
     <Dialog open={!!authId} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-[640px]">
@@ -290,28 +318,13 @@ export function UpstreamUsageDialog({ authId, authLabel, provider = "anthropic",
             <Gauge className="size-4" />
             {t("legacy.upstreamUsage.title", { label: authLabel })}
             {provider === "openai" && (
-              <span className="rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-mono uppercase text-violet-500">
+              <span className="rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-violet-500">
                 wham/usage
               </span>
             )}
           </DialogTitle>
         </DialogHeader>
-        {provider === "openai" ? (
-          <CodexUsageBody
-            authId={authId}
-            data={data as CodexUsageResponse | null}
-            busy={busy}
-            err={err}
-            onRefresh={run}
-          />
-        ) : (
-          <AnthropicUsageBody
-            data={data as AnthropicResponse | null}
-            busy={busy}
-            err={err}
-            onRefresh={run}
-          />
-        )}
+        <UpstreamUsagePanel authId={authId} provider={provider} />
       </DialogContent>
     </Dialog>
   );
