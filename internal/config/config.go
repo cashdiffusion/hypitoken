@@ -138,6 +138,13 @@ type Config struct {
 	// Days to retain rotated request logs. 0 = disable GC (keep forever).
 	LogRetentionDays int `yaml:"log_retention_days,omitempty"`
 
+	// Opt out of the SQLite index over the request log (requests.db inside
+	// log_dir). The index is derived state that makes every admin and
+	// per-user aggregate cheap; disabling it falls back to re-scanning the
+	// JSONL on each query, which at ~1M records costs tens of seconds.
+	// Here as an escape hatch, not a tuning knob.
+	LogIndexDisabled bool `yaml:"log_index_disabled,omitempty"`
+
 	// Pricing overrides (optional). Built-in defaults cover claude-haiku-4-5,
 	// claude-opus-4-6, and claude-sonnet-4-6.
 	Pricing pricing.Config `yaml:"pricing"`

@@ -136,12 +136,32 @@ func main() {
 	}
 
 	var reqLog *requestlog.Writer
+	var logIndex *requestlog.Store
 	if cfg.LogDir != "" {
 		reqLog, err = requestlog.Open(cfg.LogDir, cfg.LogRetentionDays)
 		if err != nil {
 			log.Fatalf("open request log: %v", err)
 		}
 		log.Infof("request log: writing to %s (retain %d days)", cfg.LogDir, cfg.LogRetentionDays)
+
+		// Without this every aggregate re-parses the whole archive. That is
+		// worse here than on the operator panel: each customer opening their
+		// own usage page triggers a full-archive scan of its own, and the
+		// health checker scans per credential.
+		//
+		// Derived state, so a failure is logged and ignored — the query paths
+		// fall back to scanning on their own. Must come after
+		// SetBucketLocation: the index materializes day labels in the
+		// display zone.
+		if !cfg.LogIndexDisabled {
+			if st, err := requestlog.OpenStore(cfg.LogDir); err != nil {
+				log.Warnf("request log: index unavailable (%v); queries fall back to scanning", err)
+			} else {
+				logIndex = st
+			}
+		} else {
+			log.Info("request log: index disabled by config (log_index_disabled)")
+		}
 	} else {
 		log.Info("request log: disabled (set log_dir in config to enable)")
 	}
@@ -386,6 +406,12 @@ func main() {
 		defer cancel()
 		_ = s.Shutdown(ctx)
 		store.Close()
+		// Stop the index before the writer: it tails the file the writer
+		// owns, so shutting it down first means no catch-up races the final
+		// flush.
+		if logIndex != nil {
+			logIndex.Close()
+		}
 		if reqLog != nil {
 			reqLog.Close()
 		}
