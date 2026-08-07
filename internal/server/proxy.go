@@ -987,7 +987,9 @@ recoveredFromSignature:
 	var userID int64
 	var multiplier float64
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
-		costUSD = s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
+		// Priced on the model we actually bought upstream (see billingModelFor);
+		// every label below stays on the client-facing name.
+		costUSD = s.pricing.Cost(auth.NormalizeProvider(a.Provider), billingModelFor(a, model), counts)
 		billedUSD = costUSD
 		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
 			billed, err := s.saas.Charge(c.Request.Context(), info, auth.NormalizeProvider(a.Provider), model, counts, costUSD)
@@ -1051,6 +1053,35 @@ recoveredFromSignature:
 		ClaudeAudit:   claudeAudit,
 	})
 	return false, true, nil
+}
+
+// billingModelFor returns the model name a request should be PRICED on, which
+// is not always the name the client asked for.
+//
+// On an Anthropic OAuth credential, cc-core's DefaultClaudeOAuthModelMap folds
+// retired generations onto the current model (claude-opus-4-7 → claude-opus-5,
+// claude-sonnet-4-6 → claude-sonnet-5). What we actually buy from Anthropic is
+// the resolved model, so that is what we cost. The client keeps seeing the name
+// it asked for everywhere else — the response model is rewritten back
+// (rewriteClientModel), the request log records the client-facing name, and the
+// wallet/workspace ledger records it in ChargeMeta — so this changes the
+// amount, never the label. For Opus the two are identical anyway (same price
+// card); for Sonnet the resolved name is cheaper until the sonnet-5
+// introductory rate lapses on 2026-08-31, and the customer gets that difference.
+//
+// API-key credentials are deliberately excluded. Their model_map is a relay
+// vendor's naming convention, not a model substitution: it rewrites to names
+// like "[0.1]a/claude-sonnet-4-6" that match no price card, so pricing them on
+// the upstream name would silently drop every such request onto the provider
+// default.
+func billingModelFor(a *auth.Auth, clientModel string) string {
+	if a == nil || a.Kind != auth.KindOAuth {
+		return clientModel
+	}
+	if upstream, ok := a.ResolveUpstreamModel(clientModel); ok && upstream != "" {
+		return upstream
+	}
+	return clientModel
 }
 
 // doForwardAnthropicAPIKey is the API-key passthrough for Anthropic-shaped
