@@ -84,7 +84,18 @@ type reqCacheEntry struct {
 	result *requestlog.Result
 }
 
-const lifetimeCacheTTL = 15 * time.Second
+// lifetimeCacheTTL is how long an aggregate is served without any refresh.
+// lifetimeCacheMaxStale is how far past that we will still serve the cached
+// copy *immediately* while refreshing in the background.
+//
+// The gap matters: on production these aggregates cost 0.7–1.7 s (the 24h
+// window scans a 500 MB request index), and the TTL used to be exactly 15 s —
+// the same as the credential panel's poll interval. Every single poll landed
+// on an expired entry, so the panel paid the full aggregate every time and the
+// operator saw a permanently "slow" page. With a stale window, only the
+// background refresh pays it and the request itself is always a map lookup.
+const lifetimeCacheTTL = 20 * time.Second
+const lifetimeCacheMaxStale = 10 * time.Minute
 const requestsCacheTTL = 15 * time.Second
 const requestsCacheMax = 16
 
@@ -101,7 +112,12 @@ func (h *Handler) lifetimeByAuth() map[string]requestlog.Aggregate {
 	return h.cachedByAuth("lifetime", time.Time{}, time.Time{})
 }
 
-// cachedByAuth memoizes one AggregateByAuth window.
+// cachedByAuth memoizes one AggregateByAuth window, stale-while-revalidate.
+//
+// Three cases:
+//   - fresh (age < TTL)            → return it, do nothing
+//   - stale but usable (< maxStale)→ return it NOW, refresh in the background
+//   - missing or too stale         → compute synchronously
 //
 // The lock is released before the aggregate runs and reacquired to store the
 // result, and concurrent misses collapse through singleflight. Holding the
@@ -114,11 +130,21 @@ func (h *Handler) lifetimeByAuth() map[string]requestlog.Aggregate {
 // rendering the last known totals.
 func (h *Handler) cachedByAuth(key string, from, to time.Time) map[string]requestlog.Aggregate {
 	h.lifetimeMu.Lock()
-	if ent, ok := h.byAuthCache[key]; ok && time.Since(ent.at) < lifetimeCacheTTL {
-		h.lifetimeMu.Unlock()
-		return ent.result
-	}
+	ent, ok := h.byAuthCache[key]
 	h.lifetimeMu.Unlock()
+	if ok {
+		age := time.Since(ent.at)
+		if age < lifetimeCacheTTL {
+			return ent.result
+		}
+		if age < lifetimeCacheMaxStale {
+			// Warm the entry for the next caller without making this one wait.
+			// singleflight keeps a slow aggregate from stacking up refreshes
+			// across a burst of polls.
+			go func() { _, _, _ = h.byAuthSF.Do(key, func() (any, error) { return h.refreshByAuth(key, from, to) }) }()
+			return ent.result
+		}
+	}
 
 	v, err, _ := h.byAuthSF.Do(key, func() (any, error) {
 		// Re-check under singleflight: whoever queued behind the winner must
@@ -129,18 +155,7 @@ func (h *Handler) cachedByAuth(key string, from, to time.Time) map[string]reques
 			return ent.result, nil
 		}
 		h.lifetimeMu.Unlock()
-
-		m, err := requestlog.AggregateByAuth(h.cfg.LogDir, from, to)
-		if err != nil {
-			return nil, err
-		}
-		h.lifetimeMu.Lock()
-		if h.byAuthCache == nil {
-			h.byAuthCache = make(map[string]byAuthCacheEntry, 2)
-		}
-		h.byAuthCache[key] = byAuthCacheEntry{at: time.Now(), result: m}
-		h.lifetimeMu.Unlock()
-		return m, nil
+		return h.refreshByAuth(key, from, to)
 	})
 	if err != nil {
 		log.Warnf("admin: %s aggregate: %v", key, err)
@@ -153,6 +168,30 @@ func (h *Handler) cachedByAuth(key string, from, to time.Time) map[string]reques
 		return map[string]requestlog.Aggregate{}
 	}
 	return v.(map[string]requestlog.Aggregate)
+}
+
+// refreshByAuth runs one aggregate and stores it. Always called through
+// byAuthSF so only one pass per window is ever in flight.
+func (h *Handler) refreshByAuth(key string, from, to time.Time) (map[string]requestlog.Aggregate, error) {
+	m, err := requestlog.AggregateByAuth(h.cfg.LogDir, from, to)
+	if err != nil {
+		return nil, err
+	}
+	h.lifetimeMu.Lock()
+	if h.byAuthCache == nil {
+		h.byAuthCache = make(map[string]byAuthCacheEntry, 2)
+	}
+	h.byAuthCache[key] = byAuthCacheEntry{at: time.Now(), result: m}
+	h.lifetimeMu.Unlock()
+	return m, nil
+}
+
+// timePtr renders a zero time as JSON-omitted rather than "0001-01-01".
+func timePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 func aggToCounts(a requestlog.Aggregate) usage.Counts {
@@ -204,48 +243,6 @@ func (h *Handler) Register(r *gin.Engine) {
 		api.DELETE("/tokens/:token", h.handleDeleteToken)
 		api.POST("/tokens/:token/reset", h.handleResetToken)
 		api.POST("/tokens/:token/inherit", h.handleInheritToken)
-	}
-}
-
-func serveAsset(c *gin.Context, root fs.FS, name string) {
-	f, err := root.Open(name)
-	if err != nil {
-		c.AbortWithStatus(http.StatusNotFound)
-		return
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
-	c.Data(http.StatusOK, guessMime(name), data)
-}
-
-func guessMime(name string) string {
-	switch filepath.Ext(name) {
-	case ".html":
-		return "text/html; charset=utf-8"
-	case ".css":
-		return "text/css; charset=utf-8"
-	case ".js":
-		return "application/javascript; charset=utf-8"
-	case ".json":
-		return "application/json"
-	case ".svg":
-		return "image/svg+xml"
-	case ".woff":
-		return "font/woff"
-	case ".woff2":
-		return "font/woff2"
-	case ".png":
-		return "image/png"
-	case ".ico":
-		return "image/x-icon"
-	case ".map":
-		return "application/json"
-	default:
-		return "application/octet-stream"
 	}
 }
 
@@ -394,7 +391,13 @@ type usageSummary struct {
 // /summary endpoint and the SaaS /api/v2/admin/credentials bridge. Factored
 // out so the SaaS panel can render the same data (usage / quota / model_map
 // / client_tokens / codex rate-limits) without re-shipping all of /summary.
-func (h *Handler) buildAuthRows() []authRow {
+//
+// withDaily controls the 14-day per-credential series. It is off for the list
+// endpoints: nothing on either panel's list view reads it, yet it was ~70% of
+// the response body (77 KB for 35 credentials, re-sent on every 15s poll).
+// The credential detail dialog fetches it per-credential instead — see
+// handleBridgeCredUsage.
+func (h *Handler) buildAuthRows(withDaily bool) []authRow {
 	usageMap := h.usage.Snapshot()
 	lifetime := h.lifetimeByAuth()
 	// Truncated to the minute so the cache key is stable across a polling
@@ -405,21 +408,6 @@ func (h *Handler) buildAuthRows() []authRow {
 		kind := "oauth"
 		if st.Auth.Kind == auth.KindAPIKey {
 			kind = "apikey"
-		}
-		var quotaReset *time.Time
-		if !st.Auth.QuotaResetAt.IsZero() {
-			t := st.Auth.QuotaResetAt
-			quotaReset = &t
-		}
-		var expAt *time.Time
-		if !st.Auth.ExpiresAt.IsZero() {
-			t := st.Auth.ExpiresAt
-			expAt = &t
-		}
-		var quarantinedUntil *time.Time
-		if !st.Auth.QuarantineUntil.IsZero() {
-			t := st.Auth.QuarantineUntil
-			quarantinedUntil = &t
 		}
 		var u *usageSummary
 		// Show a usage row for every auth that has either in-memory daily
@@ -435,7 +423,7 @@ func (h *Handler) buildAuthRows() []authRow {
 				lastPtr = &lu
 			}
 			var daily []usage.DayEntry
-			if hasMem {
+			if withDaily && hasMem {
 				daily = v.DailyOrdered(14)
 			}
 			u = &usageSummary{
@@ -500,10 +488,10 @@ func (h *Handler) buildAuthRows() []authRow {
 			ClientTokens:           h.resolveClientTokenLabels(st.ClientTokens),
 			Disabled:               st.Auth.Disabled,
 			QuotaExceeded:          !st.Auth.QuotaExceededAt.IsZero(),
-			QuotaResetAt:           quotaReset,
-			QuarantinedUntil:       quarantinedUntil,
+			QuotaResetAt:           timePtr(st.Auth.QuotaResetAt),
+			QuarantinedUntil:       timePtr(st.Auth.QuarantineUntil),
 			QuarantineStrikes:      st.Auth.QuarantineStrikes,
-			ExpiresAt:              expAt,
+			ExpiresAt:              timePtr(st.Auth.ExpiresAt),
 			FileBacked:             strings.TrimSpace(st.Auth.FilePath) != "",
 			Healthy:                healthy,
 			HardFailure:            hardFail,
@@ -514,48 +502,21 @@ func (h *Handler) buildAuthRows() []authRow {
 			ClientCancelReason:     cancelReason,
 			ModelMap:               st.Auth.ModelMap,
 			Usage:                  u,
-			CodexRateLimits: func() map[string]string {
-				if live == nil {
-					return nil
-				}
-				snap := live.Snapshot()
-				return snap.CodexRateLimits
-			}(),
-			CodexRateLimitsAt: func() *time.Time {
-				if live == nil {
-					return nil
-				}
-				snap := live.Snapshot()
-				if snap.CodexRateLimitsAt.IsZero() {
-					return nil
-				}
-				t := snap.CodexRateLimitsAt
-				return &t
-			}(),
-			CodexUsage: func() *auth.CodexUsageInfo {
-				if live == nil {
-					return nil
-				}
-				return live.Snapshot().CodexUsage
-			}(),
-			CodexUsageAt: func() *time.Time {
-				if live == nil {
-					return nil
-				}
-				snap := live.Snapshot()
-				if snap.CodexUsageAt.IsZero() {
-					return nil
-				}
-				t := snap.CodexUsageAt
-				return &t
-			}(),
+			// st.Auth is already a full auth.Snapshot() taken by Pool.Status(),
+			// Codex fields included. This used to call live.Snapshot() four
+			// more times per row — four extra credential-lock acquisitions and
+			// two map deep-copies each, to read fields we were holding.
+			CodexRateLimits:   st.Auth.CodexRateLimits,
+			CodexRateLimitsAt: timePtr(st.Auth.CodexRateLimitsAt),
+			CodexUsage:        st.Auth.CodexUsage,
+			CodexUsageAt:      timePtr(st.Auth.CodexUsageAt),
 		})
 	}
 	return rows
 }
 
 func (h *Handler) handleSummary(c *gin.Context) {
-	rows := h.buildAuthRows()
+	rows := h.buildAuthRows(false)
 	// Clients (per-access-token spending).
 	clientSnap := h.usage.SnapshotClients()
 	currentWeek := h.usage.CurrentWeekKey()
@@ -1864,6 +1825,7 @@ func (h *Handler) RegisterSaaSBridge(g *gin.RouterGroup) {
 	// create / oauth-start / oauth-finish / delete — those are not just
 	// pass-throughs (they write JSON files into AuthDir).
 	g.GET("/credentials", h.handleBridgeListCreds)
+	g.GET("/credentials/:id/usage", h.handleBridgeCredUsage)
 	// Upload a raw credential JSON (export from another instance, etc.). The
 	// legacy handler writes the file into AuthDir and adds it to the shared
 	// pool — the same pool the SaaS panel reads — so it bridges cleanly.
@@ -1878,5 +1840,24 @@ func (h *Handler) RegisterSaaSBridge(g *gin.RouterGroup) {
 // (/api/v2/admin/credentials). Same shape as /summary's "auths" but without
 // the clients/pricing fan-out — those have their own endpoints elsewhere.
 func (h *Handler) handleBridgeListCreds(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"credentials": h.buildAuthRows()})
+	c.JSON(http.StatusOK, gin.H{"credentials": h.buildAuthRows(false)})
+}
+
+// handleBridgeCredUsage serves one credential's usage block including the
+// 14-day daily series. Split out of the list response because only the
+// detail dialog reads the series, and shipping it for every credential on
+// every poll tripled the list payload.
+func (h *Handler) handleBridgeCredUsage(c *gin.Context) {
+	id := c.Param("id")
+	for _, row := range h.buildAuthRows(true) {
+		if row.ID == id {
+			if row.Usage == nil {
+				c.JSON(http.StatusOK, gin.H{"usage": nil})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"usage": row.Usage})
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 }

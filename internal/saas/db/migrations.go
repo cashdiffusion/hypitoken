@@ -608,6 +608,42 @@ CREATE INDEX idx_wallet_tx_ws_token   ON wallet_tx(workspace_id, token_id, creat
 CREATE INDEX idx_wallet_tx_user_token ON wallet_tx(user_id, token_id, created_at);
 CREATE INDEX idx_user_tokens_ws       ON user_tokens(workspace_id);
 `,
+
+	// v16 — make the spend reports index-only.
+	//
+	// The v15 indexes select the right rows but carry none of the aggregated
+	// columns, so every report did an index range scan *plus* one main-table
+	// rowid lookup per matching row. /me/usage/summary runs five such passes
+	// over the same slice, and on production that measured 1.9–3.4 s for a
+	// 10 KB response — paid by every customer on every dashboard load.
+	//
+	// These two are partial (kind='charge', which every report's predicate
+	// states literally) and cover every column the aggregates read, so the
+	// planner can satisfy them without touching the table at all. Partial +
+	// covering also keeps them far smaller than a plain 9-column index would
+	// be: topup/adjust/refund rows are excluded entirely.
+	//
+	// idx_wallet_tx_kind_id fixes a different query: /admin/adjustments counts
+	// with `WHERE kind = 'adjust'`, and with no index on kind that was a full
+	// scan of the whole table to produce a single number.
+	`
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_user_charge ON wallet_tx(
+    user_id, created_at, token_id, model,
+    amount_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens
+) WHERE kind = 'charge';
+
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_ws_charge ON wallet_tx(
+    workspace_id, created_at, token_id, model,
+    amount_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens
+) WHERE kind = 'charge';
+
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_kind_id ON wallet_tx(kind, id DESC);
+
+-- The planner picks between the v15 and v16 indexes on cost estimates; with no
+-- sqlite_stat1 it guesses, and guessed wrong often enough to keep choosing a
+-- non-covering path. ANALYZE is cheap here and runs once per migration.
+ANALYZE;
+`,
 }
 
 // backfillTokenAttributionSQL recovers token_id / model from the legacy free-text

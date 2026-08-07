@@ -1,4 +1,3 @@
-import Hls from "hls.js";
 import { type CSSProperties, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { usePrefersReducedMotion } from "./use-media";
@@ -33,21 +32,37 @@ export function HlsVideo({
     const isHls = src.endsWith(".m3u8");
     const nativeHls = video.canPlayType("application/vnd.apple.mpegurl");
 
-    let hls: Hls | undefined;
-    if (isHls && !nativeHls && Hls.isSupported()) {
-      hls = new Hls({ enableWorker: true, lowLatencyMode: false, capLevelToPlayerSize: true });
-      hls.loadSource(src);
-      hls.attachMedia(video);
-    } else {
-      video.src = src;
-    }
     const tryPlay = () => video.play().catch(() => {});
     video.addEventListener("loadeddata", tryPlay);
-    tryPlay();
+
+    // hls.js is 162 kB gzipped and is only needed for an .m3u8 source on a
+    // browser without native HLS. Importing it statically put all of it on the
+    // landing page's critical path even though the hero is a plain .mp4, so it
+    // is pulled in on demand and the mp4 path never touches it.
+    let destroy: (() => void) | undefined;
+    let cancelled = false;
+    if (isHls && !nativeHls) {
+      void import("hls.js").then(({ default: Hls }) => {
+        if (cancelled || !Hls.isSupported()) return;
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          capLevelToPlayerSize: true,
+        });
+        hls.loadSource(src);
+        hls.attachMedia(video);
+        destroy = () => hls.destroy();
+        tryPlay();
+      });
+    } else {
+      video.src = src;
+      tryPlay();
+    }
 
     return () => {
+      cancelled = true;
       video.removeEventListener("loadeddata", tryPlay);
-      if (hls) hls.destroy();
+      destroy?.();
     };
   }, [src, reduced]);
 

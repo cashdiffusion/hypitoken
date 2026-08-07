@@ -263,7 +263,10 @@ export interface CredentialUsage {
   sum_24h: UsageCounts;
   sum_5h: UsageCounts;
   last_used?: string;
-  daily: UsageDay[];
+  /** 14-day series, oldest first. Omitted by the list endpoints — only the
+   * detail dialog needs it, and it was ~70% of the list payload. Fetch it via
+   * GET /admin/credentials/:id/usage. */
+  daily?: UsageDay[];
   total_cost_usd: number;
 }
 

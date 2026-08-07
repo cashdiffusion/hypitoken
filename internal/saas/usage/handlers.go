@@ -19,6 +19,7 @@
 package usage
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,9 +33,12 @@ import (
 
 type Handler struct {
 	DB *db.DB
+	// summaryCache memoizes the assembled /summary body per report window.
+	// See cache.go for why this endpoint in particular needs one.
+	summaryCache *respCache
 }
 
-func New(store *db.DB) *Handler { return &Handler{DB: store} }
+func New(store *db.DB) *Handler { return &Handler{DB: store, summaryCache: newRespCache()} }
 
 // PersonalRoutes mounts the individual view on a group already wrapped with
 // RequireUser (rooted at /me/usage).
@@ -224,34 +228,27 @@ func toTokenView(s *db.TokenSpend, withMember bool) tokenSpendView {
 // summary is the dashboard payload: headline totals, the three breakdowns, the
 // daily series that feeds the heatmap, and the streak derived from it.
 func (h *Handler) summary(c *gin.Context, f db.ReportFilter) {
-	ctx := c.Request.Context()
+	body, err := h.summaryCache.do(filterKey("summary", f), func() (any, error) {
+		return h.buildSummary(c.Request.Context(), f)
+	})
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", body)
+}
+
+func (h *Handler) buildSummary(ctx context.Context, f db.ReportFilter) (any, error) {
 	withMember := f.WorkspaceID > 0
 
-	totals, err := h.DB.SpendSummary(ctx, f)
+	// One pass, not five. Every breakdown here derives from the same slice of
+	// the ledger; running them as independent queries meant scanning it five
+	// times. See db.SpendBreakdown.
+	b, err := h.DB.SpendBreakdown(ctx, f)
 	if err != nil {
-		serverError(c, err)
-		return
+		return nil, err
 	}
-	byToken, err := h.DB.SpendByToken(ctx, f)
-	if err != nil {
-		serverError(c, err)
-		return
-	}
-	byModel, err := h.DB.SpendByModel(ctx, f)
-	if err != nil {
-		serverError(c, err)
-		return
-	}
-	byTag, err := h.DB.SpendByTag(ctx, f)
-	if err != nil {
-		serverError(c, err)
-		return
-	}
-	byDay, err := h.DB.SpendByDay(ctx, f)
-	if err != nil {
-		serverError(c, err)
-		return
-	}
+	totals, byToken, byModel, byTag, byDay := b.Total, b.ByToken, b.ByModel, b.ByTag, b.ByDay
 
 	// The heatmap wants a dense series; the streak wants the same data, so both
 	// come off one query.
@@ -263,7 +260,7 @@ func (h *Handler) summary(c *gin.Context, f db.ReportFilter) {
 		tokens = append(tokens, toTokenView(t, withMember))
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	return gin.H{
 		"range": gin.H{
 			"from": f.From.Format("2006-01-02"),
 			"to":   f.To.AddDate(0, 0, -1).Format("2006-01-02"),
@@ -282,7 +279,7 @@ func (h *Handler) summary(c *gin.Context, f db.ReportFilter) {
 		"by_tag":   byTag,
 		"by_day":   dense,
 		"streak":   gin.H{"current_days": current, "longest_days": longest},
-	})
+	}, nil
 }
 
 // tokens is the team view's headline table: one row per key, across all members.

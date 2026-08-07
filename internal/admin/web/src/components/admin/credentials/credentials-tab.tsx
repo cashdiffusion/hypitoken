@@ -1,6 +1,15 @@
 import { AlertTriangle, KeyRound, PauseCircle, Search, ShieldCheck, X } from "lucide-react";
 import { motion } from "motion/react";
-import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { CountUp, GlassPanel } from "@/components/app/page-primitives";
@@ -30,12 +39,41 @@ import { UploadJSONDialog } from "./upload-json-dialog";
 const ParticleField = lazy(() => import("@/components/landing/particle-field"));
 
 const PAGE = 12;
+// 30s, not 15s. The list endpoint aggregates the request log; at 15s it lined
+// up with the server's cache window so every poll paid the full aggregate, and
+// each response re-rendered the whole card grid. Nothing on this page is
+// time-critical — a cleared cooldown showing 30s late is fine.
+const POLL_MS = 30_000;
 const HEALTH_FILTERS = ["all", "healthy", "quota", "paused", "hardFail", "disabled"] as const;
 type HealthFilter = (typeof HEALTH_FILTERS)[number];
 const SORTS = ["default", "recent", "usage24h", "cost", "name"] as const;
 type Sort = (typeof SORTS)[number];
 
 type Provider = "anthropic" | "openai";
+
+// reuseUnchanged carries the previous object forward for any credential whose
+// serialized form is identical. Every poll returns a freshly parsed array, so
+// without this CredentialCard's memo never holds — shallow-comparing `cred`
+// against a brand-new object always reports a change, and the whole grid
+// re-renders every 30s even when nothing moved. Most polls change nothing, so
+// this usually reduces the commit to zero cards.
+function reuseUnchanged(prev: Credential[], next: Credential[]): Credential[] {
+  if (prev.length === 0) return next;
+  const byID = new Map(prev.map((c) => [c.id, c]));
+  let reused = 0;
+  const merged = next.map((c) => {
+    const old = byID.get(c.id);
+    if (old && JSON.stringify(old) === JSON.stringify(c)) {
+      reused++;
+      return old;
+    }
+    return c;
+  });
+  // Nothing moved at all — hand back the identical array so React bails out of
+  // the state update entirely and the poll costs zero render work.
+  if (reused === next.length && next.length === prev.length) return prev;
+  return merged;
+}
 
 export function CredentialsTab() {
   const { t } = useTranslation();
@@ -60,64 +98,99 @@ export function CredentialsTab() {
   const [oauthOffset, setOauthOffset] = useState(0);
   const [keyOffset, setKeyOffset] = useState(0);
 
-  const reload = async () => {
-    const r = await apiGet<{ credentials: Credential[] }>("/admin/credentials");
-    setCreds(r.credentials || []);
-  };
-  // Load on mount + poll every 15s so an expired quota cooldown (cleared
-  // server-side) stops showing a stale badge without a manual reload. Polling
-  // only swaps `creds`; filters, paging and open dialogs are separate state.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: mount + interval poll; reload's closure only touches stable setters.
-  useEffect(() => {
-    reload();
-    const id = setInterval(reload, 15000);
-    return () => clearInterval(id);
+  // Guards against overlapping polls: the list endpoint can take a second on a
+  // cold cache, and without this a slow response let the next tick stack a
+  // second request on top of it.
+  const inFlight = useRef(false);
+  const reload = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      const r = await apiGet<{ credentials: Credential[] }>("/admin/credentials");
+      setCreds((prev) => reuseUnchanged(prev, r.credentials || []));
+    } finally {
+      inFlight.current = false;
+    }
   }, []);
 
-  const runAction = async (c: Credential, kind: CardAction) => {
-    setBusyId(c.id);
-    try {
-      if (kind === "toggle") {
-        await apiPatch(`/admin/credentials/${encodeURIComponent(c.id)}`, { disabled: !c.disabled });
-        toast.success(
-          c.disabled ? t("admin.creds.toast.enabled") : t("admin.creds.toast.disabled"),
-        );
-      } else {
-        await apiPost(`/admin/credentials/${encodeURIComponent(c.id)}/${kind}`);
-        toast.success(
-          kind === "refresh"
-            ? t("admin.creds.toast.refreshed")
-            : kind === "clear-quota"
-              ? t("admin.creds.toast.quotaCleared")
-              : t("admin.creds.toast.markedHealthy"),
-        );
-      }
-      await reload();
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setBusyId("");
-    }
-  };
+  // Load on mount + poll so an expired quota cooldown (cleared server-side)
+  // stops showing a stale badge without a manual reload. Polling only swaps
+  // `creds`; filters, paging and open dialogs are separate state.
+  //
+  // The tick is skipped while the tab is hidden and a fresh load fires on
+  // re-show — same shape as the console dashboard. A background tab used to
+  // keep hammering a request that costs the server real work.
+  useEffect(() => {
+    reload();
+    const tick = () => {
+      if (document.visibilityState === "hidden") return;
+      reload();
+    };
+    const id = setInterval(tick, POLL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") reload();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [reload]);
 
-  const remove = async (c: Credential) => {
-    if (
-      !(await confirm({
-        title: t("common.delete"),
-        description: t("admin.creds.confirmRemove", { name: c.label }),
-        confirmLabel: t("common.delete"),
-        destructive: true,
-      }))
-    )
-      return;
-    try {
-      await apiDelete(`/admin/credentials/${encodeURIComponent(c.id)}`);
-      toast.success(t("admin.creds.removed"));
-      await reload();
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
-  };
+  // useCallback so CredentialCard's memo actually holds — a fresh function
+  // identity here would re-render every card on every parent render.
+  const runAction = useCallback(
+    async (c: Credential, kind: CardAction) => {
+      setBusyId(c.id);
+      try {
+        if (kind === "toggle") {
+          await apiPatch(`/admin/credentials/${encodeURIComponent(c.id)}`, {
+            disabled: !c.disabled,
+          });
+          toast.success(
+            c.disabled ? t("admin.creds.toast.enabled") : t("admin.creds.toast.disabled"),
+          );
+        } else {
+          await apiPost(`/admin/credentials/${encodeURIComponent(c.id)}/${kind}`);
+          toast.success(
+            kind === "refresh"
+              ? t("admin.creds.toast.refreshed")
+              : kind === "clear-quota"
+                ? t("admin.creds.toast.quotaCleared")
+                : t("admin.creds.toast.markedHealthy"),
+          );
+        }
+        await reload();
+      } catch (e) {
+        toast.error(errMsg(e));
+      } finally {
+        setBusyId("");
+      }
+    },
+    [reload, t],
+  );
+
+  const remove = useCallback(
+    async (c: Credential) => {
+      if (
+        !(await confirm({
+          title: t("common.delete"),
+          description: t("admin.creds.confirmRemove", { name: c.label }),
+          confirmLabel: t("common.delete"),
+          destructive: true,
+        }))
+      )
+        return;
+      try {
+        await apiDelete(`/admin/credentials/${encodeURIComponent(c.id)}`);
+        toast.success(t("admin.creds.removed"));
+        await reload();
+      } catch (e) {
+        toast.error(errMsg(e));
+      }
+    },
+    [confirm, reload, t],
+  );
 
   const byProvider = useMemo(
     () => ({
@@ -227,10 +300,10 @@ export function CredentialsTab() {
                 <CredentialCard
                   cred={c}
                   busy={busyId === c.id}
-                  onEdit={() => setEditing(c)}
-                  onDetail={() => setDetail(c)}
-                  onDelete={() => remove(c)}
-                  onAction={(kind) => runAction(c, kind)}
+                  onEdit={setEditing}
+                  onDetail={setDetail}
+                  onDelete={remove}
+                  onAction={runAction}
                 />
               </RevealItem>
             ))}

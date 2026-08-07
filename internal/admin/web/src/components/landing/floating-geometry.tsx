@@ -1,6 +1,7 @@
 import { Canvas, type RootState, useFrame } from "@react-three/fiber";
 import { useRef } from "react";
 import type * as THREE from "three";
+import { useAmbientFrameloop } from "./use-ambient-frameloop";
 
 // Slow-tumbling wireframe icosahedron — ambient "floating geometry" for a
 // section backdrop. Wireframe + low opacity keeps it as atmosphere, never a
@@ -38,14 +39,18 @@ function Shape({ color }: { color: string }) {
 }
 
 export default function FloatingGeometry({ color = "#34d399" }: { color?: string }) {
+  const { ref, frameloop } = useAmbientFrameloop();
   return (
-    <Canvas
-      camera={{ position: [0, 0, 4.2], fov: 55 }}
-      dpr={[1, 1.5]}
-      gl={{ antialias: true, alpha: true, powerPreference: "low-power" }}
-      style={{ position: "absolute", inset: 0 }}
-    >
-      <Shape color={color} />
-    </Canvas>
+    <div ref={ref} style={{ position: "absolute", inset: 0 }}>
+      <Canvas
+        frameloop={frameloop}
+        camera={{ position: [0, 0, 4.2], fov: 55 }}
+        dpr={[1, 1.5]}
+        gl={{ antialias: true, alpha: true, powerPreference: "low-power" }}
+        style={{ position: "absolute", inset: 0 }}
+      >
+        <Shape color={color} />
+      </Canvas>
+    </div>
   );
 }

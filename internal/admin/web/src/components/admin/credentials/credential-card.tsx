@@ -10,7 +10,7 @@ import {
   ShieldOff,
   Trash2,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { SpotlightCard } from "@/components/landing/interactions";
 import { Badge } from "@/components/ui/badge";
@@ -64,7 +64,12 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-export function CredentialCard({
+// memo + credential-typed callbacks. The list polls every 30s and swaps in a
+// fresh array, so without this every card in the grid re-rendered on each tick.
+// The callbacks take the credential rather than closing over it so the parent
+// can hand every card the same stable function — per-card arrow props would
+// change identity on every parent render and defeat the memo entirely.
+export const CredentialCard = memo(function CredentialCard({
   cred: c,
   busy,
   onEdit,
@@ -74,10 +79,10 @@ export function CredentialCard({
 }: {
   cred: Credential;
   busy: boolean;
-  onEdit: () => void;
-  onDetail: () => void;
-  onDelete: () => void;
-  onAction: (kind: CardAction) => void;
+  onEdit: (c: Credential) => void;
+  onDetail: (c: Credential) => void;
+  onDelete: (c: Credential) => void;
+  onAction: (c: Credential, kind: CardAction) => void;
 }) {
   const { t } = useTranslation();
   const status = credStatus(c);
@@ -96,6 +101,7 @@ export function CredentialCard({
   return (
     <SpotlightCard
       padded={false}
+      spotlight={false}
       className={cn("flex h-full flex-col", c.disabled && "opacity-70")}
     >
       {/* accent hairline — only lit while the credential can actually serve */}
@@ -298,7 +304,7 @@ export function CredentialCard({
         <Button
           size="sm"
           variant="outline"
-          onClick={onDetail}
+          onClick={() => onDetail(c)}
           title={t("admin.creds.actions.detail")}
         >
           <Gauge className="size-3.5" />
@@ -306,14 +312,14 @@ export function CredentialCard({
         </Button>
         {!readOnly && (
           <>
-            <Button size="sm" variant="outline" onClick={onEdit} title={t("common.edit")}>
+            <Button size="sm" variant="outline" onClick={() => onEdit(c)} title={t("common.edit")}>
               <Pencil className="size-3.5" />
             </Button>
             <Button
               size="sm"
               variant="outline"
               disabled={busy}
-              onClick={() => onAction("toggle")}
+              onClick={() => onAction(c, "toggle")}
               title={
                 c.disabled ? t("admin.creds.actions.enable") : t("admin.creds.actions.disable")
               }
@@ -325,7 +331,7 @@ export function CredentialCard({
                 size="sm"
                 variant="outline"
                 disabled={busy}
-                onClick={() => onAction("refresh")}
+                onClick={() => onAction(c, "refresh")}
                 title={t("admin.creds.actions.refresh")}
               >
                 <RefreshCw className={cn("size-3.5", busy && "animate-spin")} />
@@ -336,7 +342,7 @@ export function CredentialCard({
                 size="sm"
                 variant="warning"
                 disabled={busy}
-                onClick={() => onAction("clear-quota")}
+                onClick={() => onAction(c, "clear-quota")}
               >
                 <CheckCircle2 className="size-3.5" />
                 {t("admin.creds.actions.clearQuota")}
@@ -347,7 +353,7 @@ export function CredentialCard({
                 size="sm"
                 variant="warning"
                 disabled={busy}
-                onClick={() => onAction("clear-failure")}
+                onClick={() => onAction(c, "clear-failure")}
               >
                 <CheckCircle2 className="size-3.5" />
                 {t("admin.creds.actions.markHealthy")}
@@ -357,7 +363,7 @@ export function CredentialCard({
               size="sm"
               variant="outline"
               className="ml-auto border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={onDelete}
+              onClick={() => onDelete(c)}
               title={t("common.delete")}
             >
               <Trash2 className="size-3.5" />
@@ -367,4 +373,4 @@ export function CredentialCard({
       </div>
     </SpotlightCard>
   );
-}
+});

@@ -11,6 +11,8 @@ import (
 
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/usage"
+
+	"github.com/wjsoj/CPA-Claude/internal/webasset"
 )
 
 // RegisterStatus mounts the public /status/ SPA + API. Unlike Register(),
@@ -26,8 +28,9 @@ func (h *Handler) RegisterStatus(r *gin.Engine) {
 	r.GET("/status", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/status/")
 	})
+	assets := webasset.New(sub)
 	r.GET("/status/", func(c *gin.Context) {
-		serveAsset(c, sub, "index.html")
+		assets.Serve(c, "index.html")
 	})
 	r.GET("/status/assets/*filepath", func(c *gin.Context) {
 		p := strings.TrimPrefix(c.Param("filepath"), "/")
@@ -35,7 +38,7 @@ func (h *Handler) RegisterStatus(r *gin.Engine) {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
-		serveAsset(c, sub, "assets/"+p)
+		assets.Serve(c, "assets/"+p)
 	})
 	r.GET("/status/api/overview", h.handleStatusOverview)
 	r.GET("/status/api/dashboard", h.handleStatusDashboard)

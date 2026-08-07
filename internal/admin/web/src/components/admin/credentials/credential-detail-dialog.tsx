@@ -12,7 +12,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { Credential } from "@/lib/types";
+import { apiGet } from "@/lib/api";
+import type { Credential, CredentialUsage, UsageDay } from "@/lib/types";
 import { cn, fmtInt, fmtUSD } from "@/lib/utils";
 import { credStatus, StatusDot } from "./credential-status";
 
@@ -46,16 +47,36 @@ export function CredentialDetailDialog({
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<"overview" | "upstream">("overview");
+  // The 14-day series is fetched per credential rather than shipped with the
+  // list: it was ~70% of the list payload and only this dialog reads it.
+  const [daily, setDaily] = useState<UsageDay[]>([]);
 
+  const credID = cred?.id;
   useEffect(() => {
-    if (cred) setTab("overview");
-  }, [cred]);
+    if (!credID) return;
+    setTab("overview");
+    setDaily([]);
+    let cancelled = false;
+    apiGet<{ usage: CredentialUsage | null }>(
+      `/admin/credentials/${encodeURIComponent(credID)}/usage`,
+    )
+      .then((r) => {
+        if (!cancelled) setDaily(r.usage?.daily || []);
+      })
+      .catch(() => {
+        // A missing sparkline is not worth a toast — the rest of the dialog
+        // renders from data the list already provided.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [credID]);
 
   if (!cred) return null;
   const c = cred;
   const u = c.usage;
   const status = credStatus(c);
-  const spark = (u?.daily || []).map((d) => ({
+  const spark = daily.map((d) => ({
     label: d.day,
     value: (d.input_tokens || 0) + (d.output_tokens || 0),
   }));

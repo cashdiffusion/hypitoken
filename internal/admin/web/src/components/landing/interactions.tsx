@@ -17,6 +17,7 @@ export function SpotlightCard({
   className,
   tiltDeg = 2.5,
   padded = true,
+  spotlight = true,
 }: {
   children: ReactNode;
   className?: string;
@@ -24,6 +25,12 @@ export function SpotlightCard({
   /** Set false when the content needs to bleed to the card's edges (full-width
    * banners, footers). The caller then owns all internal spacing. */
   padded?: boolean;
+  /** Set false in dense grids. The cursor glow reads as premium on a handful
+   * of hero cards, but each instance measures its rect on every mousemove — a
+   * forced layout — and drives three springs. Two dozen of them on one screen
+   * turned pointer movement into steady layout thrash, for an effect nobody
+   * notices at that density. The CSS hover shadow and hairline stay. */
+  spotlight?: boolean;
 }) {
   const reduce = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
@@ -52,25 +59,33 @@ export function SpotlightCard({
   return (
     <motion.div
       ref={ref}
-      onMouseMove={onMove}
-      onMouseEnter={() => glowOpacity.set(1)}
-      onMouseLeave={() => {
-        glowOpacity.set(0);
-        rx.set(0);
-        ry.set(0);
-      }}
-      style={reduce ? undefined : { rotateX: rx, rotateY: ry, transformPerspective: 1000 }}
+      onMouseMove={spotlight ? onMove : undefined}
+      onMouseEnter={spotlight ? () => glowOpacity.set(1) : undefined}
+      onMouseLeave={
+        spotlight
+          ? () => {
+              glowOpacity.set(0);
+              rx.set(0);
+              ry.set(0);
+            }
+          : undefined
+      }
+      style={
+        reduce || !spotlight ? undefined : { rotateX: rx, rotateY: ry, transformPerspective: 1000 }
+      }
       className={cn(
         "glass group relative overflow-hidden rounded-2xl transition-shadow duration-300 hover:shadow-[0_20px_60px_-24px_color-mix(in_oklch,var(--primary)_45%,transparent)]",
         padded && "p-6",
         className,
       )}
     >
-      <motion.div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{ background: glow, opacity: glowOpacity }}
-      />
+      {spotlight && (
+        <motion.div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{ background: glow, opacity: glowOpacity }}
+        />
+      )}
       {/* hairline top highlight that brightens on hover */}
       <div
         aria-hidden
