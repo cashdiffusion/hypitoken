@@ -15,6 +15,7 @@ import {
 import { apiGet } from "@/lib/api";
 import type { Credential, CredentialUsage, UsageDay } from "@/lib/types";
 import { cn, fmtInt, fmtUSD } from "@/lib/utils";
+import { CodexBillingPanel } from "./codex-billing-panel";
 import { credStatus, StatusDot } from "./credential-status";
 
 function Row({ k, v }: { k: string; v: ReactNode }) {
@@ -46,7 +47,7 @@ export function CredentialDetailDialog({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"overview" | "upstream">("overview");
+  const [tab, setTab] = useState<"overview" | "upstream" | "billing">("overview");
   // The 14-day series is fetched per credential rather than shipped with the
   // list: it was ~70% of the list payload and only this dialog reads it.
   const [daily, setDaily] = useState<UsageDay[]>([]);
@@ -83,7 +84,14 @@ export function CredentialDetailDialog({
   // The upstream probe only exists for OAuth subscription accounts — API keys
   // have no per-account quota endpoint to ask.
   const canProbe = c.kind === "oauth" && (c.provider === "anthropic" || c.provider === "openai");
-  const tabs = canProbe ? (["overview", "upstream"] as const) : (["overview"] as const);
+  // Billing is ChatGPT-only: there is no Anthropic counterpart to the
+  // subscriptions/accounts-check portal.
+  const canBill = c.kind === "oauth" && c.provider === "openai";
+  const tabs = canBill
+    ? (["overview", "upstream", "billing"] as const)
+    : canProbe
+      ? (["overview", "upstream"] as const)
+      : (["overview"] as const);
 
   return (
     <Dialog open={!!cred} onOpenChange={(o) => !o && onClose()}>
@@ -128,7 +136,9 @@ export function CredentialDetailDialog({
                 )}
                 {k === "overview"
                   ? t("admin.creds.detail.tabOverview")
-                  : t("admin.creds.detail.tabUpstream")}
+                  : k === "upstream"
+                    ? t("admin.creds.detail.tabUpstream")
+                    : t("admin.creds.detail.tabBilling")}
               </button>
             ))}
           </div>
@@ -260,11 +270,13 @@ export function CredentialDetailDialog({
               </div>
             )}
           </div>
-        ) : (
+        ) : tab === "upstream" ? (
           <UpstreamUsagePanel
             authId={c.id}
             provider={c.provider === "openai" ? "openai" : "anthropic"}
           />
+        ) : (
+          <CodexBillingPanel authId={c.id} seed={c.codex_subscription} />
         )}
       </DialogContent>
     </Dialog>

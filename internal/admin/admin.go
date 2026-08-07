@@ -232,6 +232,7 @@ func (h *Handler) Register(r *gin.Engine) {
 		api.POST("/apikeys", h.handleCreateAPIKey)
 		api.POST("/auths/:id/anthropic-usage", h.handleAnthropicUsage)
 		api.POST("/auths/:id/codex-usage", h.handleCodexUsage)
+		api.POST("/auths/:id/codex-subscription", h.handleCodexSubscription)
 		api.POST("/auths/:id/reset-codex-credit", h.handleResetCodexCredit)
 		api.GET("/requests", h.handleRequestsQuery)
 		api.GET("/requests/clients", h.handleRequestsClients)
@@ -369,6 +370,66 @@ type authRow struct {
 	// creds that have never been probed.
 	CodexUsage   *auth.CodexUsageInfo `json:"codex_usage,omitempty"`
 	CodexUsageAt *time.Time           `json:"codex_usage_at,omitempty"`
+	// CodexSubscription is the billing view (plan, term, renewal, delinquency)
+	// from the last FetchCodexSubscription. Carried on the row — not only in
+	// the probe response — so a credential that is about to lapse for billing
+	// reasons is visible on page load rather than only after someone clicks.
+	CodexSubscription *codexSubscriptionView `json:"codex_subscription,omitempty"`
+}
+
+// codexSubscriptionView is the raw upstream billing view plus the answers
+// cc-core derives from it.
+//
+// The derived fields are computed in Go rather than in the SPA on purpose:
+// cc-core exposes PurchasedAt/ExpiresAt/Plan/IsFree/AtRisk precisely so every
+// consumer answers these questions identically, and two of them are not
+// obvious. "Is it free?" has two independent sources (a gratis flag and a
+// 100%-off promo), and "is it at risk?" has to pick between grace-period end
+// and term end. Re-deriving either in TypeScript is how the panel and the
+// server start disagreeing about whether an account is paid.
+type codexSubscriptionView struct {
+	Info *auth.CodexSubscriptionInfo `json:"info,omitempty"`
+
+	Plan        string     `json:"plan,omitempty"`
+	PurchasedAt *time.Time `json:"purchased_at,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+
+	Free       bool   `json:"free"`
+	FreeReason string `json:"free_reason,omitempty"`
+
+	AtRisk       bool       `json:"at_risk"`
+	RiskReason   string     `json:"risk_reason,omitempty"`
+	RiskDeadline *time.Time `json:"risk_deadline,omitempty"`
+
+	// FetchedAt is when the probe last succeeded, so the panel can say how
+	// stale the answer is instead of implying it is live.
+	FetchedAt *time.Time `json:"fetched_at,omitempty"`
+}
+
+// newCodexSubscriptionView folds the cc-core helpers into one payload. Returns
+// nil for a credential that has never been probed, so the field stays absent
+// rather than rendering as an empty billing panel.
+func newCodexSubscriptionView(info *auth.CodexSubscriptionInfo, at time.Time) *codexSubscriptionView {
+	if info == nil {
+		return nil
+	}
+	v := &codexSubscriptionView{Info: info, Plan: info.Plan()}
+	if t := info.PurchasedAt(); !t.IsZero() {
+		v.PurchasedAt = &t
+	}
+	if t := info.ExpiresAt(); !t.IsZero() {
+		v.ExpiresAt = &t
+	}
+	v.Free, v.FreeReason = info.IsFree()
+	var deadline time.Time
+	v.AtRisk, v.RiskReason, deadline = info.AtRisk()
+	if !deadline.IsZero() {
+		v.RiskDeadline = &deadline
+	}
+	if !at.IsZero() {
+		v.FetchedAt = &at
+	}
+	return v
 }
 
 type usageSummary struct {
@@ -510,6 +571,7 @@ func (h *Handler) buildAuthRows(withDaily bool) []authRow {
 			CodexRateLimitsAt: timePtr(st.Auth.CodexRateLimitsAt),
 			CodexUsage:        st.Auth.CodexUsage,
 			CodexUsageAt:      timePtr(st.Auth.CodexUsageAt),
+			CodexSubscription: newCodexSubscriptionView(st.Auth.CodexSubscription, st.Auth.CodexSubscriptionAt),
 		})
 	}
 	return rows
@@ -1265,6 +1327,45 @@ func (h *Handler) handleCodexUsage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"usage": info})
 }
 
+// handleCodexSubscription probes the chatgpt.com billing endpoints
+// (/backend-api/subscriptions + accounts/check) for an OpenAI OAuth credential
+// and returns the plan/term/renewal view.
+//
+// This answers a different question from codex-usage. wham/usage says how much
+// quota is left right now; this says what was bought, when the term started,
+// and whether it renews — and in particular whether the account is delinquent.
+// Delinquency is invisible to every other signal we have: the account keeps
+// serving traffic normally until its grace period ends, then stops dead. This
+// probe is the only advance warning.
+//
+// Like codex-usage it never touches credential health on failure (see the note
+// on FetchCodexSubscription): a flaky billing endpoint says nothing about
+// whether /responses works, and a delinquent account is still serving.
+func (h *Handler) handleCodexSubscription(c *gin.Context) {
+	id := c.Param("id")
+	a := h.pool.FindByID(id)
+	if a == nil || a.Kind != auth.KindOAuth {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "oauth credential not found"})
+		return
+	}
+	if auth.NormalizeProvider(a.Provider) != auth.ProviderOpenAI {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "codex-subscription endpoint is OpenAI-only"})
+		return
+	}
+	// Two upstream round trips, so a little more headroom than the single-call
+	// usage probe.
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
+	defer cancel()
+	info, err := a.FetchCodexSubscription(ctx, h.pool.UseUTLS())
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"subscription": newCodexSubscriptionView(info, a.Snapshot().CodexSubscriptionAt),
+	})
+}
+
 // handleResetCodexCredit consumes one Codex rate-limit reset credit (the "quota
 // reset card") for an OpenAI OAuth credential, immediately resetting the
 // account's rolling rate-limit window(s) instead of waiting for the natural
@@ -1818,6 +1919,7 @@ func (h *Handler) RegisterSaaSBridge(g *gin.RouterGroup) {
 	g.GET("/requests/hourly", h.handleRequestsHourly)
 	g.POST("/credentials/:id/anthropic-usage", h.handleAnthropicUsage)
 	g.POST("/credentials/:id/codex-usage", h.handleCodexUsage)
+	g.POST("/credentials/:id/codex-subscription", h.handleCodexSubscription)
 	g.POST("/credentials/:id/reset-codex-credit", h.handleResetCodexCredit)
 	// Rich credential read + mutations. Mirrors the legacy /summary fields so
 	// the SaaS panel can render the same usage / quota / model_map / sparkline

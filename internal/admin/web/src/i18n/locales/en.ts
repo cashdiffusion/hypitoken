@@ -1031,6 +1031,43 @@ export default {
         activeTokens: "Active client tokens ({{count}})",
         modelMap: "Model map ({{count}})",
         passthrough: "passthrough",
+        tabBilling: "Billing",
+      },
+      // ChatGPT subscription/billing probe (cc-core FetchCodexSubscription).
+      // Answers what was bought and until when — a different question from the
+      // upstream quota panel, which only knows the current window.
+      billing: {
+        probe: "Check billing",
+        reprobe: "Re-probe",
+        querying: "Querying subscription state…",
+        notProbed:
+          "Not probed yet. This reads the ChatGPT billing portal; it does not send a model request through the credential.",
+        asOf: "as of {{when}}",
+        term: "Term",
+        renews: "Renews",
+        free: "Free",
+        freeWhy: "Free because: {{why}}",
+        comped: "comped",
+        until: "until {{when}}",
+        seats: "Seats",
+        planId: "Plan id",
+        boughtVia: "Bought via",
+        account: "Account",
+        since: "since {{when}}",
+        history: "History",
+        previouslyPaid: "previously paid",
+        neverPaid: "never paid",
+        graceEnds: "Grace ends",
+        graceEnd: "its grace period ends",
+        badgeDelinquent: "Payment failed",
+        badgeNotRenewing: "Not renewing",
+        delinquentBody:
+          "A renewal charge failed. The account keeps serving traffic until {{when}}, then loses entitlement.",
+        notRenewingBody: "Set not to renew — the subscription lapses on {{when}}.",
+        offPortal:
+          "Bought through {{platform}}, so it has to be fixed there, not in the web billing portal.",
+        riskUntil: "usable until {{when}}",
+        riskSoon: "about to lapse for a billing reason",
       },
       edit: {
         title: "Edit credential · {{label}}",

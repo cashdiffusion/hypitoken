@@ -205,6 +205,27 @@ export const CredentialCard = memo(function CredentialCard({
           {c.failure_reason}
         </AlertBand>
       )}
+      {/* Billing risk is the only failure mode with no other tell: a delinquent
+          ChatGPT account serves traffic normally until its grace period ends,
+          so nothing in health or quota moves before it dies. Surfaced on the
+          card so it is visible without opening the billing tab. */}
+      {c.codex_subscription?.at_risk && (
+        <AlertBand
+          tone={c.codex_subscription.risk_reason === "delinquent" ? "error" : "warning"}
+          icon={<AlertTriangle className="size-3.5" />}
+          label={
+            c.codex_subscription.risk_reason === "delinquent"
+              ? t("admin.creds.billing.badgeDelinquent")
+              : t("admin.creds.billing.badgeNotRenewing")
+          }
+        >
+          {c.codex_subscription.risk_deadline
+            ? t("admin.creds.billing.riskUntil", {
+                when: new Date(c.codex_subscription.risk_deadline).toLocaleDateString(),
+              })
+            : t("admin.creds.billing.riskSoon")}
+        </AlertBand>
+      )}
       {c.refresh_suspended && (
         <AlertBand
           tone="error"
