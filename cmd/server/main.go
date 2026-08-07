@@ -385,7 +385,17 @@ func main() {
 		shopInst.RegisterRoutes(shopEng)
 		addr := fmt.Sprintf("%s:%d", cfg.Endpoints.Shop.Host, cfg.Endpoints.Shop.Port)
 		s.AttachExtraEndpoint("shop", addr, shopEng)
-		saasShutdown = append(saasShutdown, func() { _ = shopDB.Close() })
+		// Delivery emails outlive the request that spawned them and end in a
+		// write (email_sent). Join them before closing the DB, or a buyer who
+		// was mailed during shutdown stays flagged undelivered.
+		saasShutdown = append(saasShutdown, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := shopInst.WaitDeliveries(ctx); err != nil {
+				log.Warnf("shop: delivery emails still in flight at shutdown: %v", err)
+			}
+			_ = shopDB.Close()
+		})
 		log.Infof("shop: enabled at %s (site=%q stripe currency=%s webhook=%t)", addr, cfg.Shop.SiteName, shopGw.Currency(), shopGw.HasWebhookSecret())
 	}
 

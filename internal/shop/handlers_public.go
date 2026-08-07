@@ -333,7 +333,7 @@ func (s *Shop) applyStripeSession(ctx context.Context, o *Order, sess *stripe.Ch
 	// Fire the delivery email; failures don't block — admin can resend. The
 	// goroutine deliberately uses its own background context (dispatchOrderEmail)
 	// since it must outlive this request/webhook.
-	go s.dispatchOrderEmail(updated) //nolint:gosec // G118: delivery email must outlive the request ctx, dispatchOrderEmail uses its own background ctx
+	s.goDispatchOrderEmail(updated)
 	return nil
 }
 
@@ -352,6 +352,39 @@ func (s *Shop) maybeSettleStripeOrder(ctx context.Context, o *Order) {
 	}
 	if err := s.applyStripeSession(ctx, o, sess, "poll"); err != nil {
 		log.Warnf("shop: stripe poll apply order=%s: %v", o.OutTradeNo, err)
+	}
+}
+
+// goDispatchOrderEmail runs dispatchOrderEmail in the background, registered
+// on s.deliveries so WaitDeliveries can join it. Every delivery-email
+// goroutine must start here rather than with a bare `go` — an unregistered
+// one races the DB close at shutdown (see the deliveries field on Shop).
+//
+//nolint:gosec // G118: the delivery email must outlive the request ctx; dispatchOrderEmail uses its own background ctx
+func (s *Shop) goDispatchOrderEmail(o *Order) {
+	s.deliveries.Add(1)
+	go func() {
+		defer s.deliveries.Done()
+		s.dispatchOrderEmail(o)
+	}()
+}
+
+// WaitDeliveries blocks until every in-flight delivery email has finished
+// (including its email_sent write), or until ctx expires. Call it before
+// closing the shop DB. Returns ctx.Err() if the wait timed out — the caller
+// should close anyway at that point; a lost email_sent flag is recoverable
+// from the admin panel, a hung shutdown is not.
+func (s *Shop) WaitDeliveries(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.deliveries.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
