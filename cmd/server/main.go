@@ -203,11 +203,15 @@ func main() {
 		bootstrapAdmin(saasDB, cfg.SaaS)
 		bootstrapPricingFromCatalog(cfg.SaaS, saasDB)
 
-		// Daily VACUUM INTO snapshot, retained for 30 days. Atomic /
-		// online — request handlers don't see a pause, and each snapshot
-		// is a clean self-contained .db file (no WAL/SHM siblings) which
-		// makes off-host shipping a single-file copy.
-		go saasDB.RunDailyBackups(refresherCtx, 30)
+		// Daily VACUUM INTO snapshot. Atomic / online — request handlers
+		// don't see a pause, and each snapshot is a clean self-contained
+		// .db file (no WAL/SHM siblings) which makes off-host shipping a
+		// single-file copy.
+		//
+		// Retention is saas.local_snapshot_days (default 14). It used to be a
+		// hardcoded 30: at ~190 MB per snapshot and growing that was ~6 GB of
+		// disk for a tier of backup the off-host archive already covers.
+		go saasDB.RunDailyBackups(refresherCtx, cfg.SaaS.LocalSnapshotDays)
 
 		mailer := mail.New(mail.SMTPConfig{
 			Host: cfg.SaaS.SMTP.Host, Port: cfg.SaaS.SMTP.Port,

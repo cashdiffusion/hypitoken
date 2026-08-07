@@ -24,6 +24,13 @@ type Config struct {
 	// the dir of the loaded config file.
 	DBPath string `yaml:"db_path"`
 
+	// LocalSnapshotDays is how many daily on-disk snapshots to keep in
+	// <dbdir>/backups. These are the local safety net; the off-host encrypted
+	// backup (see the top-level `backup:` block) is the real one, so this does
+	// not need a long tail. Default 14 — at ~190 MB per snapshot and growing,
+	// the previous hardcoded 30 was heading for ~6 GB. Set 0 for the default.
+	LocalSnapshotDays int `yaml:"local_snapshot_days,omitempty"`
+
 	// JWTSecret is the HS256 signing key. If empty on first start, a 32-byte
 	// random secret is generated and persisted to <DBPath>.jwt_secret (mode
 	// 0600) so subsequent starts reuse it.
@@ -185,6 +192,9 @@ func (c *Config) ApplyDefaults(configDir string) {
 		c.DBPath = filepath.Join(configDir, "saas.db")
 	} else if !filepath.IsAbs(c.DBPath) {
 		c.DBPath = filepath.Join(configDir, c.DBPath)
+	}
+	if c.LocalSnapshotDays <= 0 {
+		c.LocalSnapshotDays = 14
 	}
 	if c.JWTTTL == 0 {
 		c.JWTTTL = 24 * time.Hour

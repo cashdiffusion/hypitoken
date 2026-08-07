@@ -108,7 +108,12 @@ ask() {
 write_unit() {
   local cfg="$1" user="$2" workdir tmp_unit
   workdir="$(getent passwd "$user" | cut -d: -f6)"
-  [ -z "$workdir" ] && workdir="/"
+  # A system user's passwd entry names a home directory that useradd
+  # --no-create-home never actually created. systemd then kills the unit at
+  # CHDIR (status=200) before the binary runs — that silently disabled the
+  # off-host backup on one deployment for 20 days, 20 failed runs, 0 uploads.
+  # Test for the directory, not just for an empty field.
+  [ -d "$workdir" ] || workdir="/"
   tmp_unit="$(mktemp)"
   cat > "$tmp_unit" <<UNIT
 [Unit]
@@ -141,7 +146,12 @@ BACKUP_TIMER="hypitoken-backup.timer"
 write_backup_units() {
   local cfg="$1" user="$2" workdir tmp_s tmp_t
   workdir="$(getent passwd "$user" | cut -d: -f6)"
-  [ -z "$workdir" ] && workdir="/"
+  # A system user's passwd entry names a home directory that useradd
+  # --no-create-home never actually created. systemd then kills the unit at
+  # CHDIR (status=200) before the binary runs — that silently disabled the
+  # off-host backup on one deployment for 20 days, 20 failed runs, 0 uploads.
+  # Test for the directory, not just for an empty field.
+  [ -d "$workdir" ] || workdir="/"
   tmp_s="$(mktemp)"; tmp_t="$(mktemp)"
   cat > "$tmp_s" <<UNIT
 [Unit]

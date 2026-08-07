@@ -181,6 +181,11 @@ saas:
   # directory.
   db_path: ./saas.db
 
+  # Daily on-disk snapshots kept in <db_path dir>/backups. These are the
+  # local safety net — the off-host encrypted archive (see `backup:` above)
+  # is the real one, so a long tail here mostly just costs disk. Default 14.
+  local_snapshot_days: 14
+
   # JWT signing key. Leave empty and the server generates a 32-byte
   # random secret on first start, persisted to <db_path>.jwt_secret.
   jwt_secret: ""
