@@ -236,6 +236,13 @@ func buildManifest(ctx context.Context, cfg *config.Config, configPath, tmpDir s
 	// Upstream credential dirs (refresh_tokens — unrecoverable if lost).
 	entries = append(entries, dirEntries(cfg.AuthDir, "auths")...)
 
+	// Usage state: per-credential day/hour counters and per-client-token
+	// weekly spend. Money lives in saas.db, so losing this doesn't lose
+	// revenue — but it does reset every client's weekly-budget counter to
+	// zero, which lets a capped token overspend for a week. The sibling
+	// CPA-Claude fork has always captured it; this side just never did.
+	add("state.json", cfg.StateFile, 0o600)
+
 	// In-config-dir secrets/ folder (if used).
 	configDir := filepath.Dir(configPath)
 	entries = append(entries, dirEntries(filepath.Join(configDir, "secrets"), "secrets")...)
@@ -249,10 +256,51 @@ func buildManifest(ctx context.Context, cfg *config.Config, configPath, tmpDir s
 	}
 	entries = append(entries, ext...)
 
-	if len(entries) == 0 {
-		return nil, fmt.Errorf("nothing to back up")
+	if err := assertManifestComplete(cfg, entries); err != nil {
+		return nil, err
 	}
 	return entries, nil
+}
+
+// assertManifestComplete fails the run when something the config says should
+// exist did not make it into the archive.
+//
+// The old guard was `len(entries) == 0`. That is far too weak: point a config
+// at the wrong directory and every collector silently skips, the archive ships
+// with one file, the upload logs "uploaded 1 files", and the systemd oneshot
+// reports success — a backup that exists, is encrypted, restores cleanly, and
+// contains nothing. (Observed while drill-testing: a config copied to /tmp made
+// every relative path miss, and the run still "succeeded".) Better to fail
+// loudly, because a failed unit is visible and an empty archive is not.
+func assertManifestComplete(cfg *config.Config, entries []backup.FileEntry) error {
+	have := make(map[string]bool, len(entries))
+	auths := 0
+	for _, e := range entries {
+		have[e.Name] = true
+		if strings.HasPrefix(e.Name, "auths/") {
+			auths++
+		}
+	}
+	var missing []string
+	if cfg.SaaS.Enabled && !have["saas.db"] {
+		missing = append(missing, "saas.db (saas.enabled is true)")
+	}
+	if cfg.Shop.Enabled && !have["shop.db"] {
+		missing = append(missing, "shop.db (shop.enabled is true)")
+	}
+	// An empty auth dir means the credential files — the one unrecoverable
+	// thing in here — are not in the archive.
+	if strings.TrimSpace(cfg.AuthDir) != "" && auths == 0 {
+		missing = append(missing, fmt.Sprintf("any credential from auth_dir %q", cfg.AuthDir))
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("refusing to ship an incomplete backup — missing %s; check the paths in this config resolve",
+			strings.Join(missing, ", "))
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("nothing to back up")
+	}
+	return nil
 }
 
 // externalSecretEntries finds config string fields that use the "@/path"
