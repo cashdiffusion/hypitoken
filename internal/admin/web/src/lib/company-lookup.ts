@@ -90,14 +90,15 @@ async function lookupViaServer(q: string): Promise<InvoiceTitle[] | null> {
 }
 
 export async function lookupCompany(q: string): Promise<LookupResult> {
+  // A direct answer is final, including an empty one: the server queries the
+  // same provider with no extra sources of its own, so it can only agree or
+  // fail. Asking it anyway would add a doomed round-trip (up to the timeout)
+  // to every search that genuinely matches nothing — the slowest path for the
+  // least useful outcome.
   const direct = await lookupDirect(q);
-  if (direct && direct.length > 0) return { titles: direct, degraded: false };
+  if (direct) return { titles: direct, degraded: false };
 
   const viaServer = await lookupViaServer(q);
   if (viaServer) return { titles: viaServer, degraded: false };
-
-  // A direct call that succeeded but genuinely matched nothing is not a
-  // degradation — the company simply isn't there.
-  if (direct) return { titles: [], degraded: false };
   return { titles: [], degraded: true };
 }

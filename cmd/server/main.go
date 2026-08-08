@@ -318,7 +318,7 @@ func main() {
 		// mail provider's quota is itself a casualty of the kind of attack that
 		// triggers mass disabling).
 		supportSvc := support.New(saasDB, cfg.SaaS.SiteName, cfg.SaaS.SiteURL)
-		supportSvc.ConfigureInvoicing(cfg.SaaS.Invoice.TitleSuggestURL, cfg.SaaS.Invoice.TitleSuggestProxy, support.PaymentInfo{
+		supportSvc.ConfigureInvoicing(cfg.SaaS.Invoice.TitleSuggestURL, support.PaymentInfo{
 			AccountNo:   cfg.SaaS.Invoice.AccountNo,
 			AccountName: cfg.SaaS.Invoice.AccountName,
 			BankBranch:  cfg.SaaS.Invoice.BankBranch,
