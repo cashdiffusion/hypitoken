@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/codexerr"
 	"github.com/wjsoj/cc-core/codexws"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/usage"
@@ -360,11 +361,20 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 			if err != nil {
 				return
 			}
+			// out is what the client sees; data stays the upstream original so
+			// classification, usage extraction and terminal detection all read
+			// what upstream actually said.
+			out := data
 			if mt == codexws.TextMessage && len(data) > 0 {
 				if rid := codexResponseID(data); rid != "" {
 					s.codexRespAccount.Bind(group, rid, a.ID)
 				}
 				counts.Add(extractCodexBackendUsageFromJSON(data))
+				var shed, capacity bool
+				if out, shed, capacity = codexWSClientFrame(data); shed {
+					log.Warnf("codex ws: %s shed a turn (capacity=%t): %s",
+						a.ID, capacity, truncate(data, 200))
+				}
 				if codexTerminalEvent(data) {
 					counts.Requests++
 					if onTurn != nil {
@@ -376,7 +386,7 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 				}
 			}
 			_ = client.SetWriteDeadline(time.Now().Add(codexWSWriteDeadline))
-			if err := client.WriteMessage(gorillaws.TextMessage, data); err != nil {
+			if err := client.WriteMessage(gorillaws.TextMessage, out); err != nil {
 				return
 			}
 		}
@@ -429,6 +439,35 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 // -> SaaS Charge (group×provider multiplier) -> usage ledger -> request log. A
 // multi-turn WS connection accumulates one Requests increment per terminal
 // event, so counts already reflects every billed turn.
+// codexWSClientFrame decides what one upstream frame should look like by the
+// time it reaches the client, and reports whether upstream shed the turn.
+//
+// The WS relay was a pure passthrough, which is exactly what made this bite:
+// the ChatGPT backend sheds a turn as an in-band error frame inside an
+// otherwise-healthy socket, and codex-rs maps server_is_overloaded / slow_down
+// to ApiError::ServerOverloaded — TERMINAL for the session, surfacing as
+// "Selected model is at capacity. Please try a different model." The identical
+// failure under nearly any other code lands in its Retryable arm and is backed
+// off instead. There is no failover left to withhold the frame for (the socket
+// is established and the turn's earlier frames are committed), so the frame is
+// forwarded with only those two codes demoted — the same treatment the HTTP
+// path gives a shed it can no longer fail over. The message is untouched, so
+// the user still reads the real reason. Fatal frames (content policy, invalid
+// request, anything unrecognised) are forwarded verbatim.
+//
+// capacity separates the two halves of ClassRetryable. server_is_overloaded /
+// slow_down are a property of the model and the moment — the same request would
+// shed on any account — while quota and rate codes belong to the credential.
+// Quota codes are never demoted: the CLI handles them non-terminally, and the
+// original code is what carries the retry delay.
+func codexWSClientFrame(data []byte) (out []byte, shed, capacity bool) {
+	if codexerr.Classify(data) != codexerr.ClassRetryable {
+		return data, false, false
+	}
+	demoted, isCapacity := codexerr.DemoteCapacityCode(data)
+	return demoted, true, isCapacity
+}
+
 // codexTurnDelta returns the tokens consumed since the last settled turn —
 // cur (running session total) minus billed (total already settled) — tagged as
 // one request. Keeping this a pure function makes the "each turn bills only its
