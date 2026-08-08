@@ -1,10 +1,9 @@
-import { LifeBuoy, Loader2, MailCheck, ShieldQuestion } from "lucide-react";
+import { LifeBuoy, Loader2, ShieldQuestion } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { AppealKeyNotice, TicketStatusBadge, TicketThread } from "@/components/app/ticket-thread";
-import { OtpField } from "@/components/auth/otp-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,10 +66,8 @@ export default function AppealPage() {
   const { t } = useTranslation();
   const [params] = useSearchParams();
   const [email, setEmail] = useState(params.get("email") ?? "");
-  const [code, setCode] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
-  const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [freshKey, setFreshKey] = useState("");
@@ -88,27 +85,12 @@ export default function AppealPage() {
       });
   }, []);
 
-  const sendCode = async () => {
-    if (!email.trim() || busy) return;
-    setBusy(true);
-    try {
-      await post("/appeal/send-code", { email: email.trim() });
-      setSent(true);
-      toast.success(t("support.appeal.codeSent"));
-    } catch (e) {
-      toast.error(errMsg(e, t("support.errors.sendCode")));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const submit = async () => {
-    if (!email.trim() || code.length !== 6 || !body.trim() || busy) return;
+    if (!email.trim() || !body.trim() || busy) return;
     setBusy(true);
     try {
       const r = await post<{ ticket: Ticket }>("/appeal", {
         email: email.trim(),
-        code,
         subject: subject.trim(),
         body: body.trim(),
       });
@@ -155,7 +137,9 @@ export default function AppealPage() {
         <div className="rounded-2xl border border-border/60 bg-card/40 p-6">
           <TicketThread ticket={ticket} onReply={reply} replyAs="user" />
         </div>
-        <p className="text-center text-xs text-muted-foreground">{t("support.appeal.replyNote")}</p>
+        <p className="text-center text-xs text-muted-foreground">
+          {t("support.appeal.checkBackNote")}
+        </p>
       </div>
     );
   }
@@ -178,33 +162,16 @@ export default function AppealPage() {
       <div className="space-y-5 rounded-2xl border border-border/60 bg-card/40 p-6">
         <div className="space-y-2">
           <Label htmlFor="email">{t("common.email")}</Label>
-          <div className="flex gap-2">
-            <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-            />
-            <Button variant="outline" onClick={sendCode} disabled={!email.trim() || busy}>
-              {busy && !sent ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <MailCheck className="h-4 w-4" />
-              )}
-              {t("support.appeal.getCode")}
-            </Button>
-          </div>
+          <Input
+            id="email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            autoComplete="email"
+          />
           <p className="text-xs text-muted-foreground">{t("support.appeal.emailHint")}</p>
         </div>
-
-        {sent ? (
-          <div className="space-y-2">
-            <Label>{t("auth.register.code")}</Label>
-            <OtpField value={code} onChange={setCode} />
-          </div>
-        ) : null}
 
         <div className="space-y-2">
           <Label htmlFor="subject">{t("support.form.subject")}</Label>
@@ -233,7 +200,7 @@ export default function AppealPage() {
         <Button
           className="w-full"
           onClick={submit}
-          disabled={!email.trim() || code.length !== 6 || !body.trim() || busy}
+          disabled={!email.trim() || !body.trim() || busy}
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LifeBuoy className="h-4 w-4" />}
           {t("support.appeal.submit")}

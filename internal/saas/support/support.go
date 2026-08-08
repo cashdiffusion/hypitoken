@@ -60,25 +60,23 @@ var (
 	ErrClosed    = errors.New("ticket is closed")
 )
 
-// Mailer is the slice of internal/saas/mail this package needs. Same interface
-// the referral module uses, so *mail.ResendMailer satisfies it unchanged.
-type Mailer interface {
-	Send(to, subject, html, text string) error
-}
-
 // Service is the support desk. Construct with New and hold one instance; all
 // state lives in SQLite so it is safe for concurrent use.
+//
+// Note there is no mailer here. The desk is entirely in-app: a user submits and
+// reads replies on the page. That is a deliberate constraint rather than an
+// omission — see PublicRoutes for why an appeal channel must not depend on
+// outbound mail.
 type Service struct {
 	DB       *db.DB
-	Mailer   Mailer // may be nil — the in-app thread still works, only mail is skipped
 	SiteName string
 	SiteURL  string
 
 	codeRL *rateLimiter
 }
 
-func New(store *db.DB, mailer Mailer, siteName, siteURL string) *Service {
-	return &Service{DB: store, Mailer: mailer, SiteName: siteName, SiteURL: siteURL, codeRL: newRateLimiter()}
+func New(store *db.DB, siteName, siteURL string) *Service {
+	return &Service{DB: store, SiteName: siteName, SiteURL: siteURL, codeRL: newRateLimiter()}
 }
 
 // Ticket is one support thread.

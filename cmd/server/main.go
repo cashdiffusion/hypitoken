@@ -314,8 +314,10 @@ func main() {
 
 		// Support desk. Owns tickets from signed-in users AND the appeal channel
 		// for accounts the anti-abuse rules got wrong — which must work without a
-		// session, since a disabled account cannot authenticate at all.
-		supportSvc := support.New(saasDB, mailer, cfg.SaaS.SiteName, cfg.SaaS.SiteURL)
+		// session (a disabled account cannot authenticate) and without email (the
+		// mail provider's quota is itself a casualty of the kind of attack that
+		// triggers mass disabling).
+		supportSvc := support.New(saasDB, cfg.SaaS.SiteName, cfg.SaaS.SiteURL)
 
 		// Catalog used for pricing computation (same instance as the proxy's
 		// internal billing — the SaaS layer only adds the multiplier on top).

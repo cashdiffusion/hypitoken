@@ -2,6 +2,7 @@ package support
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -15,7 +16,7 @@ func newSvc(t *testing.T) *Service {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	return New(store, nil, "Test", "http://localhost:8317")
+	return New(store, "Test", "http://localhost:8317")
 }
 
 // TestAppealAccessKeyIsTheOnlyHandle covers the capability model for an appeal
@@ -138,26 +139,36 @@ func TestAdminQueueOrdering(t *testing.T) {
 	}
 }
 
-// TestRateLimiterWindows pins the appeal limiter: the send path is 1/60s per
-// email, and a rejected call must not extend its own penalty.
+// TestRateLimiterWindows pins the appeal limiter. With no OTP in front of the
+// endpoint this is the only guard it has, so both axes matter: 3/hour per
+// address, 20/day per IP for an attacker rotating addresses.
 func TestRateLimiterWindows(t *testing.T) {
 	l := newRateLimiter()
-	if ok, _ := l.allowSend("a@example.com", "1.2.3.4"); !ok {
-		t.Fatal("first send must pass")
+	for i := range 3 {
+		if ok, _ := l.allowSubmit("a@example.com", "1.2.3.4"); !ok {
+			t.Fatalf("submit %d must pass", i)
+		}
 	}
-	ok, retry := l.allowSend("a@example.com", "1.2.3.4")
+	ok, retry := l.allowSubmit("a@example.com", "1.2.3.4")
 	if ok {
-		t.Fatal("second send within 60s must be refused")
+		t.Fatal("fourth submit within the hour must be refused")
 	}
-	if retry <= 0 || retry > 60 {
+	if retry <= 0 || retry > 3600 {
 		t.Fatalf("retry-after out of range: %d", retry)
 	}
-	// A different address is unaffected by the first one's window.
-	if ok, _ := l.allowSend("b@example.com", "5.6.7.8"); !ok {
-		t.Fatal("unrelated email must pass")
+	// A different address from a different IP is unaffected.
+	if ok, _ := l.allowSubmit("b@example.com", "5.6.7.8"); !ok {
+		t.Fatal("unrelated submitter must pass")
 	}
-	// Submissions are counted separately from sends.
-	if ok, _ := l.allowSubmit("a@example.com", "1.2.3.4"); !ok {
-		t.Fatal("submit must not share the send window")
+	// Rotating the address does not escape the per-IP daily ceiling.
+	blocked := false
+	for i := range 30 {
+		if ok, _ := l.allowSubmit(fmt.Sprintf("burner%d@example.com", i), "9.9.9.9"); !ok {
+			blocked = true
+			break
+		}
+	}
+	if !blocked {
+		t.Fatal("address rotation must still hit the per-IP daily cap")
 	}
 }

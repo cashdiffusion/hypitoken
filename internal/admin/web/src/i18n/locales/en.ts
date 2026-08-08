@@ -736,9 +736,7 @@ export default {
     appeal: {
       title: "Account appeal",
       sub: "If your account was disabled by mistake, file an appeal here. We review these by hand and restore accounts we got wrong.",
-      getCode: "Send code",
-      codeSent: "Code sent — check your inbox.",
-      emailHint: "Use the email you registered with; we'll send a code to confirm it's you.",
+      emailHint: "Use the email you registered with so we can find your account.",
       subjectPlaceholder: "e.g. Account disabled by mistake",
       body: "Your appeal",
       bodyPlaceholder: "Tell us how you use the service and why you believe this was a mistake.",
@@ -748,7 +746,7 @@ export default {
       keyTitle: "Save this appeal reference",
       keyHint:
         "Your account can't sign in right now, so this is the only way back to this thread. We've saved a copy in this browser, but you'll need it on another device or after clearing your data.",
-      replyNote: "We'll email you when we reply.",
+      checkBackNote: "We reply on this page — check back here in the same browser.",
     },
     admin: {
       empty: "No tickets match this filter.",
@@ -771,7 +769,6 @@ export default {
       create: "Failed to submit",
       reply: "Failed to reply",
       status: "Failed to update status",
-      sendCode: "Failed to send code",
     },
   },
 

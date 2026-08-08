@@ -2,23 +2,15 @@ package support
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
-	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 )
-
-// appealCodeTTL bounds how long the emailed OTP stays valid. Longer than the
-// registration code's window: an appeal is usually written after the user has
-// already spent a while working out what happened to their account.
-const appealCodeTTL = 30 * time.Minute
 
 // appealKeyHeader carries the appeal access key. It is a bearer credential, so
 // it travels in a header rather than the query string: URLs end up in access
@@ -34,11 +26,18 @@ func appealKey(c *gin.Context) string {
 
 // PublicRoutes mounts the unauthenticated appeal channel on /api/v2. These are
 // the ONLY support endpoints a disabled account can reach — RequireUser rejects
-// them everywhere else — so they authenticate per-request with an emailed OTP
-// and, for reads, the access key handed out at submission.
+// them everywhere else.
+//
+// Submission is deliberately open: no session, no emailed code. Requiring one
+// would put the appeal channel behind the mail provider, and on the day this
+// shipped that provider's daily quota was already exhausted by the very attack
+// we were responding to — an appeal path that depends on email is a path that
+// fails exactly when it is needed. The trade is that the address on an appeal
+// is unverified, so it is a claim for an operator to weigh, not an identity.
+// Rate limiting is what keeps the endpoint from being a spam sink, and reads
+// still require the access key minted at submission.
 func (s *Service) PublicRoutes(g *gin.RouterGroup) {
 	a := g.Group("/appeal")
-	a.POST("/send-code", s.appealSendCode)
 	a.POST("", s.appealSubmit)
 	a.GET("/:id", s.appealGet)
 	a.POST("/:id/reply", s.appealReply)
@@ -64,53 +63,8 @@ func (s *Service) AdminRoutes(g *gin.RouterGroup) {
 
 // ---- public appeal channel ----
 
-type sendCodeReq struct {
-	Email string `json:"email"`
-}
-
-func (s *Service) appealSendCode(c *gin.Context) {
-	var req sendCodeReq
-	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
-		return
-	}
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-	if !validEmail(email) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid email"})
-		return
-	}
-	if ok, retry := s.codeRL.allowSend(email, c.ClientIP()); !ok {
-		c.Header("Retry-After", strconv.Itoa(retry))
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": "请求过于频繁，请稍后再试", "retry_after": retry})
-		return
-	}
-	code, err := db.GenerateNumericCode(6)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-		return
-	}
-	if err := s.DB.PutEmailCode(c.Request.Context(), email, code, db.PurposeAppeal, appealCodeTTL); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-		return
-	}
-	// Always answer "sent", whether or not the address has an account. An appeal
-	// form that reveals which emails are registered is a free account-enumeration
-	// oracle, and the ban-appeal page is precisely where an attacker would go
-	// looking to confirm which of their farm addresses we caught.
-	if s.Mailer != nil {
-		subject, html, text := appealCodeEmail(s.SiteName, code)
-		go func() {
-			if err := s.Mailer.Send(email, subject, html, text); err != nil {
-				log.Warnf("support: appeal code mail to %s failed: %v", email, err)
-			}
-		}()
-	}
-	c.JSON(http.StatusOK, gin.H{"sent": true})
-}
-
 type appealReq struct {
 	Email   string `json:"email"`
-	Code    string `json:"code"`
 	Subject string `json:"subject"`
 	Body    string `json:"body"`
 }
@@ -129,10 +83,6 @@ func (s *Service) appealSubmit(c *gin.Context) {
 	if ok, retry := s.codeRL.allowSubmit(email, c.ClientIP()); !ok {
 		c.Header("Retry-After", strconv.Itoa(retry))
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "提交过于频繁，请稍后再试", "retry_after": retry})
-		return
-	}
-	if err := s.DB.ConsumeEmailCode(c.Request.Context(), email, strings.TrimSpace(req.Code), db.PurposeAppeal); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码无效或已过期"})
 		return
 	}
 	// Link the appeal to the account when one exists, so the operator sees the
@@ -330,25 +280,13 @@ func (s *Service) adminReply(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
 	}
-	t, err := s.Get(c.Request.Context(), id)
-	if err != nil {
+	if _, err := s.Get(c.Request.Context(), id); err != nil {
 		respondErr(c, err)
 		return
 	}
 	if err := s.Reply(c.Request.Context(), id, AuthorAdmin, req.Body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
-	}
-	// Mail the reply out. A disabled user has no reason to keep checking a page
-	// they can't log into, so the notification is what actually closes the loop.
-	if s.Mailer != nil {
-		subject, html, text := replyEmail(s.SiteName, s.SiteURL, t, req.Body)
-		to := t.Email
-		go func() {
-			if err := s.Mailer.Send(to, subject, html, text); err != nil {
-				log.Warnf("support: reply mail to %s failed: %v", to, err)
-			}
-		}()
 	}
 	fresh, _ := s.Get(c.Request.Context(), id)
 	c.JSON(http.StatusOK, gin.H{"ticket": fresh})
@@ -419,34 +357,4 @@ func validEmail(s string) bool {
 	}
 	at := strings.IndexByte(s, '@')
 	return at > 0 && at < len(s)-1 && strings.IndexByte(s[at+1:], '@') < 0 && strings.Contains(s[at+1:], ".")
-}
-
-func appealCodeEmail(siteName, code string) (subject, html, text string) {
-	subject = fmt.Sprintf("%s 账号申诉验证码", siteName)
-	html = fmt.Sprintf(`<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#0f172a">
-<p style="font-size:15px;line-height:1.7;margin:0 0 20px">你正在提交 %s 的账号申诉。请在申诉页面填入以下验证码：</p>
-<p style="font-size:32px;font-weight:700;letter-spacing:.32em;margin:0 0 20px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">%s</p>
-<p style="font-size:13px;line-height:1.7;color:#64748b;margin:0">验证码 30 分钟内有效。如果这不是你本人的操作，忽略这封邮件即可，你的账号不会有任何变化。</p>
-</div>`, htmlEsc(siteName), htmlEsc(code))
-	text = fmt.Sprintf("你正在提交 %s 的账号申诉。验证码：%s（30 分钟内有效）。如果这不是你本人的操作，忽略这封邮件即可。", siteName, code)
-	return subject, html, text
-}
-
-func replyEmail(siteName, siteURL string, t *Ticket, body string) (subject, html, text string) {
-	subject = fmt.Sprintf("[%s] 工单 #%d 有新回复", siteName, t.ID)
-	link := fmt.Sprintf("%s/support", strings.TrimRight(siteURL, "/"))
-	html = fmt.Sprintf(`<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#0f172a">
-<p style="font-size:15px;line-height:1.7;margin:0 0 8px">你的工单 <strong>#%d · %s</strong> 收到了新回复：</p>
-<div style="border-left:3px solid #10b981;background:#f8fafc;padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.8;white-space:pre-wrap">%s</div>
-<p style="font-size:14px;line-height:1.7;margin:0 0 20px">你可以直接回复这封邮件所在的工单页面继续沟通：<br><a href="%s" style="color:#0f766e">%s</a></p>
-<p style="font-size:13px;color:#64748b;margin:0">— %s 支持团队</p>
-</div>`, t.ID, htmlEsc(t.Subject), htmlEsc(body), link, link, htmlEsc(siteName))
-	text = fmt.Sprintf("你的工单 #%d · %s 收到了新回复：\n\n%s\n\n查看并继续沟通：%s\n\n— %s 支持团队",
-		t.ID, t.Subject, body, link, siteName)
-	return subject, html, text
-}
-
-func htmlEsc(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;")
-	return r.Replace(s)
 }

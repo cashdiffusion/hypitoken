@@ -5,21 +5,21 @@ import (
 	"time"
 )
 
-// rateLimiter guards the two unauthenticated appeal endpoints: the OTP send and
-// the submission itself. Both are reachable with no session by design, which is
-// exactly what makes them worth abusing — the send path costs the operator SMTP
-// quota and can be pointed at someone else's inbox, and the submit path writes
-// rows.
+// rateLimiter guards the unauthenticated appeal endpoint. With the emailed OTP
+// gone, this is the ONLY thing standing between an open POST and a spam sink —
+// anyone can submit, under any address, with no proof of anything.
 //
 // Windows, per key:
 //
-//	send    email 1/60s + 5/hour, IP 10/hour
-//	submit  email 3/hour,         IP 10/hour
+//	submit  email 3/hour, IP 20/day
 //
-// Deliberately looser than the registration limiter on the email axis and
-// tighter on the IP axis: someone appealing a wrongful ban is likely to retry in
-// frustration, and locking them out of the only channel they have left would
-// defeat the purpose. In-memory, like auth's — single-process deployment.
+// The IP window is a hard daily ceiling rather than an hourly one: an attacker
+// rotating addresses is bounded by their IP, and 20 appeals a day from one
+// address is already far past what a person with a genuine grievance files.
+// The email window stays loose because someone appealing a wrongful ban will
+// legitimately retry, and locking them out of the only channel they have left
+// is the one failure mode worse than some spam. In-memory, like auth's —
+// single-process deployment.
 type rateLimiter struct {
 	mu     sync.Mutex
 	events map[string][]time.Time
@@ -34,18 +34,11 @@ type window struct {
 	d time.Duration
 }
 
-// allowSend gates the OTP mail. Returns (ok, retryAfterSeconds).
-func (l *rateLimiter) allowSend(email, ip string) (bool, int) {
-	return l.allow("send", email, ip,
-		[]window{{1, time.Minute}, {5, time.Hour}},
-		[]window{{10, time.Hour}})
-}
-
-// allowSubmit gates ticket creation.
+// allowSubmit gates ticket creation and replies. Returns (ok, retryAfterSeconds).
 func (l *rateLimiter) allowSubmit(email, ip string) (bool, int) {
 	return l.allow("submit", email, ip,
 		[]window{{3, time.Hour}},
-		[]window{{10, time.Hour}})
+		[]window{{20, 24 * time.Hour}})
 }
 
 func (l *rateLimiter) allow(scope, email, ip string, emailWins, ipWins []window) (bool, int) {

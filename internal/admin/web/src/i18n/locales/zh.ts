@@ -715,9 +715,7 @@ export default {
     appeal: {
       title: "账号申诉",
       sub: "如果你的账号被误判停用，请在这里提交申诉。我们会人工复核，确认无误后恢复账号。",
-      getCode: "获取验证码",
-      codeSent: "验证码已发送，请查收邮箱。",
-      emailHint: "请填写注册时使用的邮箱，我们会发送验证码确认是你本人。",
+      emailHint: "请填写你注册时使用的邮箱，方便我们定位到你的账号。",
       subjectPlaceholder: "例如：账号被误封，申请恢复",
       body: "申诉说明",
       bodyPlaceholder: "请说明你的使用场景，以及你认为这是误判的理由。",
@@ -727,7 +725,7 @@ export default {
       keyTitle: "请保存这个申诉编号",
       keyHint:
         "由于你的账号当前无法登录，这是你之后查看回复的唯一凭据。我们已在本机浏览器保存一份，但换设备或清理浏览器数据后就需要它了。",
-      replyNote: "我们回复后会发邮件通知你。",
+      checkBackNote: "我们处理后会在本页回复，请稍后用同一浏览器回来查看。",
     },
     admin: {
       empty: "没有符合条件的工单。",
@@ -750,7 +748,6 @@ export default {
       create: "提交失败",
       reply: "回复失败",
       status: "状态更新失败",
-      sendCode: "验证码发送失败",
     },
   },
 
