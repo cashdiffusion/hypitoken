@@ -194,12 +194,20 @@ func (s *Service) countConfirmedInvites(ctx context.Context, inviterID int64) in
 	return n
 }
 
-// countQualifiedInvites counts a user's non-fraud conversions whose inviter
-// reward has actually been released — the milestone-tier basis.
+// countQualifiedInvites counts a user's non-fraud conversions that actually PAID
+// the inviter — the milestone-tier basis.
+//
+// The inviter_bonus_usd > 0 term is load-bearing. inviter_paid means "nothing
+// further is owed", which is also true of a conversion we deliberately zeroed:
+// one past the daily velocity cap, or one that arrived after the daily budget
+// tripped. Counting those would hand the tier ladder back to exactly the farm
+// the cap just stopped — 20 capped invites would still climb to RESERVE and pay
+// $5, which is how a regression test caught this.
 func (s *Service) countQualifiedInvites(ctx context.Context, inviterID int64) int {
 	var n int
 	_ = s.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM referral_conversions WHERE inviter_user_id = ? AND fraud = 0 AND inviter_paid = 1`,
+		`SELECT COUNT(*) FROM referral_conversions
+		  WHERE inviter_user_id = ? AND fraud = 0 AND inviter_paid = 1 AND inviter_bonus_usd > 0`,
 		inviterID).Scan(&n)
 	return n
 }
