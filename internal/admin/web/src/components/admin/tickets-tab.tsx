@@ -1,4 +1,12 @@
-import { CheckCircle2, ChevronLeft, Inbox, ShieldQuestion, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronLeft,
+  Copy,
+  Inbox,
+  ReceiptText,
+  ShieldQuestion,
+  XCircle,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -20,6 +28,62 @@ const FILTERS: { value: string; labelKey: string }[] = [
   { value: "rejected", labelKey: "support.admin.filters.rejected" },
   { value: "", labelKey: "support.admin.filters.all" },
 ];
+
+type InvoiceMeta = {
+  kind?: string;
+  title?: { name?: string; tax_no?: string; address?: string; phone?: string };
+  amount_cny?: number;
+  note?: string;
+};
+
+/** InvoiceMetaPanel renders a 开票申请's structured 抬头. A transposed digit in an
+ *  18-character tax number produces an invoice the customer's finance team will
+ *  reject, so every value is copyable rather than retyped by eye. */
+function InvoiceMetaPanel({ raw }: { raw: string }) {
+  const { t } = useTranslation();
+  let meta: InvoiceMeta | null = null;
+  try {
+    meta = JSON.parse(raw) as InvoiceMeta;
+  } catch {
+    return null;
+  }
+  if (!meta?.title?.name) return null;
+  const rows: [string, string][] = [
+    [t("invoice.form.company"), meta.title.name],
+    [t("invoice.form.taxNo"), meta.title.tax_no ?? ""],
+  ];
+  if (meta.title.address) rows.push([t("invoice.admin.address"), meta.title.address]);
+  if (meta.title.phone) rows.push([t("invoice.admin.phone"), meta.title.phone]);
+  if (meta.amount_cny) rows.push([t("invoice.form.amount"), `￥${meta.amount_cny.toFixed(2)}`]);
+  if (meta.note) rows.push([t("invoice.form.note"), meta.note]);
+
+  return (
+    <div className="mb-5 rounded-xl border border-primary/20 bg-primary/5 p-4">
+      <div className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+        <ReceiptText className="h-4 w-4 text-primary" />
+        {t("invoice.admin.title")}
+      </div>
+      <div className="space-y-1">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-start justify-between gap-3 text-sm">
+            <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+            <div className="flex min-w-0 items-start gap-2">
+              <span className="text-right font-mono break-all">{value}</span>
+              <button
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(value)}
+                className="mt-0.5 shrink-0 text-muted-foreground transition hover:text-foreground"
+                aria-label={label}
+              >
+                <Copy className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function TicketsTab() {
   const { t } = useTranslation();
@@ -94,6 +158,9 @@ export function TicketsTab() {
                 {active.kind === "appeal" ? (
                   <ShieldQuestion className="h-4 w-4 shrink-0 text-amber-500" />
                 ) : null}
+                {active.kind === "invoice" ? (
+                  <ReceiptText className="h-4 w-4 shrink-0 text-primary" />
+                ) : null}
                 <span className="truncate text-base font-medium">{active.subject}</span>
               </div>
               <div className="mt-0.5 text-xs text-muted-foreground">
@@ -115,6 +182,7 @@ export function TicketsTab() {
               </Button>
             </div>
           </div>
+          {active.kind === "invoice" && active.meta ? <InvoiceMetaPanel raw={active.meta} /> : null}
           <TicketThread ticket={active} onReply={reply} replyAs="admin" />
         </div>
       </div>
@@ -170,6 +238,9 @@ export function TicketsTab() {
                 <div className="flex items-center gap-2">
                   {tk.kind === "appeal" ? (
                     <ShieldQuestion className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                  ) : null}
+                  {tk.kind === "invoice" ? (
+                    <ReceiptText className="h-3.5 w-3.5 shrink-0 text-primary" />
                   ) : null}
                   <span className="truncate text-sm font-medium">{tk.subject}</span>
                 </div>

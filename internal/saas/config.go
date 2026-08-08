@@ -62,6 +62,11 @@ type Config struct {
 	// bonus from a device/network that already registered.
 	SignupFraud SignupFraudConfig `yaml:"signup_fraud"`
 
+	// Invoice configures the 开票 flow: where company-name lookups go and which
+	// 对公 account customers transfer to. Both have working built-in defaults —
+	// set these only to override.
+	Invoice InvoiceConfig `yaml:"invoice"`
+
 	// SMTP outbound mail. If Host is empty, mailer logs to stderr and
 	// (in dev) prints verification codes inline.
 	SMTP SMTPConfig `yaml:"smtp"`
@@ -117,6 +122,19 @@ type SMTPConfig struct {
 	Password string `yaml:"password"`
 	From     string `yaml:"from"`
 	UseTLS   bool   `yaml:"use_tls"`
+}
+
+// InvoiceConfig overrides the 开票 defaults. Empty fields keep the built-in
+// value, so a partial block is safe.
+type InvoiceConfig struct {
+	// TitleSuggestURL is the company-name suggest endpoint proxied for the
+	// 抬头 picker. Defaults to 天眼查's public one.
+	TitleSuggestURL string `yaml:"title_suggest_url,omitempty"`
+	// The 对公转账 destination shown after an invoice request is filed.
+	AccountNo   string `yaml:"account_no,omitempty"`
+	AccountName string `yaml:"account_name,omitempty"`
+	BankBranch  string `yaml:"bank_branch,omitempty"`
+	BankCode    string `yaml:"bank_code,omitempty"`
 }
 
 // SignupFraudConfig tunes the welcome-bonus anti-abuse check (internal/saas/

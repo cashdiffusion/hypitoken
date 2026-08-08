@@ -533,6 +533,11 @@ export default {
   },
 
   billing: {
+    invoiceNotice: {
+      title: "Need an invoice?",
+      body: "Online payments can't be invoiced. Request an invoice and we'll give you our bank-transfer details instead.",
+      action: "Request an invoice →",
+    },
     title: "Billing",
     sub: "Top up your USD wallet.",
     currentBalance: "Current balance",
@@ -704,6 +709,40 @@ export default {
       cacheHitHint: "Cache reads ÷ total input tokens",
       daily: "Daily breakdown",
       colDate: "Date",
+    },
+  },
+
+  invoice: {
+    form: {
+      title: "Request an invoice",
+      sub: "Give us the invoice title and we'll open a ticket to confirm the details with you.",
+      company: "Invoice title",
+      companyPlaceholder: "Type a company name to search",
+      taxNo: "Tax ID (统一社会信用代码)",
+      taxNoHint: "Filled in automatically when you pick a company; editable.",
+      taxNoInvalid: "A tax ID is 15–20 uppercase letters and digits.",
+      amount: "Amount (CNY, optional)",
+      note: "Note (optional)",
+      notePlaceholder: "Project name, billing contact, anything else we should know.",
+      submit: "Open ticket",
+    },
+    paid: {
+      title: "Pay by bank transfer",
+      sub: "Ticket #{{id}} is open. Transfer to the account below; we'll confirm receipt and issue the invoice in that ticket.",
+      accountName: "Account name",
+      accountNo: "Account number",
+      bankBranch: "Bank branch",
+      bankCode: "Bank code",
+      note: "Please put your account email in the transfer memo so we can match the payment. Receipt and invoice progress are posted to the ticket — check the Support page any time.",
+      done: "Got it",
+    },
+    admin: {
+      title: "Invoice details",
+      address: "Address",
+      phone: "Phone",
+    },
+    errors: {
+      submit: "Could not submit — please try again",
     },
   },
 

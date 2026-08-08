@@ -1,8 +1,9 @@
-import { CheckCircle2, Loader2, RefreshCw, TrendingUp, Wallet } from "lucide-react";
+import { CheckCircle2, Loader2, ReceiptText, RefreshCw, TrendingUp, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { InvoiceDialog } from "@/components/app/invoice-dialog";
 import { CountUp, GlassPanel, PageHeader } from "@/components/app/page-primitives";
 import { Pager } from "@/components/app/pager";
 import { preloadStripe, StripeTopUp } from "@/components/app/stripe-topup";
@@ -67,6 +68,7 @@ export default function BillingPage() {
   // separate from the paginated table so paging doesn't change the cards.
   const [statsTx, setStatsTx] = useState<WalletTx[]>([]);
   const [open, setOpen] = useState(false);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
   // Post-redirect settlement modal — Stripe Alipay/WeChat bounce back to
   // ?out=<order>; we poll it to paid and show the success animation.
   const [settleOut, setSettleOut] = useState<string | null>(null);
@@ -395,7 +397,10 @@ export default function BillingPage() {
           await reload();
           await refresh();
         }}
+        onInvoice={() => setInvoiceOpen(true)}
       />
+
+      <InvoiceDialog open={invoiceOpen} onOpenChange={setInvoiceOpen} />
 
       {/* Post-redirect settlement: confirming spinner → paid animation. */}
       <Dialog
@@ -458,10 +463,13 @@ function TopUpDialog({
   open,
   onOpenChange,
   onPaid,
+  onInvoice,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onPaid: () => void;
+  /** Close this dialog and open the invoice-request flow instead. */
+  onInvoice: () => void;
 }) {
   const { t } = useTranslation();
   const [usd, setUsd] = useState("10");
@@ -592,6 +600,26 @@ function TopUpDialog({
                 {providers && !stripeEnabled && (
                   <p className="text-sm text-destructive">{t("billing.stripe.unavailable")}</p>
                 )}
+                {/* Anyone who needs a 发票 has to pay by 对公转账 instead — say so
+                    here, before they pay by card and find out afterwards. */}
+                <div className="rounded-md border border-primary/20 bg-primary/5 p-3 text-xs leading-relaxed">
+                  <div className="mb-1 flex items-center gap-1.5 font-medium">
+                    <ReceiptText className="h-3.5 w-3.5 text-primary" />
+                    {t("billing.invoiceNotice.title")}
+                  </div>
+                  <p className="text-muted-foreground">{t("billing.invoiceNotice.body")}</p>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto px-0 py-1 text-xs"
+                    onClick={() => {
+                      close();
+                      onInvoice();
+                    }}
+                  >
+                    {t("billing.invoiceNotice.action")}
+                  </Button>
+                </div>
               </div>
             </div>
             <DialogFooter>

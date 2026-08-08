@@ -27,6 +27,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 const (
 	KindSupport = "support" // ordinary question from a signed-in user
 	KindAppeal  = "appeal"  // "my account was disabled" — may have no session
+	// KindInvoice is declared in invoice.go alongside the rest of that flow.
 )
 
 // Ticket statuses. open/pending are both live; the two terminal states are kept
@@ -73,10 +75,24 @@ type Service struct {
 	SiteURL  string
 
 	codeRL *rateLimiter
+
+	// Invoicing (invoice.go). titleSuggestURL and payment default to the
+	// built-ins; ConfigureInvoicing overrides them from operator config.
+	titleSuggestURL string
+	payment         PaymentInfo
+	httpClient      *http.Client
 }
 
 func New(store *db.DB, siteName, siteURL string) *Service {
-	return &Service{DB: store, SiteName: siteName, SiteURL: siteURL, codeRL: newRateLimiter()}
+	return &Service{
+		DB: store, SiteName: siteName, SiteURL: siteURL,
+		codeRL:          newRateLimiter(),
+		titleSuggestURL: defaultTitleSuggestURL,
+		payment:         defaultPaymentInfo(),
+		// A short client bounds the company lookup: it sits in front of a
+		// customer typing, and a hung upstream must not hold the request.
+		httpClient: &http.Client{Timeout: 6 * time.Second},
+	}
 }
 
 // Ticket is one support thread.
@@ -94,6 +110,10 @@ type Ticket struct {
 	// appeal — it is the submitter's sole handle on the thread afterwards. It is
 	// never included in list responses or in the operator view.
 	AccessKey string `json:"access_key,omitempty"`
+	// Meta is an opaque JSON blob owned by whatever created the ticket — the
+	// invoice flow puts the 抬头 in here so the operator panel can render it as
+	// fields to copy rather than prose to re-read. Empty for plain tickets.
+	Meta string `json:"meta,omitempty"`
 	// Messages is populated on single-ticket reads.
 	Messages []Message `json:"messages,omitempty"`
 }
@@ -106,12 +126,12 @@ type Message struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-const ticketCols = `id, user_id, email, kind, subject, status, last_actor, created_at, updated_at`
+const ticketCols = `id, user_id, email, kind, subject, status, last_actor, meta, created_at, updated_at`
 
 func scanTicket(row interface{ Scan(...any) error }) (*Ticket, error) {
 	var t Ticket
 	var created, updated int64
-	if err := row.Scan(&t.ID, &t.UserID, &t.Email, &t.Kind, &t.Subject, &t.Status, &t.LastActor, &created, &updated); err != nil {
+	if err := row.Scan(&t.ID, &t.UserID, &t.Email, &t.Kind, &t.Subject, &t.Status, &t.LastActor, &t.Meta, &created, &updated); err != nil {
 		return nil, err
 	}
 	t.CreatedAt = time.Unix(created, 0)
@@ -119,12 +139,14 @@ func scanTicket(row interface{ Scan(...any) error }) (*Ticket, error) {
 	return &t, nil
 }
 
-// normalizeKind constrains the kind to the two we understand.
+// normalizeKind constrains the kind to the ones we understand.
 func normalizeKind(k string) string {
-	if k == KindAppeal {
-		return KindAppeal
+	switch k {
+	case KindAppeal, KindInvoice:
+		return k
+	default:
+		return KindSupport
 	}
-	return KindSupport
 }
 
 // clip trims and bounds free text. Subjects and bodies land in the operator
@@ -154,6 +176,11 @@ func newAccessKey() (string, error) {
 // anonymous appeal, in which case an access key is minted and returned on the
 // ticket; the caller must surface it to the submitter exactly once.
 func (s *Service) Create(ctx context.Context, userID int64, email, kind, subject, body string) (*Ticket, error) {
+	return s.CreateWithMeta(ctx, userID, email, kind, subject, body, "")
+}
+
+// CreateWithMeta is Create plus an opaque JSON payload for the operator UI.
+func (s *Service) CreateWithMeta(ctx context.Context, userID int64, email, kind, subject, body, meta string) (*Ticket, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	kind = normalizeKind(kind)
 	subject = clip(subject, 200)
@@ -180,9 +207,9 @@ func (s *Service) Create(ctx context.Context, userID int64, email, kind, subject
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx, `INSERT INTO support_tickets
-		(user_id, email, kind, subject, status, access_key, last_actor, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		userID, email, kind, subject, StatusOpen, key, AuthorUser, now, now)
+		(user_id, email, kind, subject, status, access_key, last_actor, meta, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		userID, email, kind, subject, StatusOpen, key, AuthorUser, meta, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -204,10 +231,14 @@ func (s *Service) Create(ctx context.Context, userID int64, email, kind, subject
 }
 
 func defaultSubject(kind string) string {
-	if kind == KindAppeal {
+	switch kind {
+	case KindAppeal:
 		return "账号申诉"
+	case KindInvoice:
+		return "开票申请"
+	default:
+		return "咨询"
 	}
-	return "咨询"
 }
 
 // Get loads one ticket with its full thread.

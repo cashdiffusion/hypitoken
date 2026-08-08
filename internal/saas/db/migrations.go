@@ -745,6 +745,23 @@ CREATE TABLE ticket_messages (
 );
 CREATE INDEX idx_ticket_messages_ticket ON ticket_messages(ticket_id, created_at);
 `,
+
+	// v19 — structured payload on a ticket, for the invoice flow.
+	//
+	// A 开票申请 carries an 抬头 an operator has to transcribe onto a real 发票:
+	// company name, 统一社会信用代码, sometimes address / bank details. Left as
+	// prose in the message body, that is a copy-by-eye job where a single
+	// transposed digit in an 18-character tax number produces an invoice the
+	// customer's finance department will reject.
+	//
+	// meta holds it as JSON so the operator panel can render discrete
+	// copy-to-clipboard fields. Deliberately opaque to the support package —
+	// whatever creates a ticket owns the shape, and today only the invoice flow
+	// writes it. The body still restates everything in prose, so a plain-text
+	// read of the thread (export, DB dump) loses nothing.
+	`
+ALTER TABLE support_tickets ADD COLUMN meta TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // backfillTokenAttributionSQL recovers token_id / model from the legacy free-text

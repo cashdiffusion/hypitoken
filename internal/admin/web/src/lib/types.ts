@@ -536,7 +536,7 @@ export interface ReferralOpsStats {
 
 // ---- support desk ----
 
-export type TicketKind = "support" | "appeal";
+export type TicketKind = "support" | "appeal" | "invoice";
 export type TicketStatus = "open" | "pending" | "resolved" | "rejected";
 
 export interface TicketMessage {
@@ -558,6 +558,9 @@ export interface Ticket {
   updated_at: string;
   /** Returned exactly once, when an appeal is filed without a session. */
   access_key?: string;
+  /** Opaque JSON owned by whatever created the ticket; the invoice flow puts
+   *  the 抬头 here so the operator panel can render copyable fields. */
+  meta?: string;
   messages?: TicketMessage[];
 }
 
@@ -568,4 +571,23 @@ export interface TicketList {
   offset: number;
   /** Operator queue only: how many tickets are awaiting a first reply. */
   open?: number;
+}
+
+// ---- invoicing ----
+
+export interface InvoiceTitle {
+  name: string;
+  tax_no: string;
+  address?: string;
+  phone?: string;
+  bank?: string;
+  bank_account?: string;
+}
+
+/** The 对公转账 destination, served from config so it can change without a rebuild. */
+export interface InvoicePaymentInfo {
+  account_no: string;
+  account_name: string;
+  bank_branch: string;
+  bank_code: string;
 }

@@ -718,6 +718,7 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	// Support desk for signed-in users.
 	if supportH != nil {
 		supportH.UserRoutes(authed)
+		supportH.InvoiceRoutes(authed)
 	}
 
 	// Workspace (enterprise space) team management. Invite accept is open to any

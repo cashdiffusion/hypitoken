@@ -514,6 +514,11 @@ export default {
   },
 
   billing: {
+    invoiceNotice: {
+      title: "需要开发票？",
+      body: "线上支付暂不支持开票。如需发票，请提交工单选择发票抬头，我们会提供对公转账账户。",
+      action: "申请开具发票 →",
+    },
     title: "账单",
     sub: "充值你的 USD 钱包。",
     currentBalance: "当前余额",
@@ -683,6 +688,40 @@ export default {
       cacheHitHint: "缓存读取占输入总量比例",
       daily: "每日明细",
       colDate: "日期",
+    },
+  },
+
+  invoice: {
+    form: {
+      title: "申请开具发票",
+      sub: "填写发票抬头后提交工单，我们会在工单中与你确认并开票。",
+      company: "发票抬头",
+      companyPlaceholder: "输入公司名称，自动匹配",
+      taxNo: "税号（统一社会信用代码）",
+      taxNoHint: "选择公司后会自动填入，也可手动修改。",
+      taxNoInvalid: "税号应为 15–20 位的大写字母与数字。",
+      amount: "开票金额（￥，可选）",
+      note: "备注（可选）",
+      notePlaceholder: "如需注明项目名称、收件邮箱等，请填写在这里。",
+      submit: "提交工单",
+    },
+    paid: {
+      title: "请通过对公转账付款",
+      sub: "工单 #{{id}} 已创建。请使用以下账户完成对公转账，到账后我们会在工单中通知你并开具发票。",
+      accountName: "账户名称",
+      accountNo: "账号",
+      bankBranch: "归属网点",
+      bankCode: "归属行行号",
+      note: "转账时请在备注中注明你的账号邮箱，方便我们对账。到账与开票进度都会在工单中同步，你可以在「工单」页面随时查看。",
+      done: "我知道了",
+    },
+    admin: {
+      title: "开票信息",
+      address: "地址",
+      phone: "电话",
+    },
+    errors: {
+      submit: "提交失败，请稍后重试",
     },
   },
 
