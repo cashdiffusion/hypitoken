@@ -533,3 +533,39 @@ export interface ReferralOpsStats {
   daily_budget_usd: number;
   budget_tripped: boolean;
 }
+
+// ---- support desk ----
+
+export type TicketKind = "support" | "appeal";
+export type TicketStatus = "open" | "pending" | "resolved" | "rejected";
+
+export interface TicketMessage {
+  id: number;
+  author: "user" | "admin";
+  body: string;
+  created_at: string;
+}
+
+export interface Ticket {
+  id: number;
+  user_id: number;
+  email: string;
+  kind: TicketKind;
+  subject: string;
+  status: TicketStatus;
+  last_actor: "user" | "admin";
+  created_at: string;
+  updated_at: string;
+  /** Returned exactly once, when an appeal is filed without a session. */
+  access_key?: string;
+  messages?: TicketMessage[];
+}
+
+export interface TicketList {
+  tickets: Ticket[];
+  total: number;
+  limit: number;
+  offset: number;
+  /** Operator queue only: how many tickets are awaiting a first reply. */
+  open?: number;
+}

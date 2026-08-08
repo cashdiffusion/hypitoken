@@ -33,6 +33,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/mail"
 	saasprofile "github.com/wjsoj/CPA-Claude/internal/saas/profile"
 	"github.com/wjsoj/CPA-Claude/internal/saas/referral"
+	"github.com/wjsoj/CPA-Claude/internal/saas/support"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	saasworkspace "github.com/wjsoj/CPA-Claude/internal/saas/workspace"
 	"github.com/wjsoj/CPA-Claude/internal/server"
@@ -311,6 +312,11 @@ func main() {
 		authH.GiftClaimer = referralSvc
 		workspaceH := saasworkspace.New(saasDB, mailer, cfg.SaaS.SiteURL, cfg.SaaS.SiteName)
 
+		// Support desk. Owns tickets from signed-in users AND the appeal channel
+		// for accounts the anti-abuse rules got wrong — which must work without a
+		// session, since a disabled account cannot authenticate at all.
+		supportSvc := support.New(saasDB, mailer, cfg.SaaS.SiteName, cfg.SaaS.SiteURL)
+
 		// Catalog used for pricing computation (same instance as the proxy's
 		// internal billing — the SaaS layer only adds the multiplier on top).
 		catalog := pricing.NewCatalog(cfg.Pricing)
@@ -347,7 +353,7 @@ func main() {
 			return true, claims.Role == "admin"
 		}
 		for _, h := range s.GinEngines() {
-			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH, referralSvc, workspaceH)
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH, referralSvc, workspaceH, supportSvc)
 			if spaFS != nil {
 				saasadapter.MountSPA(h, spaFS)
 			}

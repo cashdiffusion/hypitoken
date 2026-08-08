@@ -4,6 +4,7 @@ import {
   Gift,
   KeyRound,
   LayoutDashboard,
+  LifeBuoy,
   LogOut,
   Receipt,
   Shield,
@@ -37,6 +38,7 @@ const NAV_ITEMS = [
   { to: "/app/usage", labelKey: "nav.usage", icon: ChartColumnBig },
   { to: "/app/logs", labelKey: "nav.logs", icon: Receipt },
   { to: "/app/console", labelKey: "nav.console", icon: Terminal },
+  { to: "/app/support", labelKey: "nav.support", icon: LifeBuoy },
 ];
 
 // SideNavLink — a sidebar row that, when active, renders a shared glass pill

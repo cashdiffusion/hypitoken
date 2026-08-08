@@ -3,6 +3,7 @@ import {
   Gift,
   KeyRound,
   LayoutDashboard,
+  LifeBuoy,
   Megaphone,
   ScrollText,
   Shield,
@@ -21,6 +22,7 @@ import { CredentialsTab } from "@/components/admin/credentials/credentials-tab";
 import { OverviewPanel } from "@/components/admin/overview-panel";
 import { ReferralTab } from "@/components/admin/referral-tab";
 import { RequestsExplorer } from "@/components/admin/requests-explorer";
+import { TicketsTab } from "@/components/admin/tickets-tab";
 import { WorkspacesTab } from "@/components/admin/workspaces-tab";
 import { GlassPanel, PageHeader } from "@/components/app/page-primitives";
 import { Pager } from "@/components/app/pager";
@@ -57,6 +59,7 @@ const TABS = [
   { to: "payments", labelKey: "admin.tabs.payments", icon: ShoppingCart },
   { to: "growth", labelKey: "admin.tabs.growth", icon: Megaphone },
   { to: "referral", labelKey: "admin.tabs.referral", icon: Gift },
+  { to: "tickets", labelKey: "admin.tabs.tickets", icon: LifeBuoy },
 ];
 
 export default function AdminPage() {
@@ -96,6 +99,7 @@ export default function AdminPage() {
         <Route path="payments" element={<PaymentsTab />} />
         <Route path="growth" element={<AttributionTab />} />
         <Route path="referral" element={<ReferralTab />} />
+        <Route path="tickets" element={<TicketsTab />} />
       </Routes>
     </div>
   );

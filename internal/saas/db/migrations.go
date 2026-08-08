@@ -701,6 +701,50 @@ UPDATE signup_devices
 
 CREATE INDEX idx_signup_devices_domain ON signup_devices(email_domain, created_at);
 `,
+
+	// v18 — support tickets, and with them an appeal channel for disabled
+	// accounts.
+	//
+	// The anti-abuse rules above withhold money on probabilistic evidence, and
+	// the enforcement they feed (disabling an account) is something a real
+	// customer can land in by accident: a shared campus /24, a browser that
+	// blocked the fingerprint script, a corporate mail domain that three
+	// colleagues signed up from the same week. Every one of those users must
+	// have a way to reach a human, and the ones who need it most are exactly the
+	// ones who can no longer log in — RequireUser 403s a disabled account before
+	// any authenticated route runs.
+	//
+	// Hence user_id = 0 is legal here: an appeal is keyed on the email address
+	// alone, proven by an emailed OTP, and read back with access_key (a
+	// capability the submitter holds, so no session is needed). A ticket from a
+	// signed-in user carries their user_id and needs no key.
+	`
+CREATE TABLE support_tickets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL DEFAULT 0,        -- 0 = anonymous appeal, identified by email
+    email       TEXT    NOT NULL,
+    kind        TEXT    NOT NULL DEFAULT 'support', -- support | appeal
+    subject     TEXT    NOT NULL DEFAULT '',
+    status      TEXT    NOT NULL DEFAULT 'open',    -- open | pending | resolved | rejected
+    access_key  TEXT    NOT NULL DEFAULT '',        -- read capability for anonymous appeals
+    last_actor  TEXT    NOT NULL DEFAULT 'user',    -- who spoke last: user | admin
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+CREATE INDEX idx_support_tickets_email  ON support_tickets(email, created_at DESC);
+CREATE INDEX idx_support_tickets_user   ON support_tickets(user_id, created_at DESC);
+CREATE INDEX idx_support_tickets_status ON support_tickets(status, updated_at DESC);
+
+CREATE TABLE ticket_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id  INTEGER NOT NULL,
+    author     TEXT    NOT NULL DEFAULT 'user',     -- user | admin
+    body       TEXT    NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_ticket_messages_ticket ON ticket_messages(ticket_id, created_at);
+`,
 }
 
 // backfillTokenAttributionSQL recovers token_id / model from the legacy free-text

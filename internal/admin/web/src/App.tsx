@@ -15,6 +15,7 @@ import HomePage from "@/routes/home";
 // one 2.78 MB chunk that every first-time visitor downloaded and parsed before
 // the hero could paint. Keep HomePage eager — it *is* the first paint.
 const AdminPage = lazy(() => import("@/routes/admin"));
+const AppealPage = lazy(() => import("@/routes/appeal"));
 const BillingPage = lazy(() => import("@/routes/billing"));
 const ConsolePage = lazy(() => import("@/routes/console"));
 const DashboardPage = lazy(() => import("@/routes/dashboard"));
@@ -30,6 +31,7 @@ const PricingPage = lazy(() => import("@/routes/pricing"));
 const PrivacyPage = lazy(() => import("@/routes/privacy"));
 const RegisterPage = lazy(() => import("@/routes/register"));
 const StatusPage = lazy(() => import("@/routes/status"));
+const SupportPage = lazy(() => import("@/routes/support"));
 const TermsPage = lazy(() => import("@/routes/terms"));
 const TokensPage = lazy(() => import("@/routes/tokens"));
 const UsagePage = lazy(() => import("@/routes/usage"));
@@ -62,6 +64,9 @@ export default function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              {/* Appeal is reachable with no session — it is the only channel a
+                  disabled account has left, so it must not sit behind RequireAuth. */}
+              <Route path="/appeal" element={<AppealPage />} />
               <Route path="/join/:token" element={<JoinPage />} />
 
               {/* marketing pages — share one persistent PublicLayout header so the
@@ -93,6 +98,7 @@ export default function App() {
                 <Route path="logs" element={<LogsPage />} />
                 <Route path="usage" element={<UsagePage />} />
                 <Route path="console" element={<ConsolePage />} />
+                <Route path="support" element={<SupportPage />} />
                 <Route
                   path="admin/*"
                   element={

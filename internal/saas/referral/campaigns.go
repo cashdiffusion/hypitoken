@@ -14,36 +14,36 @@ var ErrNotFound = errors.New("not found")
 // gift expiry, caps, and A/B copy all live here so the behaviour is tunable from
 // the admin panel without a code change.
 type Campaign struct {
-	ID                 int64     `json:"id"`
-	Slug               string    `json:"slug"`
-	Name               string    `json:"name"`
-	Kind               string    `json:"kind"`   // invite | gift | both
-	Status             string    `json:"status"` // active | paused | ended
-	InviteeBonusUSD    float64   `json:"invitee_bonus_usd"`
-	InviterBonusUSD    float64   `json:"inviter_bonus_usd"`
-	InviterRewardOn    string    `json:"inviter_reward_on"` // signup | first_spend
-	GiftExpiryDays     int       `json:"gift_expiry_days"`
-	MaxGiftUSD         float64   `json:"max_gift_usd"`
-	MaxRewardedInvites int       `json:"max_rewarded_invites"` // 0 = unlimited
-	DailyBudgetUSD     float64   `json:"daily_budget_usd"`     // circuit breaker; 0 = unlimited
+	ID                 int64   `json:"id"`
+	Slug               string  `json:"slug"`
+	Name               string  `json:"name"`
+	Kind               string  `json:"kind"`   // invite | gift | both
+	Status             string  `json:"status"` // active | paused | ended
+	InviteeBonusUSD    float64 `json:"invitee_bonus_usd"`
+	InviterBonusUSD    float64 `json:"inviter_bonus_usd"`
+	InviterRewardOn    string  `json:"inviter_reward_on"` // signup | first_spend
+	GiftExpiryDays     int     `json:"gift_expiry_days"`
+	MaxGiftUSD         float64 `json:"max_gift_usd"`
+	MaxRewardedInvites int     `json:"max_rewarded_invites"` // 0 = unlimited
+	DailyBudgetUSD     float64 `json:"daily_budget_usd"`     // circuit breaker; 0 = unlimited
 	// MinInviteeSpendUSD is how much the invitee must actually burn before a
 	// deferred (reward_on=first_spend) inviter reward is released. Without it
 	// "first spend" is satisfied by a $0.000005 charge, which is no barrier at
 	// all to someone farming invites. 0 = any spend releases.
-	MinInviteeSpendUSD float64   `json:"min_invitee_spend_usd"`
+	MinInviteeSpendUSD float64 `json:"min_invitee_spend_usd"`
 	// DailyInviteCap bounds how many confirmed invites one inviter can be paid
 	// for in a rolling 24h. Past it the conversion is still attributed (the
 	// invitee keeps their bonus) but the inviter earns nothing, so a farm's
 	// yield per identity is capped even when no per-signup rule fires.
 	// 0 = unlimited.
-	DailyInviteCap     int       `json:"daily_invite_cap"`
-	StartsAt           int64     `json:"starts_at"`
-	EndsAt             int64     `json:"ends_at"`
-	Headline           string    `json:"headline"`
-	Subcopy            string    `json:"subcopy"`
-	VariantB           string    `json:"variant_b"` // JSON {headline,subcopy}, optional
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	DailyInviteCap int       `json:"daily_invite_cap"`
+	StartsAt       int64     `json:"starts_at"`
+	EndsAt         int64     `json:"ends_at"`
+	Headline       string    `json:"headline"`
+	Subcopy        string    `json:"subcopy"`
+	VariantB       string    `json:"variant_b"` // JSON {headline,subcopy}, optional
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // Tier is one milestone rung: reaching `threshold` confirmed invites unlocks the
