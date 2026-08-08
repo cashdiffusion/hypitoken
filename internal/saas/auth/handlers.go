@@ -28,7 +28,7 @@ type ReferralGranter interface {
 	// subnet as a prior user); when true NO bonus is paid and the caller skips
 	// the trial credit too. fp is the client browser-fingerprint hash and ip the
 	// client IP, used for the anti-abuse check; both may be empty.
-	GrantSignupBonus(ctx context.Context, userID int64, ref, vid, fp, ip string) (bonusUSD float64, channel string, matched, fraud bool, err error)
+	GrantSignupBonus(ctx context.Context, userID int64, ref, vid, fp, ip, email string) (bonusUSD float64, channel string, matched, fraud bool, err error)
 }
 
 // GiftClaimer is the optional referral-module seam for delivering escrowed
@@ -168,7 +168,7 @@ func (h *Handler) register(c *gin.Context) {
 	fraud := false
 	if h.Referral != nil {
 		bonus, channel, matched, isFraud, gerr := h.Referral.GrantSignupBonus(
-			c.Request.Context(), u.ID, req.Ref, req.Vid, req.Fp, c.ClientIP())
+			c.Request.Context(), u.ID, req.Ref, req.Vid, req.Fp, c.ClientIP(), req.Email)
 		fraud = isFraud
 		if gerr != nil {
 			log.Warnf("register: signup bonus for user %d (ref=%q) failed: %v", u.ID, req.Ref, gerr)

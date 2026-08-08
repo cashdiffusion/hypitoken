@@ -68,6 +68,16 @@ func (s *Service) ConfigureFraud(cfg FraudConfig) {
 	} else {
 		s.fraud.Window = def.Window
 	}
+	if cfg.EmailDomainThreshold > 0 {
+		s.fraud.EmailDomainThreshold = cfg.EmailDomainThreshold
+	} else {
+		s.fraud.EmailDomainThreshold = def.EmailDomainThreshold
+	}
+	// RequireFingerprint has no "unset" sentinel of its own — main.go resolves
+	// the operator's *bool (absent → default true) before calling us, exactly as
+	// it already does for Enabled.
+	s.fraud.RequireFingerprint = cfg.RequireFingerprint
+	s.fraud.DisposableDomains = cfg.DisposableDomains
 }
 
 // slugRe constrains channel slugs to URL-safe, lowercase tokens so a ?ref=

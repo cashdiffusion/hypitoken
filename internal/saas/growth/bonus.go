@@ -32,14 +32,14 @@ import (
 // accurate; it just pays out 0. A nil Service or an empty/unknown ref grant
 // nothing and let the caller fall back to the trial credit. Errors are returned
 // for the caller to log but must NOT block signup.
-func (s *Service) GrantSignupBonus(ctx context.Context, userID int64, ref, vid, fp, ip string) (bonusUSD float64, channel string, matched, fraud bool, err error) {
+func (s *Service) GrantSignupBonus(ctx context.Context, userID int64, ref, vid, fp, ip, email string) (bonusUSD float64, channel string, matched, fraud bool, err error) {
 	if s == nil {
 		return 0, "", false, false, nil
 	}
 	// Anti-abuse first: record the device and decide whether this signup is a
 	// suspected repeat. A device-record error is non-fatal — it's surfaced via
 	// `err` but never blocks the signup, and on error we treat it as clean.
-	fraud, _, err = s.RecordSignupDevice(ctx, userID, fp, ip)
+	fraud, _, err = s.RecordSignupDevice(ctx, userID, fp, ip, email)
 
 	slug := NormalizeSlug(ref)
 	if slug == "" {

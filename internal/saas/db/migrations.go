@@ -644,6 +644,63 @@ CREATE INDEX IF NOT EXISTS idx_wallet_tx_kind_id ON wallet_tx(kind, id DESC);
 -- non-covering path. ANALYZE is cheap here and runs once per migration.
 ANALYZE;
 `,
+
+	// v17 — close the invite-farming hole exploited on 2026-08-08.
+	//
+	// That day 168 accounts registered (baseline 1–6) from five throwaway mail
+	// domains. The per-signup anti-abuse (v6) flagged 107 of them and withheld
+	// the $1 trial, exactly as designed — but the money never left through the
+	// trial. It left through invite referral: three "farmer" accounts collected
+	// $78 of two-sided invite bonus plus $16 of milestone tiers, because
+	//
+	//   * 93 of the 168 signups carried NO browser fingerprint at all (they hit
+	//     /api/v2/auth/register directly, so ThumbmarkJS never ran) — the
+	//     fingerprint rule cannot match what was never sent;
+	//   * every signup came through Cloudflare WARP, one distinct /24 per
+	//     account, so the ip_subnet rule never reached its threshold either; and
+	//   * inviter_reward_on='signup' paid the inviter the instant the invitee's
+	//     row existed, with no spend of any kind required.
+	//
+	// The schema half of the fix (the rules themselves live in
+	// internal/saas/growth/fraud.go and internal/saas/referral/grant.go):
+	//
+	//   * min_invitee_spend_usd — the inviter reward is now released only after
+	//     the invitee has actually burned this much. Combined with flipping
+	//     inviter_reward_on to 'first_spend', farming an invite costs real
+	//     upstream money instead of being free. NOTE the existing release path
+	//     fired on ANY charge, and charges here go down to $0.000005, so the
+	//     threshold is what gives 'first_spend' teeth.
+	//   * daily_invite_cap — per-inviter velocity. One account converted 20
+	//     invitees in a single day, none of which any rule flagged. Beyond this
+	//     many confirmed invites in 24h the conversion is still attributed but
+	//     pays nothing, which bounds a farm's yield per identity instead of
+	//     trying to detect each signup individually.
+	//   * daily_budget_usd 50 — the v12 circuit breaker shipped defaulting to 0
+	//     (unlimited), which is why $116 paid out with nothing braking it.
+	//   * email_domain on signup_devices — the signal that actually separates
+	//     this attack from organic traffic (26 signups on one .web.id domain),
+	//     recorded per signup so the burst rule has history to match against.
+	//
+	// Backfilled from users.email for existing rows so the domain rule has depth
+	// on day one rather than starting blind.
+	`
+ALTER TABLE referral_campaigns ADD COLUMN min_invitee_spend_usd REAL NOT NULL DEFAULT 0.25;
+ALTER TABLE referral_campaigns ADD COLUMN daily_invite_cap INTEGER NOT NULL DEFAULT 5;
+
+UPDATE referral_campaigns SET inviter_reward_on = 'first_spend' WHERE inviter_reward_on = 'signup';
+UPDATE referral_campaigns SET daily_budget_usd = 50 WHERE daily_budget_usd <= 0;
+
+ALTER TABLE signup_devices ADD COLUMN email_domain TEXT NOT NULL DEFAULT '';
+
+UPDATE signup_devices
+   SET email_domain = lower(substr(
+           (SELECT u.email FROM users u WHERE u.id = signup_devices.user_id),
+           instr((SELECT u.email FROM users u WHERE u.id = signup_devices.user_id), '@') + 1))
+ WHERE email_domain = ''
+   AND instr(COALESCE((SELECT u.email FROM users u WHERE u.id = signup_devices.user_id), ''), '@') > 0;
+
+CREATE INDEX idx_signup_devices_domain ON signup_devices(email_domain, created_at);
+`,
 }
 
 // backfillTokenAttributionSQL recovers token_id / model from the legacy free-text

@@ -272,10 +272,17 @@ func main() {
 		if cfg.SaaS.SignupFraud.Enabled != nil {
 			fraudEnabled = *cfg.SaaS.SignupFraud.Enabled
 		}
+		requireFP := true
+		if cfg.SaaS.SignupFraud.RequireFingerprint != nil {
+			requireFP = *cfg.SaaS.SignupFraud.RequireFingerprint
+		}
 		growthSvc.ConfigureFraud(growth.FraudConfig{
-			Enabled:         fraudEnabled,
-			SubnetThreshold: cfg.SaaS.SignupFraud.IPSubnetThreshold,
-			Window:          time.Duration(cfg.SaaS.SignupFraud.WindowHours) * time.Hour,
+			Enabled:              fraudEnabled,
+			SubnetThreshold:      cfg.SaaS.SignupFraud.IPSubnetThreshold,
+			Window:               time.Duration(cfg.SaaS.SignupFraud.WindowHours) * time.Hour,
+			RequireFingerprint:   requireFP,
+			EmailDomainThreshold: cfg.SaaS.SignupFraud.EmailDomainThreshold,
+			DisposableDomains:    cfg.SaaS.SignupFraud.DisposableDomains,
 		})
 		// authH.Referral is set below to the referral service, which composes
 		// growthSvc (personal invite codes first, then admin marketing channels).

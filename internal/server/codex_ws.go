@@ -168,7 +168,15 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	}
 	_ = clientConn.SetReadDeadline(time.Time{})
 
-	model := codexWSExtractModel(firstFrame)
+	// routingModel/routingTier feed the upstream x-codex-routing-hint and must
+	// stay the values the client actually asked for — in particular they must
+	// NOT inherit the "unknown" placeholder below, which exists only so billing
+	// and log rows have something to group on. A hint naming a model that does
+	// not exist is worse than no hint at all.
+	routingModel := codexWSExtractModel(firstFrame)
+	routingTier := codexWSExtractServiceTier(firstFrame)
+
+	model := routingModel
 	if model == "" {
 		model = "unknown"
 	}
@@ -211,7 +219,7 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 		snap := cand.Snapshot()
 		accessToken, _ := cand.Credentials()
 		accountID, _ := cand.CodexIdentity()
-		header := codexws.BuildUpstreamHeaders(accessToken, accountID, slotID, betaValue)
+		header := codexws.BuildUpstreamHeaders(accessToken, accountID, slotID, betaValue, routingModel, routingTier)
 		conn, resp, derr := codexws.Dial(c.Request.Context(), codexws.DialConfig{
 			URL:       wsURL,
 			Header:    header,
@@ -520,6 +528,25 @@ func codexWSExtractModel(frame []byte) string {
 		return probe.Model
 	}
 	return probe.Response.Model
+}
+
+// codexWSExtractServiceTier best-effort reads service_tier from the first
+// client frame, in the same two shapes as codexWSExtractModel. Feeds the
+// routing hint only; an absent tier simply omits the ";tier=" segment.
+func codexWSExtractServiceTier(frame []byte) string {
+	var probe struct {
+		ServiceTier string `json:"service_tier"`
+		Response    struct {
+			ServiceTier string `json:"service_tier"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(frame, &probe) != nil {
+		return ""
+	}
+	if probe.ServiceTier != "" {
+		return probe.ServiceTier
+	}
+	return probe.Response.ServiceTier
 }
 
 // codexResponseID extracts response.id from a Codex backend event payload.

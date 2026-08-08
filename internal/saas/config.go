@@ -128,6 +128,17 @@ type SignupFraudConfig struct {
 	Enabled           *bool `yaml:"enabled"`             // default true
 	IPSubnetThreshold int   `yaml:"ip_subnet_threshold"` // default 3
 	WindowHours       int   `yaml:"window_hours"`        // default 720 (30 days)
+	// RequireFingerprint withholds the bonus from a signup carrying no browser
+	// fingerprint at all — the shape of a scripted registration that never
+	// loaded the page. Default true. Set false only if a legitimate integration
+	// registers users server-side.
+	RequireFingerprint *bool `yaml:"require_fingerprint"`
+	// EmailDomainThreshold flags a burst of signups sharing one non-mainstream
+	// email domain within the window. Default 3.
+	EmailDomainThreshold int `yaml:"email_domain_threshold"`
+	// DisposableDomains extends the built-in throwaway-mailbox blocklist. Exact
+	// domains, or a leading "." for a suffix match (".example.tld").
+	DisposableDomains []string `yaml:"disposable_domains"`
 }
 
 // ZPayConfig configures the Z-Pay aggregator gateway. Key is sensitive

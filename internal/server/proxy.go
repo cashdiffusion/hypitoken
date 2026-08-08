@@ -131,23 +131,13 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		}
 	}
 
-	// Fail fast when the route can't be served by any available credential.
-	// OAuth Codex credentials only speak /v1/responses — they can't serve
-	// /v1/chat/completions, and without this check the forward loop would
-	// cycle every OAuth cred (each returning retry=true), then surface a
-	// misleading 503 "all upstream credentials exhausted". If no API-key
-	// credential of this provider can serve the requested model, tell the
-	// client directly what's wrong.
-	if auth.NormalizeProvider(provider) == auth.ProviderOpenAI && path == "/v1/chat/completions" && !s.pool.HasAPIKeyFor(provider, clientGroup, model) {
-		msg := fmt.Sprintf("model %q is only available via /v1/responses on this server (no OpenAI-compatible API-key credential is configured for it); retry with the /v1/responses endpoint", model)
-		writeAPIError(c, provider, APIError{Status: http.StatusBadRequest, Code: "unsupported_endpoint", Message: msg})
-		s.emitLog(requestlog.Record{
-			Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider, Model: model,
-			Stream: peek.Stream, Path: path, Status: 400,
-			DurationMs: time.Since(start).Milliseconds(), Error: "route unsupported for available credentials",
-		})
-		return
-	}
+	// There used to be a fail-fast here that rejected /v1/chat/completions
+	// outright when no API-key credential could serve the model, because OAuth
+	// Codex credentials only spoke /v1/responses. That is no longer true:
+	// codex_chat_bridge.go translates the route onto the backend's
+	// /codex/responses, so an OAuth credential is a legitimate candidate and
+	// the normal failover loop (OAuth → model-unsupported rollback → API key)
+	// resolves the route correctly.
 
 	// Rate limit (RPM) per client token. Sliding 60s window; scoped
 	// per-provider to match the inflight budget so Claude and Codex don't
