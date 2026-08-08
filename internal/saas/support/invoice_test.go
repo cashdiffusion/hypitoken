@@ -172,7 +172,7 @@ func TestPaymentInfoOverride(t *testing.T) {
 	if svc.payment.AccountNo != "15000593710093" {
 		t.Fatalf("default account: got %q", svc.payment.AccountNo)
 	}
-	svc.ConfigureInvoicing("", PaymentInfo{AccountName: "新主体"})
+	svc.ConfigureInvoicing("", "", PaymentInfo{AccountName: "新主体"})
 	if svc.payment.AccountName != "新主体" {
 		t.Fatalf("override ignored: %q", svc.payment.AccountName)
 	}
@@ -181,5 +181,29 @@ func TestPaymentInfoOverride(t *testing.T) {
 	}
 	if svc.titleSuggestURL != defaultTitleSuggestURL {
 		t.Fatalf("empty suggest URL should keep the default, got %q", svc.titleSuggestURL)
+	}
+}
+
+// TestConfigureInvoicingProxy: the default provider blocks offshore IPs, so an
+// egress proxy is the difference between a working picker and a dead one in
+// production. A malformed value must not take the client down with it.
+func TestConfigureInvoicingProxy(t *testing.T) {
+	svc := newSvc(t)
+	direct := svc.httpClient
+
+	svc.ConfigureInvoicing("", "socks5://127.0.0.1:1080", PaymentInfo{})
+	if svc.httpClient == direct {
+		t.Fatal("proxy config did not replace the http client")
+	}
+	if svc.httpClient.Transport == nil {
+		t.Fatal("proxied client has no transport")
+	}
+
+	// An unparseable proxy leaves the previous client in place rather than
+	// nil-ing it out — a bad config line must degrade the lookup, not panic it.
+	prev := svc.httpClient
+	svc.ConfigureInvoicing("", "://nonsense", PaymentInfo{})
+	if svc.httpClient != prev {
+		t.Fatal("a malformed proxy must leave the working client alone")
 	}
 }

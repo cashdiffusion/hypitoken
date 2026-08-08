@@ -697,6 +697,7 @@ export default {
       sub: "填写发票抬头后提交工单，我们会在工单中与你确认并开票。",
       company: "发票抬头",
       companyPlaceholder: "输入公司名称，自动匹配",
+      lookupUnavailable: "自动查询暂不可用，请手动填写抬头与税号。",
       taxNo: "税号（统一社会信用代码）",
       taxNoHint: "选择公司后会自动填入，也可手动修改。",
       taxNoInvalid: "税号应为 15–20 位的大写字母与数字。",

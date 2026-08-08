@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -55,9 +56,26 @@ func defaultPaymentInfo() PaymentInfo {
 
 // ConfigureInvoicing overrides the invoice defaults from operator config. Empty
 // fields keep their built-in value, so a partial config block is safe.
-func (s *Service) ConfigureInvoicing(suggestURL string, pay PaymentInfo) {
+//
+// proxyURL matters more than it looks: the default lookup provider refuses
+// requests by geography ({"errorCode":301000,"message":"bannedLocation"}), and
+// this service runs offshore — so out of the box the lookup is dead in
+// production even though it works from a mainland dev machine. Point this at a
+// mainland egress (http:// or socks5://) to bring it back. Left empty, the
+// picker degrades to manual entry, which is why nothing here is fatal.
+func (s *Service) ConfigureInvoicing(suggestURL, proxyURL string, pay PaymentInfo) {
 	if strings.TrimSpace(suggestURL) != "" {
 		s.titleSuggestURL = suggestURL
+	}
+	if p := strings.TrimSpace(proxyURL); p != "" {
+		if u, err := url.Parse(p); err == nil {
+			s.httpClient = &http.Client{
+				Timeout:   6 * time.Second,
+				Transport: &http.Transport{Proxy: http.ProxyURL(u)},
+			}
+		} else {
+			log.Warnf("invoice: ignoring unparseable title_suggest_proxy %q: %v", p, err)
+		}
 	}
 	if pay.AccountNo != "" {
 		s.payment.AccountNo = pay.AccountNo
@@ -123,7 +141,7 @@ func (s *Service) titleSuggest(c *gin.Context) {
 	if err != nil {
 		// Never an error to the client: the form stays usable by hand, and a
 		// lookup outage must not stop someone from requesting an invoice.
-		log.Debugf("invoice: title-suggest failed for %q: %v", q, err)
+		log.Warnf("invoice: title-suggest failed for %q: %v", q, err)
 		c.JSON(http.StatusOK, gin.H{"titles": out, "degraded": true})
 		return
 	}

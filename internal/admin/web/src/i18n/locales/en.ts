@@ -718,6 +718,7 @@ export default {
       sub: "Give us the invoice title and we'll open a ticket to confirm the details with you.",
       company: "Invoice title",
       companyPlaceholder: "Type a company name to search",
+      lookupUnavailable: "Lookup is unavailable right now — enter the title and tax ID by hand.",
       taxNo: "Tax ID (统一社会信用代码)",
       taxNoHint: "Filled in automatically when you pick a company; editable.",
       taxNoInvalid: "A tax ID is 15–20 uppercase letters and digits.",

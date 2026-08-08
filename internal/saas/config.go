@@ -130,6 +130,11 @@ type InvoiceConfig struct {
 	// TitleSuggestURL is the company-name suggest endpoint proxied for the
 	// 抬头 picker. Defaults to 天眼查's public one.
 	TitleSuggestURL string `yaml:"title_suggest_url,omitempty"`
+	// TitleSuggestProxy routes the lookup through an egress proxy (http:// or
+	// socks5://). The default provider blocks by geography, so an offshore
+	// deployment needs a mainland egress here or the picker degrades to manual
+	// entry. Empty = direct.
+	TitleSuggestProxy string `yaml:"title_suggest_proxy,omitempty"`
 	// The 对公转账 destination shown after an invoice request is filed.
 	AccountNo   string `yaml:"account_no,omitempty"`
 	AccountName string `yaml:"account_name,omitempty"`

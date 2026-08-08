@@ -69,6 +69,7 @@ export function InvoiceDialog({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<InvoiceTitle[]>([]);
   const [searching, setSearching] = useState(false);
+  const [degraded, setDegraded] = useState(false);
   const [picked, setPicked] = useState(false);
   const [taxNo, setTaxNo] = useState("");
   const [amount, setAmount] = useState("");
@@ -80,6 +81,7 @@ export function InvoiceDialog({
   const reset = useCallback(() => {
     setQuery("");
     setResults([]);
+    setDegraded(false);
     setPicked(false);
     setTaxNo("");
     setAmount("");
@@ -99,13 +101,18 @@ export function InvoiceDialog({
     debounce.current = setTimeout(async () => {
       setSearching(true);
       try {
-        const r = await apiGet<{ titles: InvoiceTitle[] }>(
+        const r = await apiGet<{ titles: InvoiceTitle[]; degraded?: boolean }>(
           `/invoice/title-suggest?q=${encodeURIComponent(query.trim())}`,
         );
         setResults(r.titles ?? []);
+        // The provider blocks by geography and rate-limits by IP, so an empty
+        // list can mean "unavailable" rather than "no such company". Say which,
+        // or the user retypes the name wondering why nothing matches.
+        setDegraded(Boolean(r.degraded));
       } catch {
         // Lookup is a convenience; typing the 抬头 by hand still works.
         setResults([]);
+        setDegraded(true);
       } finally {
         setSearching(false);
       }
@@ -205,6 +212,11 @@ export function InvoiceDialog({
                     <Loader2 className="absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
                   ) : null}
                 </div>
+                {degraded && !picked ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t("invoice.form.lookupUnavailable")}
+                  </p>
+                ) : null}
                 {results.length > 0 ? (
                   <div className="max-h-52 overflow-y-auto rounded-lg border border-border/60 bg-card/60">
                     {results.map((r) => (
