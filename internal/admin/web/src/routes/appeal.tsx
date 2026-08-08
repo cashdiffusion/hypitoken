@@ -17,10 +17,16 @@ import { errMsg } from "@/lib/utils";
 // client. These call fetch directly.
 const BASE = "/api/v2";
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+// The access key is a bearer credential, so it rides a header — never the
+// query string, which would leak it into access logs and the Referer.
+const KEY_HEADER = "X-Appeal-Key";
+
+async function post<T>(path: string, body: unknown, key?: string): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (key) headers[KEY_HEADER] = key;
   const res = await fetch(BASE + path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => null);
@@ -34,8 +40,8 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return data as T;
 }
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(BASE + path);
+async function get<T>(path: string, key?: string): Promise<T> {
+  const res = await fetch(BASE + path, { headers: key ? { [KEY_HEADER]: key } : {} });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return data as T;
@@ -69,20 +75,18 @@ export default function AppealPage() {
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [freshKey, setFreshKey] = useState("");
 
-  // Re-open an existing appeal from a previous visit (or from a link carrying
-  // ?id=&key=, which is what the notification email can point at).
+  // Re-open an existing appeal from a previous visit. Deliberately NOT from a
+  // ?key= link: the key is a bearer credential and a URL is the one place it
+  // must never be, so localStorage is the only restore path.
   useEffect(() => {
-    const linked =
-      params.get("id") && params.get("key")
-        ? { id: Number(params.get("id")), key: params.get("key") as string }
-        : loadSaved();
-    if (!linked?.id || !linked.key) return;
-    void get<{ ticket: Ticket }>(`/appeal/${linked.id}?key=${encodeURIComponent(linked.key)}`)
+    const saved = loadSaved();
+    if (!saved?.id || !saved.key) return;
+    void get<{ ticket: Ticket }>(`/appeal/${saved.id}`, saved.key)
       .then((r) => setTicket(r.ticket))
       .catch(() => {
         /* stale key — fall through to the blank form */
       });
-  }, [params]);
+  }, []);
 
   const sendCode = async () => {
     if (!email.trim() || busy) return;
@@ -127,10 +131,7 @@ export default function AppealPage() {
     const saved = loadSaved();
     const key = freshKey || saved?.key || "";
     try {
-      const r = await post<{ ticket: Ticket }>(
-        `/appeal/${ticket.id}/reply?key=${encodeURIComponent(key)}`,
-        { body: text },
-      );
+      const r = await post<{ ticket: Ticket }>(`/appeal/${ticket.id}/reply`, { body: text }, key);
       setTicket(r.ticket);
     } catch (e) {
       toast.error(errMsg(e, t("support.errors.reply")));

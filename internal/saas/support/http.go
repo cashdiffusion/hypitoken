@@ -20,6 +20,18 @@ import (
 // already spent a while working out what happened to their account.
 const appealCodeTTL = 30 * time.Minute
 
+// appealKeyHeader carries the appeal access key. It is a bearer credential, so
+// it travels in a header rather than the query string: URLs end up in access
+// logs, proxy logs, and the Referer sent to any third-party asset the page
+// loads, and this key is the ONLY thing standing between a stranger and a
+// user's appeal thread.
+const appealKeyHeader = "X-Appeal-Key" //nolint:gosec // G101 false positive — a header name, not a credential.
+
+// appealKey reads the caller's access key.
+func appealKey(c *gin.Context) string {
+	return strings.TrimSpace(c.GetHeader(appealKeyHeader))
+}
+
 // PublicRoutes mounts the unauthenticated appeal channel on /api/v2. These are
 // the ONLY support endpoints a disabled account can reach — RequireUser rejects
 // them everywhere else — so they authenticate per-request with an emailed OTP
@@ -154,7 +166,7 @@ func (s *Service) appealGet(c *gin.Context) {
 	if !ok {
 		return
 	}
-	t, err := s.GetForKey(c.Request.Context(), id, c.Query("key"))
+	t, err := s.GetForKey(c.Request.Context(), id, appealKey(c))
 	if err != nil {
 		respondErr(c, err)
 		return
@@ -176,7 +188,7 @@ func (s *Service) appealReply(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
 	}
-	t, err := s.GetForKey(c.Request.Context(), id, c.Query("key"))
+	t, err := s.GetForKey(c.Request.Context(), id, appealKey(c))
 	if err != nil {
 		respondErr(c, err)
 		return
