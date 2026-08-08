@@ -254,14 +254,17 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		// is surfaced in the request log instead of looking like a clean stream
 		// end, on both paths.
 		writeResponseHeaders(c, resp)
-		relay := func() (bool, error) { return streamSSECodexBackend(c, resp, &counts) }
+		// Branching here rather than through a relay closure is deliberate:
+		// capturing resp in a closure makes bodyclose lose track of the
+		// unconditional Close after this switch and report a false leak.
+		var sawTerminal bool
+		var rerr error
 		if isChat {
-			wantsUsage := chatStreamWantsUsage(body)
-			relay = func() (bool, error) {
-				return streamCodexAsChatCompletions(c, resp, &counts, model, wantsUsage)
-			}
+			sawTerminal, rerr = streamCodexAsChatCompletions(c, resp, &counts, model, chatStreamWantsUsage(body))
+		} else {
+			sawTerminal, rerr = streamSSECodexBackend(c, resp, &counts)
 		}
-		if sawTerminal, rerr := relay(); !sawTerminal {
+		if !sawTerminal {
 			// A stream that ends without a terminal event is only an upstream
 			// fault when the upstream is what went away. The far more common
 			// cause is the client hanging up mid-turn — Codex CLI aborts the

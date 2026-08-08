@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +36,7 @@ func TestStreamCodexAsChatCompletions(t *testing.T) {
 
 	var counts usage.Counts
 	sawTerminal, err := streamCodexAsChatCompletions(c, resp, &counts, "gpt-5.6-sol", false)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		t.Fatalf("relay error: %v", err)
 	}
 	if !sawTerminal {
