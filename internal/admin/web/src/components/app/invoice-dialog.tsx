@@ -14,7 +14,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiPost } from "@/lib/api";
+import { lookupCompany } from "@/lib/company-lookup";
 import type { InvoicePaymentInfo, InvoiceTitle, Ticket } from "@/lib/types";
 import { cn, errMsg } from "@/lib/utils";
 
@@ -101,14 +102,15 @@ export function InvoiceDialog({
     debounce.current = setTimeout(async () => {
       setSearching(true);
       try {
-        const r = await apiGet<{ titles: InvoiceTitle[]; degraded?: boolean }>(
-          `/invoice/title-suggest?q=${encodeURIComponent(query.trim())}`,
-        );
-        setResults(r.titles ?? []);
-        // The provider blocks by geography and rate-limits by IP, so an empty
-        // list can mean "unavailable" rather than "no such company". Say which,
-        // or the user retypes the name wondering why nothing matches.
-        setDegraded(Boolean(r.degraded));
+        // Browser first, server as fallback — the provider geo-blocks our
+        // offshore servers but not our (mostly mainland) customers. See
+        // lib/company-lookup.
+        const r = await lookupCompany(query.trim());
+        setResults(r.titles);
+        // An empty list can mean "unavailable" rather than "no such company",
+        // so say which — otherwise the user retypes the name wondering why
+        // nothing matches.
+        setDegraded(r.degraded);
       } catch {
         // Lookup is a convenience; typing the 抬头 by hand still works.
         setResults([]);
