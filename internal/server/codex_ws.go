@@ -134,7 +134,11 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	// slots this token does not already hold, so an established session is never
 	// torn down. Checked before the upgrade, while an HTTP status can still be
 	// returned.
-	if maxSess := s.cfg.ClientMaxSessions; maxSess > 0 && clientToken != "" {
+	// A trusted relay is exempt: the cap counts slots to stop ONE user hoarding
+	// the fleet, but a relay's slots belong to many users — capping it would
+	// refuse the very fan-out the relay headers exist to enable. Its aggregate
+	// pressure is still bounded by the RPM and concurrency limits on its token.
+	if maxSess := s.cfg.ClientMaxSessions; maxSess > 0 && clientToken != "" && !relayIsTrusted(c) {
 		if held, already := s.pool.SessionsHeld(provider, clientToken, slotID); !already && held >= maxSess {
 			log.Warnf("codex ws: token %s at its session cap (%d held, max %d) — refusing a new session",
 				maskClientToken(clientToken), held, maxSess)

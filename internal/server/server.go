@@ -34,13 +34,16 @@ type endpoint struct {
 }
 
 type Server struct {
-	cfg       *config.Config
-	pool      *auth.Pool
-	usage     *usage.Store
-	pricing   *pricing.Catalog
-	tokens    *clienttoken.Store
-	reqLog    *requestlog.Writer
-	endpoints []*endpoint
+	cfg     *config.Config
+	pool    *auth.Pool
+	usage   *usage.Store
+	pricing *pricing.Catalog
+	tokens  *clienttoken.Store
+	// trustedRelays are client tokens belonging to a proxy we also run, whose
+	// relay headers may be believed for routing. Resolved once from config.
+	trustedRelays trustedRelaySet
+	reqLog        *requestlog.Writer
+	endpoints     []*endpoint
 	// inflight is keyed by (provider | clientToken): Claude and Codex are
 	// treated as independent budgets for the same user so a client running
 	// Claude at cap doesn't block its Codex calls (and vice-versa). Matches
@@ -94,6 +97,9 @@ func New(cfg *config.Config, pool *auth.Pool, store *usage.Store, reqLog *reques
 	gin.SetMode(gin.ReleaseMode)
 	cat := pricing.NewCatalog(cfg.Pricing)
 	s := &Server{cfg: cfg, pool: pool, usage: store, pricing: cat, tokens: tokens, reqLog: reqLog}
+	if s.trustedRelays = newTrustedRelaySet(cfg.TrustedRelayTokens); len(s.trustedRelays) > 0 {
+		log.Infof("relay: trusting %d client token(s) to declare their downstream callers", len(s.trustedRelays))
+	}
 	s.codexRespAccount = newCodexRespAccountStore(codexRespAccountTTL)
 	s.sidecar = ccsidecar.New(ccsidecar.Config{
 		Enabled: true,
@@ -361,6 +367,7 @@ func (s *Server) clientAuth() gin.HandlerFunc {
 				c.Set("client_token", tok)
 				c.Set("client_name", info.Name)
 				c.Set("saas_info", info)
+				c.Set(relayTrustedKey, s.trustedRelays.Has(tok))
 				c.Next()
 				return
 			}
@@ -379,6 +386,9 @@ func (s *Server) clientAuth() gin.HandlerFunc {
 			}
 			c.Set("client_token", tok)
 			c.Set("client_name", entry.Name)
+			// Either opt-in designates a relay: the operator's config list, or
+			// the token's own trusted_relay flag in the legacy store.
+			c.Set(relayTrustedKey, entry.TrustedRelay || s.trustedRelays.Has(tok))
 			c.Next()
 			return
 		}

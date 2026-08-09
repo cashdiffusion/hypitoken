@@ -19,6 +19,7 @@ import (
 	"github.com/wjsoj/cc-core/advisor"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/mimicry"
+	"github.com/wjsoj/cc-core/relay"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/sidecar"
 	ccstream "github.com/wjsoj/cc-core/stream"
@@ -365,6 +366,13 @@ func (s *Server) emitLog(r requestlog.Record) {
 // different credentials. Returns "" when the client supplies neither (raw API
 // callers) — the pool then keeps one slot per client token.
 func clientSlotID(c *gin.Context) string {
+	// A trusted relay speaks for the caller behind it. Its declaration wins over
+	// the session headers on the wire, which describe the relay's own hop rather
+	// than the user — without this every user behind one relay token shares a
+	// slot and therefore a single upstream credential.
+	if id, ok := relayIdentity(c); ok {
+		return id.SlotID()
+	}
 	if v := strings.TrimSpace(c.GetHeader("X-Claude-Code-Session-Id")); v != "" {
 		return v
 	}
@@ -1424,6 +1432,10 @@ func stripAnthropicOAuthBeta(h http.Header) {
 // behind CF — seeing those headers triggers CF's loop-prevention WAF and
 // returns 403 HTML. Prefix match so future CF additions are covered.
 func stripIngressHeaders(h http.Header) {
+	// Relay identity is for us to act on, not to propagate: forwarding it would
+	// hand an upstream vendor the shape of our client base, and would let an
+	// untrusted caller's forged header reach a peer that does trust us.
+	relay.Strip(h)
 	for k := range h {
 		lower := strings.ToLower(k)
 		if strings.HasPrefix(lower, "cf-") || strings.HasPrefix(lower, "cdn-") ||

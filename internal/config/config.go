@@ -131,6 +131,25 @@ type Config struct {
 	// session already holding one keeps working.
 	ClientMaxSessions int `yaml:"client_max_sessions"`
 
+	// TrustedRelayTokens are client tokens belonging to a proxy we also run —
+	// today CPA-Claude, which can route here through a single API key. Traffic
+	// on such a token carries cc-core/relay headers naming the DOWNSTREAM
+	// caller; for a token listed here (and ONLY for one listed here) those
+	// headers are believed and become the scheduler slot, so the relay's users
+	// spread across credentials instead of all pinning to one.
+	//
+	// This is routing only: RPM, concurrency, quota and billing stay keyed on
+	// the relay's own token, because the relay is one paying customer however
+	// many users sit behind it — and because a limit keyed on a self-asserted
+	// header is a limit anyone can evade by inventing a new value. The one
+	// exception is client_max_sessions, which counts slots and would otherwise
+	// refuse the very fan-out this enables; a trusted relay is exempt from it.
+	//
+	// Entries may be a raw token or "sha256:<hex>" so a config file need not
+	// hold the secret in the clear. Empty (the default) trusts nobody, and the
+	// headers are stripped from every request.
+	TrustedRelayTokens []string `yaml:"trusted_relay_tokens,omitempty"`
+
 	// Default sliding-window requests-per-minute cap per client token.
 	// 0 = unlimited. Per-token overrides take precedence.
 	ClientRPM int `yaml:"client_rpm"`
