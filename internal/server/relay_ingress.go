@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 	"github.com/wjsoj/cc-core/relay"
 )
 
@@ -83,5 +85,40 @@ func relayIdentity(c *gin.Context) (relay.Identity, bool) {
 	if !relayIsTrusted(c) {
 		return relay.Identity{}, false
 	}
-	return relay.Read(c.Request.Header)
+	id, ok := relay.Read(c.Request.Header)
+	if ok {
+		noteRelayClient(id)
+	}
+	return id, ok
+}
+
+// seenRelayClients bounds the first-sighting log below. A relay's user count is
+// small and the map is per-process, but the key comes off a header, so it needs
+// a ceiling regardless of how it is meant to be used.
+var (
+	seenRelayMu      sync.Mutex
+	seenRelayClients = map[string]struct{}{}
+)
+
+const maxLoggedRelayClients = 512
+
+// noteRelayClient logs the first time each declared downstream caller is seen.
+//
+// The whole feature is invisible otherwise: routing changes shape inside the
+// pool, where nothing is observable from outside, and a misconfiguration (the
+// token missing from trusted_relay_tokens, a relay too old to stamp) looks
+// exactly like normal operation. One line per user per process answers "is it
+// actually differentiating them?" without logging a line per request.
+func noteRelayClient(id relay.Identity) {
+	seenRelayMu.Lock()
+	defer seenRelayMu.Unlock()
+	if _, dup := seenRelayClients[id.Client]; dup {
+		return
+	}
+	if len(seenRelayClients) >= maxLoggedRelayClients {
+		return
+	}
+	seenRelayClients[id.Client] = struct{}{}
+	log.Infof("relay: %s declared downstream caller %s (%d distinct so far)",
+		id.Peer, id.Client, len(seenRelayClients))
 }
