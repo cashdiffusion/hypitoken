@@ -37,6 +37,11 @@ func runBackupCmd(args []string) {
 		return
 	}
 
+	if len(args) > 0 && args[0] == "list" {
+		runBackupListCmd(args[1:])
+		return
+	}
+
 	fs := flag.NewFlagSet("backup", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "path to config file")
 	_ = fs.Parse(args)
