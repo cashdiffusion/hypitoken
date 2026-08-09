@@ -376,6 +376,9 @@ export default {
     sending: "赠送中…",
     sent: "礼品卡已送出",
     note: "从你的钱包扣除。对方注册/登录后领取，{{days}} 天未领取自动退回。",
+    locked:
+      "赠送礼品卡需要账户至少充值过一次。赠额（注册礼、邀请奖励）可以自己使用，但不能转赠给其他账户。",
+    lockedCta: "去充值 →",
     sentTitle: "我送出的",
     claimLabel: "输入兑换码领取",
     claimBtn: "领取",

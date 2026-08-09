@@ -90,7 +90,8 @@ func TestManifestCompleteRequiresRequestIndexWhenArchiveOff(t *testing.T) {
 	cfg.LogDir = "/var/lib/app/requests"
 	cfg.LogJSONLDisabled = true
 
-	base := []string{"saas.db", "shop.db", "tokens.json", "auths/a.json"}
+	base := make([]string, 0, 5) // +1 for the requests.db appended below
+	base = append(base, "saas.db", "shop.db", "tokens.json", "auths/a.json")
 	if err := assertManifestComplete(cfg, manifest(base...)); err == nil {
 		t.Fatal("archive without requests.db accepted while log_jsonl_disabled is on")
 	} else if !strings.Contains(err.Error(), "requests.db") {

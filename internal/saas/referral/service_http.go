@@ -95,12 +95,21 @@ func (s *Service) handleMe(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// Surfaced so the gift form can explain the restriction up front instead of
+	// letting the user compose a card and only then bounce it. On error assume
+	// eligible: a transient DB blip must not accuse a paying customer, and
+	// SendGift re-checks authoritatively either way.
+	canGift, cerr := s.DB.HasEverToppedUp(c.Request.Context(), u.ID)
+	if cerr != nil {
+		canGift = true
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"stats":       stats,
-		"card":        card,
-		"invite_url":  s.InviteURL(card.Code),
-		"invite_code": card.Code,
-		"campaign":    s.campaignPayload(c, u.ID),
+		"stats":         stats,
+		"card":          card,
+		"invite_url":    s.InviteURL(card.Code),
+		"invite_code":   card.Code,
+		"campaign":      s.campaignPayload(c, u.ID),
+		"can_send_gift": canGift,
 	})
 }
 
@@ -224,6 +233,11 @@ func (s *Service) handleSendGift(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrInvalidEmail), errors.Is(err, ErrSelfGift), errors.Is(err, ErrAmountTooSmall), errors.Is(err, ErrAmountTooLarge):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrTopupRequired):
+			// 403, not 402: the wallet may well have (bonus) credit in it, so
+			// "payment required" would send the UI down the top-up-to-cover-this
+			// path. The block is on who may gift at all, not on the amount.
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error(), "code": "topup_required"})
 		case errors.Is(err, db.ErrInsufficientBalance):
 			c.JSON(http.StatusPaymentRequired, gin.H{"error": "insufficient balance"})
 		default:

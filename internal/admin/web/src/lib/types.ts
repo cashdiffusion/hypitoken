@@ -483,6 +483,9 @@ export interface ReferralMe {
   invite_url: string;
   invite_code: string;
   campaign: ReferralCampaign;
+  /** False until the account has topped up at least once — bonus credit alone
+   *  cannot be forwarded to another account. */
+  can_send_gift: boolean;
 }
 
 export interface GiftCard {

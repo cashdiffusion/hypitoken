@@ -51,34 +51,40 @@ func runExportRequestsCmd(args []string) {
 		os.Exit(2)
 	}
 
-	// Read-only, and deliberately so: this normally runs on a box where the
-	// server has the same database open, and the read-write OpenStore would
-	// start a second ingest loop competing with it.
-	st, err := requestlog.OpenStoreForRead(cfg.LogDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "export-requests: open index: %v\n", err)
-		os.Exit(1)
-	}
-	defer st.Close()
-
-	w := os.Stdout
-	if *out != "-" {
-		f, err := os.OpenFile(*out, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "export-requests: %v\n", err)
-			os.Exit(1)
-		}
-		defer f.Close()
-		w = f
-	}
-	bw := bufio.NewWriterSize(w, 256*1024)
-	n, err := st.Export(*from, *to, bw)
-	if flushErr := bw.Flush(); err == nil {
-		err = flushErr
-	}
+	n, err := exportRequests(cfg.LogDir, *from, *to, *out)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "export-requests: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "export-requests: wrote %d records\n", n)
+}
+
+// exportRequests does the work and returns, so that every acquired handle is
+// released by its defer. Keeping os.Exit in the caller is what makes the defers
+// reachable at all — an exit inside this scope would skip them.
+func exportRequests(logDir, from, to, out string) (int, error) {
+	// Read-only, and deliberately so: this normally runs on a box where the
+	// server has the same database open, and the read-write OpenStore would
+	// start a second ingest loop competing with it.
+	st, err := requestlog.OpenStoreForRead(logDir)
+	if err != nil {
+		return 0, fmt.Errorf("open index: %w", err)
+	}
+	defer st.Close()
+
+	w := os.Stdout
+	if out != "-" {
+		f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err != nil {
+			return 0, err
+		}
+		defer f.Close()
+		w = f
+	}
+	bw := bufio.NewWriterSize(w, 256*1024)
+	n, err := st.Export(from, to, bw)
+	if flushErr := bw.Flush(); err == nil {
+		err = flushErr
+	}
+	return n, err
 }

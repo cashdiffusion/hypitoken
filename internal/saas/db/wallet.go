@@ -225,6 +225,36 @@ func (db *DB) GetBalance(ctx context.Context, userID int64) (float64, error) {
 	return db.GetWorkspaceBalance(ctx, wsID)
 }
 
+// HasEverToppedUp reports whether real money has ever entered this user's
+// personal wallet — i.e. at least one `topup` row exists for it.
+//
+// It answers "has this account ever paid us anything", which is the cheapest
+// honest proxy for "is a human behind this account". Bonus credit (`adjust`)
+// deliberately does NOT count: on 2026-08-08 a referral farm swept the $1
+// signup bonus off its throwaway accounts by having each one issue a gift card
+// back to the operator's main account, seconds after registering. Gating gift
+// issuance on a topup closes that route without touching the bonus itself —
+// farmed credit can still be spent on the account that received it, it just
+// cannot be moved to another account.
+//
+// Both attribution shapes are checked: topups land on the personal workspace
+// via addWorkspaceBalanceTx (workspace_id set, user_id = payer), but rows
+// written before workspaces existed carry only user_id.
+func (db *DB) HasEverToppedUp(ctx context.Context, userID int64) (bool, error) {
+	var found int
+	err := db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM wallet_tx
+			 WHERE kind = ?
+			   AND (user_id = ?
+			     OR workspace_id = (SELECT personal_workspace_id FROM users WHERE id = ?))
+		)`, TxKindTopup, userID, userID).Scan(&found)
+	if err != nil {
+		return false, err
+	}
+	return found == 1, nil
+}
+
 // ListWalletTx returns a page of the user's transactions plus the matching
 // total count (for pagination). When `kinds` is non-empty the ledger is
 // filtered to those kinds — the billing wallet-history view passes the

@@ -222,6 +222,81 @@ func TestMilestoneSingleGrant(t *testing.T) {
 	}
 }
 
+// bonus credits a user the way a signup/referral grant does — an `adjust` row,
+// not a `topup`. The distinction is the whole point of the gift gate.
+func bonus(t *testing.T, store *db.DB, userID int64, amt float64) {
+	t.Helper()
+	if _, err := store.AddBalance(context.Background(), userID, db.TxKindAdjust, amt, "test-bonus", "", false); err != nil {
+		t.Fatalf("bonus: %v", err)
+	}
+}
+
+// TestGiftRequiresTopup replays the 2026-08-08 laundering route: a throwaway
+// account receives its $1 signup bonus and immediately gifts it to the farm's
+// main account. Bonus credit must not be forwardable; a real topup lifts the
+// block.
+func TestGiftRequiresTopup(t *testing.T) {
+	ctx := context.Background()
+	svc, store := newSvc(t, false)
+
+	mule := mkUser(t, store, "mule@test.com")
+	farmer := mkUser(t, store, "farmer@test.com")
+	bonus(t, store, mule, 1)
+
+	// The balance is real and sufficient — only the provenance disqualifies it,
+	// so a wrong implementation would fail with ErrInsufficientBalance here and
+	// look like it worked.
+	if _, err := svc.SendGift(ctx, mule, "mule@test.com", "farmer@test.com", 1, "", "claude", "dark"); !errors.Is(err, ErrTopupRequired) {
+		t.Fatalf("bonus-only account must not gift: got %v", err)
+	}
+	if got := bal(t, store, mule); got != 1 {
+		t.Fatalf("refused gift must not debit: want 1, got %v", got)
+	}
+	if got := bal(t, store, farmer); got != 0 {
+		t.Fatalf("farmer must receive nothing: got %v", got)
+	}
+
+	// One cent of real money is enough — the gate is about provenance, not size.
+	credit(t, store, mule, 0.01)
+	if _, err := svc.SendGift(ctx, mule, "mule@test.com", "farmer@test.com", 1, "", "claude", "dark"); err != nil {
+		t.Fatalf("after topup the gift must go through: %v", err)
+	}
+	if got := bal(t, store, farmer); got != 1 {
+		t.Fatalf("farmer balance: want 1, got %v", got)
+	}
+}
+
+// TestHasEverToppedUpIgnoresNonTopupCredit pins the ledger predicate itself:
+// only `topup` counts. A refund of a topup is money returning, not money
+// arriving, and an admin adjust is us granting credit — neither proves payment.
+func TestHasEverToppedUpIgnoresNonTopupCredit(t *testing.T) {
+	ctx := context.Background()
+	_, store := newSvc(t, false)
+	u := mkUser(t, store, "ledger@test.com")
+
+	for _, kind := range []string{db.TxKindAdjust, db.TxKindRefund} {
+		if _, err := store.AddBalance(ctx, u, kind, 5, "test", "", false); err != nil {
+			t.Fatalf("add %s: %v", kind, err)
+		}
+		paid, err := store.HasEverToppedUp(ctx, u)
+		if err != nil {
+			t.Fatalf("check: %v", err)
+		}
+		if paid {
+			t.Fatalf("%s must not count as payment", kind)
+		}
+	}
+
+	credit(t, store, u, 1)
+	paid, err := store.HasEverToppedUp(ctx, u)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if !paid {
+		t.Fatal("a topup must count as payment")
+	}
+}
+
 func TestGiftSendClaimConservation(t *testing.T) {
 	ctx := context.Background()
 	svc, store := newSvc(t, false)
