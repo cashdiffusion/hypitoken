@@ -64,6 +64,9 @@ func main() {
 		case "restore":
 			runRestoreCmd(os.Args[2:])
 			return
+		case "export-requests":
+			runExportRequestsCmd(os.Args[2:])
+			return
 		}
 	}
 
@@ -139,21 +142,18 @@ func main() {
 	var reqLog *requestlog.Writer
 	var logIndex *requestlog.Store
 	if cfg.LogDir != "" {
-		reqLog, err = requestlog.Open(cfg.LogDir, cfg.LogRetentionDays)
-		if err != nil {
-			log.Fatalf("open request log: %v", err)
-		}
-		log.Infof("request log: writing to %s (retain %d days)", cfg.LogDir, cfg.LogRetentionDays)
-
-		// Without this every aggregate re-parses the whole archive. That is
+		// The index opens FIRST because the writer may depend on it: with the
+		// JSONL archive off it is the only place a record can go, and
+		// OpenWithOptions refuses to start without it.
+		//
+		// Without it every aggregate re-parses the whole archive. That is
 		// worse here than on the operator panel: each customer opening their
 		// own usage page triggers a full-archive scan of its own, and the
 		// health checker scans per credential.
 		//
-		// Derived state, so a failure is logged and ignored — the query paths
-		// fall back to scanning on their own. Must come after
-		// SetBucketLocation: the index materializes day labels in the
-		// display zone.
+		// While the archive is on the index is derived state, so a failure is
+		// logged and ignored — the query paths fall back to scanning on their
+		// own.
 		if !cfg.LogIndexDisabled {
 			if st, err := requestlog.OpenStore(cfg.LogDir); err != nil {
 				log.Warnf("request log: index unavailable (%v); queries fall back to scanning", err)
@@ -162,6 +162,19 @@ func main() {
 			}
 		} else {
 			log.Info("request log: index disabled by config (log_index_disabled)")
+		}
+
+		reqLog, err = requestlog.OpenWithOptions(cfg.LogDir, requestlog.Options{
+			RetentionDays: cfg.LogRetentionDays,
+			JSONLArchive:  !cfg.LogJSONLDisabled,
+		})
+		if err != nil {
+			log.Fatalf("open request log: %v", err)
+		}
+		if cfg.LogJSONLDisabled {
+			log.Infof("request log: index-only at %s (retain %d days, no .jsonl archive)", cfg.LogDir, cfg.LogRetentionDays)
+		} else {
+			log.Infof("request log: writing to %s (retain %d days)", cfg.LogDir, cfg.LogRetentionDays)
 		}
 	} else {
 		log.Info("request log: disabled (set log_dir in config to enable)")
