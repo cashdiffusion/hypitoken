@@ -512,21 +512,23 @@ function ModelTables({
   codexMult: number;
 }) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"claude" | "codex">("claude");
+  // Codex opens the table: it is the majority of billed traffic and carries the
+  // deeper discount, so it is what a visitor arriving from the hero expects.
+  const [tab, setTab] = useState<"claude" | "codex">("codex");
   const tabs = [
-    {
-      id: "claude" as const,
-      label: t("pricing.claudeTitle"),
-      sub: t("pricing.claudeSub"),
-      models: claude,
-      mult: claudeMult,
-    },
     {
       id: "codex" as const,
       label: t("pricing.codexTitle"),
       sub: t("pricing.codexSub"),
       models: codex,
       mult: codexMult,
+    },
+    {
+      id: "claude" as const,
+      label: t("pricing.claudeTitle"),
+      sub: t("pricing.claudeSub"),
+      models: claude,
+      mult: claudeMult,
     },
   ];
   // biome-ignore lint/style/noNonNullAssertion: tab state is always one of the two tab ids defined above
@@ -620,8 +622,8 @@ function AccessGroups({ groups }: { groups: PricingGroup[] }) {
                 <p className="mt-1 text-xs text-muted-foreground">{g.Description}</p>
               )}
               <div className="mt-4 space-y-2">
-                <MultRow label="Claude" value={g.ClaudeMultiplier} />
                 <MultRow label="Codex" value={g.CodexMultiplier} />
+                <MultRow label="Claude" value={g.ClaudeMultiplier} />
                 <p className="pt-1 text-xs text-muted-foreground">{t("pricing.formulaCaption")}</p>
               </div>
             </SpotlightCard>

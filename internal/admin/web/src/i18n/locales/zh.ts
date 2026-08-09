@@ -148,11 +148,11 @@ export default {
       reset: "密码已重置，请使用新密码登录。",
     },
     panel: {
-      tagline: "把多个 Claude 与 Codex 凭证\n聚合成一个稳定端点。",
+      tagline: "把多个 Codex 与 Claude 凭证\n聚合成一个稳定端点。",
       sub: "OAuth 订阅与 API Key 智能调度、粘性会话、实时计费 —— 一个网关全部搞定。",
       f1: "多凭证负载均衡",
       f2: "按 token 实时计费",
-      f3: "Claude + Codex 双协议",
+      f3: "Codex + Claude 双协议",
     },
   },
 
@@ -1256,17 +1256,20 @@ export default {
   },
 
   home: {
-    badge: "Claude Code 周限额用完了？有解法",
-    titleA: "Claude API，仅需 ",
-    titleB: "官方价的 30%。",
-    sub: "最高可省 <strong>Claude 70%</strong>、<strong>OpenAI 95%</strong> —— 没有周限额，完整兼容 Claude Code、Codex、advisor、深度思考与子 agent。2 分钟即可开始。",
+    badge: "Codex 或 Claude 周限额用完了？有解法",
+    rotator: {
+      mid: " API，仅需官方价的 ",
+      suffix: "。",
+      show: "查看 {{name}} 价格",
+    },
+    sub: "<strong>Codex 低至官方价 5%</strong>、<strong>Claude 低至 30%</strong> —— 没有周限额，原生兼容 Codex CLI 与 Claude Code，advisor、深度思考与子 agent 全部可用。2 分钟即可开始。",
     ctaPrimary: "领取额度，免费开始",
     ctaDocs: "阅读文档",
     bullets: {
+      openaiPrice: "Codex 官方价 1/20",
       claudePrice: "Claude 官方价 3 折",
-      openaiPrice: "OpenAI 官方价 1/20",
       noLimits: "没有周限额",
-      ccCompat: "兼容 Claude Code",
+      cliCompat: "兼容 Codex CLI / Claude Code",
       fastStart: "2 分钟即可开始",
     },
 
@@ -1275,13 +1278,13 @@ export default {
     savingsSub: "同样的模型、同样的官方目录价，按你的分组倍率计费。无需订阅，没有周限额。",
     savings: {
       claudeName: "Claude API",
-      openaiName: "OpenAI API",
+      openaiName: "Codex / OpenAI API",
       official: "官方价",
       ofOfficial: "官方价",
       claudeSave: "省 70%",
       openaiSave: "省 95%",
       noLimitsTitle: "没有周限额。",
-      noLimitsSub: "在 Claude Code 订阅把你掐断的地方，继续往下写。",
+      noLimitsSub: "在 Codex 与 Claude Code 订阅把你掐断的地方，继续往下写。",
       cta: "查看完整价格",
       saved: "已省下",
       chipNoSub: "无需订阅",
@@ -1300,8 +1303,8 @@ export default {
       adaptiveB: "凭证池按最少活跃会话调度。自动故障转移、冷却管理和每日重置任务持续维护池健康。",
       stickyT: "粘性会话",
       stickyB: "每个客户端令牌在活跃窗口内固定到同一上游凭证，保留提示词缓存命中和对话连续性。",
-      ccT: "Claude Code 原生",
-      ccB: "完整模拟 Claude Code 指纹，advisor、深度思考、子 agent、MCP 工具调用都按官方 CLI 行为转发。",
+      ccT: "官方 CLI 原生",
+      ccB: "Codex CLI 与 Claude Code 的指纹都完整模拟，advisor、深度思考、子 agent、MCP 工具调用都按官方 CLI 行为转发。",
       perTokenT: "单令牌精细访问控制",
       perTokenB:
         "每个令牌可设置独立的月消费上限，并使用服务器侧并发和 RPM 控制，避免应用之间互相影响。",
@@ -1309,7 +1312,7 @@ export default {
       healthB: "用状态页形式展示上游凭证和模型探针结果。硬故障自动轮换，并提供凭证级用量视图。",
       dualT: "双 provider",
       dualB:
-        "Claude (Anthropic) 与 Codex (OpenAI) 共用一个网关域名，按路径路由，同一个 bearer 令牌即可访问。",
+        "Codex (OpenAI) 与 Claude (Anthropic) 共用一个网关域名，按路径路由，同一个 bearer 令牌即可访问。",
     },
     featuresWideTitle: "粘性会话把每个令牌固定到同一凭证 —— 缓存命中与上下文在每一轮都保留。",
     featuresWideLabels: ["会话", "粘性", "凭证池", "故障转移"],
@@ -1335,7 +1338,7 @@ export default {
       cat: {
         routing: "路由",
         sessions: "会话",
-        cc: "Claude Code",
+        cc: "CLI 兼容",
         access: "访问控制",
         health: "健康",
         provider: "Provider",
@@ -1347,17 +1350,17 @@ export default {
     testimonialsSub: "把凭证池迁到网关之后，运维者们的真实反馈。",
     testimonials: [
       {
-        text: "我们把六个 Claude 订阅汇聚到同一个端点。粘性会话保住了缓存命中，客户端配置一行都没改。",
+        text: "我们把六个 Codex 订阅汇聚到同一个端点。粘性会话保住了缓存命中，客户端配置一行都没改。",
         name: "陈宇航",
         role: "平台负责人",
       },
       {
-        text: "凭证触顶时自适应路由会悄悄故障转移，我们的 Claude Code 工作流不再撞到死路。",
+        text: "凭证触顶时自适应路由会悄悄故障转移，我们的 Codex 与 Claude Code 工作流不再撞到死路。",
         name: "佐藤美里",
         role: "资深工程师",
       },
       {
-        text: "一个 bearer 令牌同时打通 Claude 和 Codex，按路径路由，省去了维护两套集成。",
+        text: "一个 bearer 令牌同时打通 Codex 和 Claude，按路径路由，省去了维护两套集成。",
         name: "王凯",
         role: "后端负责人",
       },
@@ -1387,7 +1390,7 @@ export default {
         role: "技术主管",
       },
       {
-        text: "它对真实 Claude Code 行为的还原足够到位，advisor、思考、子 agent 都能干净地透传。",
+        text: "它对真实 CLI 行为的还原足够到位，Codex 的推理档位和 Claude Code 的子 agent 都能干净地透传。",
         name: "罗莎",
         role: "产品工程师",
       },
@@ -1410,9 +1413,9 @@ export default {
     },
 
     archEyebrow: "架构",
-    archTitle: "按真实 Claude Code 行为转发。",
+    archTitle: "按真实 CLI 行为转发。",
     archSub:
-      "网关为每个账号维护完整的 Claude Code 会话身份，包括一致的设备指纹、跨多轮稳定的 session id，以及订阅健康所需的辅助流量。",
+      "网关为每个账号维护完整的 CLI 会话身份 —— Codex CLI 与 Claude Code 各自的设备指纹、跨多轮稳定的 session id，以及订阅健康所需的辅助流量。",
     archPoints: [
       "设备指纹绑定到 OAuth 凭证，而不是客户端令牌",
       "Session id 由（账号、客户端、首条消息）派生，跨多轮保持稳定",
@@ -1427,9 +1430,9 @@ export default {
       ccLabel: "Claude Code",
       ccSub: "advisor / thinking / 子 agent",
       codexLabel: "Codex CLI",
-      codexSub: "OpenAI 兼容",
+      codexSub: "responses / WebSocket",
       sdkLabel: "第三方 SDK",
-      sdkSub: "anthropic / openai / litellm",
+      sdkSub: "openai / anthropic / litellm",
     },
 
     workflowEyebrow: "接入流程",
@@ -1437,21 +1440,21 @@ export default {
     step: {
       registerT: "注册账号",
       registerB:
-        "注册并完成邮箱验证。管理员可在后台添加 Anthropic 或 OpenAI 凭证，网关负责后续调度。",
+        "注册并完成邮箱验证。管理员可在后台添加 OpenAI 或 Anthropic 凭证，网关负责后续调度。",
       tokenT: "申请 bearer 令牌",
       tokenB: "为每个应用或团队签发 sk-cpa-• 令牌，并单独设置月消费上限。",
       pointT: "指向网关",
       pointB:
-        "设置 ANTHROPIC_BASE_URL 或 OPENAI_BASE_URL 后照常运行 claude / codex，advisor、thinking、子 agent 都可使用。",
+        "设置 OPENAI_BASE_URL 或 ANTHROPIC_BASE_URL 后照常运行 codex / claude，advisor、thinking、子 agent 都可使用。",
     },
 
     ctaTitle: "开始使用 HypiToken。",
-    ctaSub: "创建账号并申请令牌，即可把 Claude Code 和 Codex 工作流接入统一网关。",
+    ctaSub: "创建账号并申请令牌，即可把 Codex 和 Claude Code 工作流接入统一网关。",
     ctaCreate: "注册账号",
     ctaReadDocs: "阅读文档",
 
     footerBlurb:
-      "面向 Claude 与 Codex 的自托管 LLM API 网关，提供智能路由、凭证池管理和完整 Claude Code 兼容。",
+      "面向 Codex 与 Claude 的自托管 LLM API 网关，提供智能路由、凭证池管理，以及 Codex CLI / Claude Code 的完整兼容。",
     footerProduct: "产品",
     footerAccount: "账户",
     footerSignUp: "注册",
@@ -1460,7 +1463,7 @@ export default {
   pricing: {
     pageTitle: "价格",
     pageSub:
-      "下表展示 Anthropic 与 OpenAI 官方价格。实际钱包扣款 = <code>官方价 × 分组倍率</code>，倍率由你的访问分组决定。",
+      "下表展示 OpenAI 与 Anthropic 官方价格。实际钱包扣款 = <code>官方价 × 分组倍率</code>，倍率由你的访问分组决定。",
     claudeTitle: "Claude 模型",
     claudeSub: "Anthropic 官方价格，支持提示词缓存计费。",
     codexTitle: "Codex / OpenAI 模型",
@@ -1503,7 +1506,7 @@ export default {
       title: "没有套餐，只有一条公式。",
       sub: "每一笔请求都按官方价实时结算，分组倍率决定你的折扣。",
       official: "官方价",
-      officialHint: "Anthropic / OpenAI 实时发布价",
+      officialHint: "OpenAI / Anthropic 实时发布价",
       multiplier: "分组倍率",
       multiplierHint: "由你的访问分组决定",
       charged: "钱包扣款",
@@ -1519,7 +1522,7 @@ export default {
     formulaCaption: "最终扣款 = 上游官方成本 × 倍率。",
     eyebrow: "价格",
     title: "只为实际使用的 token 付费。",
-    sub: "USD 钱包按请求扣款，金额 = Anthropic / OpenAI 官方价 × 分组倍率。无需订阅，无最低消费承诺。",
+    sub: "USD 钱包按请求扣款，金额 = OpenAI / Anthropic 官方价 × 分组倍率。无需订阅，无最低消费承诺。",
     formula: "扣款 USD = 官方 USD × 分组倍率",
     groupsTitle: "价格分组",
     groupsSub: "管理员可以把你分到带折扣倍率的分组。",

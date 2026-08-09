@@ -150,11 +150,11 @@ export default {
       reset: "Password reset. Sign in with the new password.",
     },
     panel: {
-      tagline: "Fan many Claude & Codex\ncredentials into one endpoint.",
+      tagline: "Fan many Codex & Claude\ncredentials into one endpoint.",
       sub: "Smart scheduling across OAuth subscriptions and API keys, sticky sessions, and real-time billing — all from one gateway.",
       f1: "Multi-credential balancing",
       f2: "Real-time per-token billing",
-      f3: "Claude + Codex protocols",
+      f3: "Codex + Claude protocols",
     },
   },
 
@@ -1288,17 +1288,20 @@ export default {
   },
 
   home: {
-    badge: "Hit Claude Code weekly limits? There's a fix",
-    titleA: "Claude API at ",
-    titleB: "30% of official price.",
-    sub: "Save up to <strong>70% vs Claude</strong> and <strong>95% vs OpenAI</strong> — no weekly limits, fully compatible with Claude Code, Codex, advisor, extended thinking, and sub-agents. Start in under 2 minutes.",
+    badge: "Hit Codex or Claude weekly limits? There's a fix",
+    rotator: {
+      mid: " API at ",
+      suffix: " of official price.",
+      show: "Show {{name}} pricing",
+    },
+    sub: "<strong>Codex from 5% of official pricing</strong>, <strong>Claude from 30%</strong> — no weekly limits, native support for Codex CLI and Claude Code, including advisor, extended thinking, and sub-agents. Start in under 2 minutes.",
     ctaPrimary: "Start with free credit",
     ctaDocs: "Read the docs",
     bullets: {
+      openaiPrice: "5% of official Codex pricing",
       claudePrice: "30% of official Claude pricing",
-      openaiPrice: "5% of OpenAI pricing",
       noLimits: "No weekly limits",
-      ccCompat: "Claude Code compatible",
+      cliCompat: "Codex CLI / Claude Code compatible",
       fastStart: "Start in 2 minutes",
     },
 
@@ -1308,13 +1311,14 @@ export default {
       "Same models, same official rates — billed at your group multiplier. No subscription, no weekly limits.",
     savings: {
       claudeName: "Claude API",
-      openaiName: "OpenAI API",
+      openaiName: "Codex / OpenAI API",
       official: "Official price",
       ofOfficial: "of official price",
       claudeSave: "Save 70%",
       openaiSave: "Save 95%",
       noLimitsTitle: "No weekly limits.",
-      noLimitsSub: "Keep building past the point where Claude Code subscriptions cut you off.",
+      noLimitsSub:
+        "Keep building past the point where Codex and Claude Code subscriptions cut you off.",
       cta: "See full pricing",
       saved: "saved",
       chipNoSub: "No subscription",
@@ -1335,8 +1339,8 @@ export default {
       stickyT: "Sticky sessions",
       stickyB:
         "Each client token gets a consistent upstream credential within its active window — preserving cache hits and conversation continuity.",
-      ccT: "Claude Code native",
-      ccB: "Full Claude Code fingerprinting for advisor mode, extended thinking, sub-agents, and MCP tools, forwarded with official CLI behavior.",
+      ccT: "Official CLI native",
+      ccB: "Full fingerprinting for both Codex CLI and Claude Code — advisor mode, extended thinking, sub-agents, and MCP tools all forwarded with official CLI behavior.",
       perTokenT: "Per-token access control",
       perTokenB:
         "Each token can carry its own monthly spending cap and uses server-side concurrency and RPM controls, keeping apps isolated from each other.",
@@ -1345,7 +1349,7 @@ export default {
         "Status-page style health for upstream credentials and model probes. Hard failures rotate automatically, with per-credential usage views.",
       dualT: "Dual provider",
       dualB:
-        "Claude (Anthropic) and Codex (OpenAI) behind one gateway domain. Route by path with the same bearer token and host.",
+        "Codex (OpenAI) and Claude (Anthropic) behind one gateway domain. Route by path with the same bearer token and host.",
     },
     featuresWideTitle:
       "Sticky sessions pin each token to one credential — cache hits and context survive every turn.",
@@ -1372,7 +1376,7 @@ export default {
       cat: {
         routing: "Routing",
         sessions: "Sessions",
-        cc: "Claude Code",
+        cc: "CLI compatibility",
         access: "Access",
         health: "Health",
         provider: "Provider",
@@ -1384,17 +1388,17 @@ export default {
     testimonialsSub: "What operators say after moving their credential pools behind the gateway.",
     testimonials: [
       {
-        text: "We pooled six Claude subscriptions behind one endpoint. Sticky sessions kept our cache hits, and nobody changed a line of client config.",
+        text: "We pooled six Codex subscriptions behind one endpoint. Sticky sessions kept our cache hits, and nobody changed a line of client config.",
         name: "Daniel Brooks",
         role: "Platform Lead",
       },
       {
-        text: "Adaptive routing quietly fails over when a credential hits its limit. Our Claude Code workflows just stopped hitting dead ends.",
+        text: "Adaptive routing quietly fails over when a credential hits its limit. Our Codex and Claude Code workflows just stopped hitting dead ends.",
         name: "Mira Sato",
         role: "Staff Engineer",
       },
       {
-        text: "One bearer token, both Claude and Codex. Routing by path meant we didn't have to maintain two integrations.",
+        text: "One bearer token, both Codex and Claude. Routing by path meant we didn't have to maintain two integrations.",
         name: "Lukas Wagner",
         role: "Backend Lead",
       },
@@ -1424,7 +1428,7 @@ export default {
         role: "Tech Lead",
       },
       {
-        text: "It mirrors real Claude Code behavior closely enough that advisor mode, thinking, and sub-agents all pass through cleanly.",
+        text: "It mirrors real CLI behavior closely enough that Codex reasoning effort and Claude Code sub-agents all pass through cleanly.",
         name: "Elena Rossi",
         role: "Product Engineer",
       },
@@ -1449,9 +1453,9 @@ export default {
     },
 
     archEyebrow: "Architecture",
-    archTitle: "Forwarding that mirrors real Claude Code behavior.",
+    archTitle: "Forwarding that mirrors real CLI behavior.",
     archSub:
-      "The gateway maintains a full Claude Code session identity per account: consistent device fingerprint, stable session IDs across turns, and the auxiliary traffic needed to keep subscriptions healthy.",
+      "The gateway maintains a full CLI session identity per account — the device fingerprint each of Codex CLI and Claude Code presents, stable session IDs across turns, and the auxiliary traffic needed to keep subscriptions healthy.",
     archPoints: [
       "Device fingerprints are anchored to OAuth credentials, not client tokens",
       "Session IDs are derived from account, client, and first message so they stay stable across turns",
@@ -1466,9 +1470,9 @@ export default {
       ccLabel: "Claude Code",
       ccSub: "advisor / thinking / sub-agents",
       codexLabel: "Codex CLI",
-      codexSub: "openai-compatible",
+      codexSub: "responses / WebSocket",
       sdkLabel: "Third-party SDKs",
-      sdkSub: "anthropic / openai / litellm",
+      sdkSub: "openai / anthropic / litellm",
     },
 
     workflowEyebrow: "Workflow",
@@ -1476,22 +1480,22 @@ export default {
     step: {
       registerT: "Create an account",
       registerB:
-        "Register and verify your email. Operators can add Anthropic or OpenAI credentials in the admin panel; the gateway handles routing.",
+        "Register and verify your email. Operators can add OpenAI or Anthropic credentials in the admin panel; the gateway handles routing.",
       tokenT: "Issue a bearer token",
       tokenB: "Mint sk-cpa-• tokens per app or team, each with its own monthly spending cap.",
       pointT: "Point your CLI",
       pointB:
-        "Set ANTHROPIC_BASE_URL or OPENAI_BASE_URL and run claude or codex normally. Advisor, thinking, and sub-agents keep working.",
+        "Set OPENAI_BASE_URL or ANTHROPIC_BASE_URL and run codex or claude normally. Advisor, thinking, and sub-agents keep working.",
     },
 
     ctaTitle: "Start using HypiToken.",
     ctaSub:
-      "Create an account, issue a token, and route Claude Code and Codex through one gateway.",
+      "Create an account, issue a token, and route Codex and Claude Code through one gateway.",
     ctaCreate: "Create account",
     ctaReadDocs: "Read docs",
 
     footerBlurb:
-      "Self-hosted LLM API gateway for Claude and Codex with intelligent routing, credential-pool management, and full Claude Code compatibility.",
+      "Self-hosted LLM API gateway for Codex and Claude with intelligent routing, credential-pool management, and full Codex CLI / Claude Code compatibility.",
     footerProduct: "Product",
     footerAccount: "Account",
     footerSignUp: "Sign up",
@@ -1500,7 +1504,7 @@ export default {
   pricing: {
     pageTitle: "Pricing",
     pageSub:
-      "Official Anthropic and OpenAI rates are shown below. Your wallet is charged <code>official rate × group multiplier</code>, with the multiplier set by your access group.",
+      "Official OpenAI and Anthropic rates are shown below. Your wallet is charged <code>official rate × group multiplier</code>, with the multiplier set by your access group.",
     claudeTitle: "Claude models",
     claudeSub: "Official Anthropic pricing, including prompt-cache rates.",
     codexTitle: "Codex / OpenAI models",
@@ -1544,7 +1548,7 @@ export default {
       title: "No plans. Just one formula.",
       sub: "Every request settles in real time at official rates; your group multiplier sets the discount.",
       official: "Official rate",
-      officialHint: "Live Anthropic / OpenAI published price",
+      officialHint: "Live OpenAI / Anthropic published price",
       multiplier: "Group multiplier",
       multiplierHint: "Set by your access group",
       charged: "Wallet charge",
@@ -1560,7 +1564,7 @@ export default {
     formulaCaption: "Final charge = official upstream cost × multiplier.",
     eyebrow: "Pricing",
     title: "Pay only for tokens you actually use.",
-    sub: "Your USD wallet is billed per request at official Anthropic / OpenAI rates × your group multiplier. No subscription and no minimum commitment.",
+    sub: "Your USD wallet is billed per request at official OpenAI / Anthropic rates × your group multiplier. No subscription and no minimum commitment.",
     formula: "bill_usd = official_cost_usd × group_multiplier",
     groupsTitle: "Pricing groups",
     groupsSub: "The operator may assign you to a group with discounted multipliers.",
