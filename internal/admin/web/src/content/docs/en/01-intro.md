@@ -3,12 +3,12 @@ slug: intro
 title: Overview
 group: Getting started
 order: 1
-intro: HypiToken is a unified API gateway that speaks both the Anthropic and OpenAI protocols. One key connects Claude, GPT and more across Claude Code, Codex CLI, and Cursor.
+intro: HypiToken is a unified API gateway that speaks both the OpenAI and Anthropic protocols. One key connects GPT, Claude and more across Codex CLI, Claude Code, and Cursor.
 ---
 
 ## What it is
 
-HypiToken is an **Anthropic / OpenAI compatible** API relay. Point your client's Base URL at this gateway, drop in a key issued by the console, and you reach the major models directly — **no proxy or VPN required**.
+HypiToken is an **OpenAI / Anthropic compatible** API relay. Point your client's Base URL at this gateway, drop in a key issued by the console, and you reach the major models directly — **no proxy or VPN required**.
 
 Behind the scenes the gateway schedules your requests across multiple upstream subscription credentials (sticky sessions + automatic failover). The experience matches the official API, but it's steadier and usually cheaper.
 
@@ -16,22 +16,22 @@ Behind the scenes the gateway schedules your requests across multiple upstream s
 
 | Client | Type | Protocol | Base URL |
 | --- | --- | --- | --- |
-| Claude Code | CLI | Anthropic | `https://api.novadiffusion.com` |
 | Codex CLI | CLI | OpenAI | `https://api.novadiffusion.com/v1` |
+| Claude Code | CLI | Anthropic | `https://api.novadiffusion.com` |
 | Cursor | GUI | OpenAI | `https://api.novadiffusion.com/v1` |
 
 > **About the trailing `/v1`**
 >
 > The Anthropic protocol (Claude Code) does **not** take `/v1`; the OpenAI protocol (Codex CLI, Cursor) **must** include `/v1`. This is the single most common cause of 404s.
 
-> **CCSwitch is not a gateway client.** It's a local credential / config manager that switches the provider config for Claude Code and Codex in one click — the actual requests are still made by Claude Code / Codex. See [CCSwitch credential manager](/docs/ccswitch).
+> **CCSwitch is not a gateway client.** It's a local credential / config manager that switches the provider config for Codex and Claude Code in one click — the actual requests are still made by Codex / Claude Code. See [CCSwitch credential manager](/docs/ccswitch).
 
 ## Which clients are not supported
 
 The gateway only accepts **interactive AI coding clients**. Raw SDK and scripting callers are rejected at ingress with `403 client not allowed`:
 
-- ❌ Blocked: Anthropic / OpenAI official SDKs, LiteLLM, `curl`, `python-requests`, Postman, scraping scripts
-- ✅ Allowed: Claude Code, Codex CLI, Cursor, Claude Desktop and other normal interactive clients
+- ❌ Blocked: OpenAI / Anthropic official SDKs, LiteLLM, `curl`, `python-requests`, Postman, scraping scripts
+- ✅ Allowed: Codex CLI, Claude Code, Cursor, Claude Desktop and other normal interactive clients
 
 In other words you **cannot** "just test the endpoint with `curl`" — it gets rejected. Connect with one of the official clients below.
 

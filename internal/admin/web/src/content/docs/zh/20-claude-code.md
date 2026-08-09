@@ -2,7 +2,7 @@
 slug: claude-code
 title: Claude Code 接入
 group: 客户端接入
-order: 20
+order: 21
 intro: 30 秒把 Anthropic 官方 Claude Code CLI 指向网关。Advisor、深度思考、子 agent、MCP 均按原生体验使用。
 ---
 

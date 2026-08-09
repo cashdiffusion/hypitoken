@@ -2,7 +2,7 @@
 slug: claude-code
 title: Claude Code setup
 group: Clients
-order: 20
+order: 21
 intro: Point the official Anthropic Claude Code CLI at the gateway in 30 seconds. Advisor, extended thinking, sub-agents, and MCP keep their native behavior.
 ---
 

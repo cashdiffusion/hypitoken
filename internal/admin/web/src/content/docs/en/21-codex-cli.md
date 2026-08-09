@@ -2,7 +2,7 @@
 slug: codex-cli
 title: Codex CLI setup
 group: Clients
-order: 21
+order: 20
 intro: OpenAI's official Codex CLI connects to the unified gateway through /v1. The same key works for Claude Code too.
 ---
 

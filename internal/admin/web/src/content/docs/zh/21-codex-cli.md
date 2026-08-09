@@ -2,7 +2,7 @@
 slug: codex-cli
 title: Codex CLI 接入
 group: 客户端接入
-order: 21
+order: 20
 intro: OpenAI 官方 Codex CLI 通过 /v1 接入统一网关。同一个 Key 与 Claude Code 通用。
 ---
 
