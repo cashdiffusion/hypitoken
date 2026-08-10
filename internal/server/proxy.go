@@ -319,9 +319,34 @@ func (s *Server) forwardWithFailover(c *gin.Context, provider, path, model, clie
 			}
 			if prepErr != nil {
 				reason := claudePreparationFailureReason(prepErr)
-				audit := claudePreparationFailureAudit(requestClass, a.AccountKey(), reason, body, c.Request.Header, a.ProxyURL)
-				log.Errorf("proxy: Claude %s preparation failed before upstream (account_hash=%s model=%s reason=%s fallback=apikey)",
-					requestClass.String(), audit.AccountHash, model, reason)
+				failures := 0
+				if requestClass == mimicry.RequestClassGeneric {
+					failures = s.claudePreparationFailures.record(
+						hashAuditValues("claude-client/v1", clientToken),
+						mimicry.ClaudeRequestStructureSHA256(body),
+						reason,
+						time.Now(),
+					)
+				}
+				fallback := "apikey"
+				if requestClass == mimicry.RequestClassGeneric && mimicry.IsClientRequestPreparationError(prepErr) {
+					fallback = "none"
+				}
+				audit := claudePreparationFailureAudit(requestClass, a.AccountKey(), clientToken, reason, fallback, failures, body, c.Request.Header, a.ProxyURL)
+				log.Errorf("proxy: Claude %s preparation failed before upstream (account_hash=%s model=%s reason=%s fallback=%s failures=%d)",
+					requestClass.String(), audit.AccountHash, model, reason, fallback, failures)
+				if fallback == "none" {
+					s.emitLog(requestlog.Record{
+						Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider,
+						AuthID: a.ID, AuthLabel: a.Label, AuthKind: "oauth", Model: model,
+						Stream: stream, Path: path, Attempts: attempts, Status: http.StatusBadRequest,
+						DurationMs: time.Since(start).Milliseconds(),
+						Error:      "claude generic normalization rejected locally", ClaudeAudit: audit,
+					})
+					s.pool.Release(provider, clientToken, slotID)
+					writeAPIError(c, provider, APIError{Status: http.StatusBadRequest, Code: "invalid_request", Message: "The request body cannot be safely normalized for an OAuth credential."})
+					return
+				}
 				s.emitLog(requestlog.Record{
 					Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider,
 					AuthID: a.ID, AuthLabel: a.Label, AuthKind: "oauth", Model: model,
@@ -603,7 +628,7 @@ func (s *Server) doForwardPrepared(c *gin.Context, a *auth.Auth, path string, bo
 		applyAnthropicHeaders(upReq, a, stream, isAnthropicBase, id, upstreamBody)
 	}
 
-	claudeAudit := claudeIdentityAudit(prepared, accountKey, upReq.Header, a.ProxyURL)
+	claudeAudit := claudeIdentityAudit(prepared, accountKey, clientToken, upReq.Header, a.ProxyURL)
 	client := auth.ClientFor(a.ProxyURL, s.cfg.UseUTLS)
 	resp, err := client.Do(upReq)
 	if err != nil {
@@ -704,7 +729,7 @@ func (s *Server) doForwardPrepared(c *gin.Context, a *auth.Auth, path string, bo
 						if retryResp.StatusCode < 400 {
 							log.Infof("proxy: %s signature retry succeeded", a.ID)
 							resp = retryResp
-							claudeAudit = claudeIdentityAudit(retryPrepared, accountKey, retryReq.Header, a.ProxyURL)
+							claudeAudit = claudeIdentityAudit(retryPrepared, accountKey, clientToken, retryReq.Header, a.ProxyURL)
 							recovered = true
 							flagStripThinking(a)
 						} else {
@@ -857,7 +882,7 @@ func (s *Server) doForwardPrepared(c *gin.Context, a *auth.Auth, path string, bo
 			// The attempt-only row is excluded from normal dashboard aggregates,
 			// but preserves per-account 401/403/429 and hard-failure evidence for
 			// the seven-day experiment.
-			log.Warnf("proxy: %s returned %d — retrying on another credential. body=%s", a.ID, resp.StatusCode, truncate(errBody, 500))
+			log.Warnf("proxy: %s returned %d — retrying on another credential", a.ID, resp.StatusCode)
 			s.emitLog(requestlog.Record{
 				Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.NormalizeProvider(a.Provider),
 				AuthID: a.ID, AuthLabel: a.Label, AuthKind: authKind, Model: model, Status: resp.StatusCode,
@@ -871,7 +896,7 @@ func (s *Server) doForwardPrepared(c *gin.Context, a *auth.Auth, path string, bo
 			}
 		}
 
-		log.Warnf("proxy: %s returned %d — forwarding to client. body=%s", a.ID, resp.StatusCode, truncate(errBody, 500))
+		log.Warnf("proxy: %s returned %d — forwarding to client", a.ID, resp.StatusCode)
 		s.emitLog(requestlog.Record{
 			Client:      clientName,
 			ClientToken: maskClientToken(clientToken),
@@ -1474,6 +1499,9 @@ func claudePreparationFailureReason(err error) string {
 	if err == nil {
 		return "unknown"
 	}
+	if code := mimicry.PreparationErrorCodeOf(err); code != "" {
+		return string(code)
+	}
 	message := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(message, "account uuid"):
@@ -1482,6 +1510,10 @@ func claudePreparationFailureReason(err error) string {
 		return "missing_anthropic_beta"
 	case strings.Contains(message, "messages array"):
 		return "invalid_messages"
+	case strings.Contains(message, "source session"):
+		return "missing_source_session"
+	case strings.Contains(message, "credential binding"):
+		return "credential_binding_mismatch"
 	case strings.Contains(message, "json object"), strings.Contains(message, "request class"):
 		return "invalid_json_body"
 	case strings.Contains(message, "metadata"):

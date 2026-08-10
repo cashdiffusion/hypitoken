@@ -82,6 +82,12 @@ type Server struct {
 	// it, namespaced by credential group. Backs the cross-group previous_response_id
 	// safety boundary on the WS path. Always initialized (cheap; janitor goroutine).
 	codexRespAccount *codexRespAccountStore
+
+	// claudePreparationFailures coalesces repeated local Generic normalization
+	// errors by anonymous client + redacted request structure. It never stores
+	// raw prompts, tokens, or headers, and lets audits show an error burst
+	// without sending the invalid body to any upstream.
+	claudePreparationFailures claudePreparationFailureTracker
 }
 
 // LegacyAdmin returns the legacy admin handler so main.go can wire its

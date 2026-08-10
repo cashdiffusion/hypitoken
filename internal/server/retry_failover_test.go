@@ -79,6 +79,8 @@ func TestForwardPreparationFailureFallsBackToAPIKeyWithOriginalBodyAndAudit(t *t
 
 	oauthCred := oauthTestCred()
 	oauthCred.AccountUUID = "" // deterministic local preparation failure
+	oauthCredSecond := oauthTestCredID("credB", "tokenB")
+	oauthCredSecond.AccountUUID = ""
 	apiKeyCred := apiKeyTestCred("fallback")
 	logDir := t.TempDir()
 	writer, err := requestlog.Open(logDir, 0)
@@ -87,7 +89,7 @@ func TestForwardPreparationFailureFallsBackToAPIKeyWithOriginalBodyAndAudit(t *t
 	}
 	s := &Server{
 		cfg:           &config.Config{AnthropicBaseURL: upstream.URL, UseUTLS: false},
-		pool:          auth.NewPool([]*auth.Auth{oauthCred}, []*auth.Auth{apiKeyCred}, 10*time.Minute, false, ""),
+		pool:          auth.NewPool([]*auth.Auth{oauthCred, oauthCredSecond}, []*auth.Auth{apiKeyCred}, 10*time.Minute, false, ""),
 		switchTracker: thinkingsig.NewSwitchTracker(),
 		reqLog:        writer,
 	}
@@ -133,6 +135,128 @@ func TestForwardPreparationFailureFallsBackToAPIKeyWithOriginalBodyAndAudit(t *t
 	}
 	if !found {
 		t.Fatal("missing structured preparation-fallback audit")
+	}
+}
+
+// Regression for the production 400 burst: a Generic client can send an
+// OpenAI-style messages[0].role=system. The OAuth path must move that prompt
+// to top-level system, never ship the illegal role, and never pass ingress
+// headers or identity through to the selected account.
+func TestForwardGenericSystemMessageIsNormalizedBeforeOAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"claude-sonnet-5","metadata":{"user_id":"downstream-user"},"messages":[{"role":"system","content":"be a careful coding assistant"},{"role":"user","content":"question"}]}`)
+	var calls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("X-Downstream-Trace") != "" || r.Header.Get("Traceparent") != "" {
+			t.Fatalf("generic ingress headers leaked: %v", r.Header)
+		}
+		upstreamBody, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var prepared struct {
+			System []struct {
+				Text string `json:"text"`
+			} `json:"system"`
+			Messages []struct {
+				Role string `json:"role"`
+			} `json:"messages"`
+			Metadata struct {
+				UserID string `json:"user_id"`
+			} `json:"metadata"`
+		}
+		if err := json.Unmarshal(upstreamBody, &prepared); err != nil {
+			t.Fatal(err)
+		}
+		if len(prepared.System) < 3 || prepared.System[2].Text != "be a careful coding assistant" {
+			t.Fatalf("system prompt was not migrated: %s", upstreamBody)
+		}
+		for _, message := range prepared.Messages {
+			if message.Role == "system" {
+				t.Fatalf("illegal system message reached OAuth: %s", upstreamBody)
+			}
+		}
+		if strings.Contains(prepared.Metadata.UserID, "downstream-user") {
+			t.Fatalf("downstream identity leaked: %s", upstreamBody)
+		}
+		var identity struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := json.Unmarshal([]byte(prepared.Metadata.UserID), &identity); err != nil {
+			t.Fatal(err)
+		}
+		if identity.SessionID == "" || r.Header.Get("X-Claude-Code-Session-Id") != identity.SessionID {
+			t.Fatalf("header/body session mismatch: header=%q identity=%+v", r.Header.Get("X-Claude-Code-Session-Id"), identity)
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"test stop"}}`))
+	}))
+	defer upstream.Close()
+
+	credential := oauthTestCred()
+	s := newDoForwardTestServer(t, upstream.URL, credential)
+	c, recorder := newMessagesContext(t, body)
+	c.Request.Header.Set("X-Downstream-Trace", "do-not-forward")
+	c.Request.Header.Set("Traceparent", "00-downstream")
+	s.forwardWithFailover(c, auth.ProviderAnthropic, "/v1/messages", "claude-sonnet-5", "tok-abcdef123456", "", "client", "slot-1", body, false, time.Now())
+
+	if calls != 1 || recorder.Code != http.StatusBadRequest {
+		t.Fatalf("calls=%d status=%d", calls, recorder.Code)
+	}
+}
+
+func TestForwardUnsafeGenericBodyReturnsLocal400WithoutFallbackOrOAuthRotation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"claude-sonnet-5","messages":[{"role":"system","content":[]},{"role":"user","content":"question"}]}`)
+	var upstreamCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+
+	oauthA := oauthTestCredID("credA", "tokenA")
+	oauthB := oauthTestCredID("credB", "tokenB")
+	apiKey := apiKeyTestCred("fallback")
+	logDir := t.TempDir()
+	writer, err := requestlog.Open(logDir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		cfg:           &config.Config{AnthropicBaseURL: upstream.URL, UseUTLS: false},
+		pool:          auth.NewPool([]*auth.Auth{oauthA, oauthB}, []*auth.Auth{apiKey}, 10*time.Minute, false, ""),
+		switchTracker: thinkingsig.NewSwitchTracker(),
+		reqLog:        writer,
+	}
+	c, recorder := newMessagesContext(t, body)
+	s.forwardWithFailover(c, auth.ProviderAnthropic, "/v1/messages", "claude-sonnet-5", "tok-abcdef123456", "", "client", "slot-1", body, false, time.Now())
+	writer.Close()
+
+	if upstreamCalls != 0 || recorder.Code != http.StatusBadRequest || recorder.Header().Get("X-Error-Code") != "invalid_request" {
+		t.Fatalf("upstream=%d status=%d code=%q", upstreamCalls, recorder.Code, recorder.Header().Get("X-Error-Code"))
+	}
+	files, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var audit *requestlog.ClaudeAudit
+	for _, file := range files {
+		data, readErr := os.ReadFile(logDir + "/" + file.Name())
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		for _, line := range bytes.Split(data, []byte{'\n'}) {
+			var record requestlog.Record
+			if json.Unmarshal(line, &record) == nil && record.ClaudeAudit != nil && record.ClaudeAudit.PreparationFailed {
+				audit = record.ClaudeAudit
+			}
+		}
+	}
+	if audit == nil || audit.Fallback != "none" || audit.PreparationError != "invalid_directive_structure" ||
+		audit.PreparationFailures != 1 || audit.ClientHash == "" || len(audit.BodySHA256) != 64 {
+		t.Fatalf("missing local-rejection audit: %+v", audit)
 	}
 }
 

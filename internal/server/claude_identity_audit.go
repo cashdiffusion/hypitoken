@@ -17,7 +17,7 @@ const maxAuditNames = 16
 // claudeIdentityAudit turns the opaque prepared-request result into
 // privacy-safe request-log evidence. It never receives or stores a raw prompt,
 // bearer, client token, account UUID, or email.
-func claudeIdentityAudit(prepared mimicry.BodyTransformResult, accountKey string, headers http.Header, proxyURL string) *requestlog.ClaudeAudit {
+func claudeIdentityAudit(prepared mimicry.BodyTransformResult, accountKey, clientToken string, headers http.Header, proxyURL string) *requestlog.ClaudeAudit {
 	if !prepared.IsValid() || !prepared.AccountIdentityApplied() {
 		return nil
 	}
@@ -29,6 +29,7 @@ func claudeIdentityAudit(prepared mimicry.BodyTransformResult, accountKey string
 	extraHeaders := unexpectedClaudeHeaderNames(headers)
 	audit := &requestlog.ClaudeAudit{
 		AccountHash:           mimicry.HashClaudeAccountKey(accountKey),
+		ClientHash:            hashAuditValues("claude-client/v1", clientToken),
 		RequestClass:          prepared.Policy().Class().String(),
 		IdentityMode:          mode,
 		AccountIdentityMapped: prepared.AccountIdentityApplied(),
@@ -47,31 +48,32 @@ func claudeIdentityAudit(prepared mimicry.BodyTransformResult, accountKey string
 	return audit
 }
 
-func claudePreparationFailureAudit(requestClass mimicry.RequestClass, accountKey, reason string, body []byte, headers http.Header, proxyURL string) *requestlog.ClaudeAudit {
+func claudePreparationFailureAudit(requestClass mimicry.RequestClass, accountKey, clientToken, reason, fallback string, failures int, body []byte, headers http.Header, proxyURL string) *requestlog.ClaudeAudit {
 	mode := "rewrite"
 	if requestClass == mimicry.RequestClassGeneric {
 		mode = mimicry.GenericRequestSynthesize.String()
 	}
 	return &requestlog.ClaudeAudit{
-		AccountHash:       mimicry.HashClaudeAccountKey(accountKey),
-		RequestClass:      requestClass.String(),
-		IdentityMode:      mode,
-		PreparationFailed: true,
-		PreparationError:  reason,
-		Fallback:          "apikey",
-		BodyBytes:         len(body),
-		BodySHA256:        hashBody(body),
-		SessionBinding:    "unavailable",
-		BillingValidation: "failed",
-		BetaHash:          hashAuditValues("claude-beta/v1", headers.Get("Anthropic-Beta")),
-		ProfileHash:       claudeProfileHash(headers),
-		ProxyConfigHash:   proxyConfigHash(proxyURL),
+		AccountHash:         mimicry.HashClaudeAccountKey(accountKey),
+		ClientHash:          hashAuditValues("claude-client/v1", clientToken),
+		RequestClass:        requestClass.String(),
+		IdentityMode:        mode,
+		PreparationFailed:   true,
+		PreparationError:    reason,
+		PreparationFailures: failures,
+		Fallback:            fallback,
+		BodyBytes:           len(body),
+		BodySHA256:          hashBody(body),
+		SessionBinding:      "unavailable",
+		BillingValidation:   "failed",
+		BetaHash:            hashAuditValues("claude-beta/v1", headers.Get("Anthropic-Beta")),
+		ProfileHash:         claudeProfileHash(headers),
+		ProxyConfigHash:     proxyConfigHash(proxyURL),
 	}
 }
 
 func hashBody(body []byte) string {
-	sum := sha256.Sum256(body)
-	return fmt.Sprintf("%x", sum)
+	return mimicry.ClaudeRequestStructureSHA256(body)
 }
 
 func hashAuditValues(domain string, values ...string) string {
@@ -135,7 +137,7 @@ func proxyConfigHash(raw string) string {
 }
 
 func unexpectedClaudeHeaderNames(headers http.Header) []string {
-	var names []string
+	names := make([]string, 0, len(headers))
 	for name := range headers {
 		lower := strings.ToLower(name)
 		if expectedClaudeHeader(lower) {

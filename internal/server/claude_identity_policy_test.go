@@ -86,7 +86,7 @@ func TestClaudeRewriteAuditMapsAnonymizedAccount(t *testing.T) {
 	if err := applyAnthropicPreparedHeaders(req, credential, true, true, prepared); err != nil {
 		t.Fatal(err)
 	}
-	audit := claudeIdentityAudit(prepared, credential.AccountKey(), req.Header, credential.ProxyURL)
+	audit := claudeIdentityAudit(prepared, credential.AccountKey(), "client-token", req.Header, credential.ProxyURL)
 	if audit == nil {
 		t.Fatal("missing Claude rewrite audit")
 	}
@@ -128,7 +128,7 @@ func TestClaudeGenericSynthesisAuditMapsAnonymizedAccount(t *testing.T) {
 	if err := applyAnthropicPreparedHeaders(req, credential, true, true, prepared); err != nil {
 		t.Fatal(err)
 	}
-	audit := claudeIdentityAudit(prepared, credential.AccountKey(), req.Header, credential.ProxyURL)
+	audit := claudeIdentityAudit(prepared, credential.AccountKey(), "client-token", req.Header, credential.ProxyURL)
 	if audit == nil || audit.RequestClass != "generic" || audit.IdentityMode != "synthesize" ||
 		!audit.AccountIdentityMapped || audit.AccountHash == "" || audit.AccountHash == credential.AccountKey() {
 		t.Fatalf("unexpected generic audit: %+v", audit)
@@ -168,7 +168,7 @@ func BenchmarkClaudeIdentityAudit(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		if audit := claudeIdentityAudit(prepared, credential.AccountKey(), req.Header, credential.ProxyURL); audit == nil {
+		if audit := claudeIdentityAudit(prepared, credential.AccountKey(), "client-token", req.Header, credential.ProxyURL); audit == nil {
 			b.Fatal("missing audit")
 		}
 	}
