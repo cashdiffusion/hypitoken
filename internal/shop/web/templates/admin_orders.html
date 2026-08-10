@@ -19,7 +19,10 @@
   </div>
 
   <section class="bg-card hairline rounded-lg overflow-hidden ">
-    <table class="w-full text-[13.5px]">
+    <!-- Six columns will not fit a phone. The card clips (rounded corners), so
+         without this the far columns are unreachable rather than scrollable. -->
+    <div class="overflow-x-auto">
+    <table class="w-full min-w-[720px] text-[13.5px]">
       <thead>
         <tr class="hairline-b bg-secondary/40">
           <th class="text-left px-5 py-3 eyebrow font-medium">订单号</th>
@@ -64,6 +67,7 @@
         {{end}}
       </tbody>
     </table>
+    </div>
   </section>
 </div>
 

@@ -7,15 +7,18 @@
   </a>
 </div>
 
-<div class="grid grid-cols-12 gap-10 lg:gap-16">
+<!-- One column on phones. A 12-track grid still lays out its 11 gaps even when
+     every child spans all 12, so `grid-cols-12 gap-10` has a 440px floor —
+     74px wider than the 390px viewport. The track count only starts at lg. -->
+<div class="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:gap-16">
 
   <!-- Product detail — sticky on desktop -->
-  <aside class="col-span-12 lg:col-span-5 reveal">
+  <aside class="lg:col-span-5 reveal">
     <div class="lg:sticky lg:top-28">
       <div class="section-meta mb-5">
         <span class="eyebrow">单品 · 收据预览</span>
       </div>
-      <h1 class="font-display text-[42px] leading-[1.05] tracking-tight text-foreground font-medium">
+      <h1 class="font-display text-[32px] sm:text-[42px] leading-[1.08] sm:leading-[1.05] tracking-tight text-foreground font-medium">
         {{.Product.Name}}
       </h1>
       {{if .Product.Description}}
@@ -25,7 +28,7 @@
       <dl class="mt-10 space-y-4 hairline-t pt-6">
         <div class="flex items-baseline justify-between">
           <dt class="eyebrow">售价</dt>
-          <dd class="font-display text-[44px] leading-none text-foreground num tracking-tight">
+          <dd class="font-display text-[34px] sm:text-[44px] leading-none text-foreground num tracking-tight">
             <span class="text-[20px] text-muted-fg align-top">{{curSymbol .Product.Currency}}</span>{{printf "%.2f" .Product.PriceCNY}}
           </dd>
         </div>
@@ -46,7 +49,7 @@
   </aside>
 
   <!-- Form -->
-  <section class="col-span-12 lg:col-span-7 reveal" style="animation-delay:0.1s">
+  <section class="lg:col-span-7 reveal" style="animation-delay:0.1s">
     {{if .OutOfStock}}
     <div class="bg-destructive-soft border border-destructive-soft rounded-lg p-6">
       <div class="eyebrow text-destructive mb-2">售罄</div>
@@ -56,7 +59,7 @@
     {{else}}
 
     <div class="bg-card hairline rounded-lg ">
-      <div class="p-7 lg:p-9 hairline-b">
+      <div class="p-5 sm:p-7 lg:p-9 hairline-b">
         <div class="eyebrow mb-2">结算 · 三个字段</div>
         <h2 class="font-display text-[26px] leading-tight text-foreground font-medium">
           填写收件方式
@@ -64,12 +67,12 @@
       </div>
 
       {{if .FormError}}
-      <div class="mx-7 lg:mx-9 mt-6 bg-destructive-soft border border-destructive-soft rounded-md px-4 py-3 text-[13px] text-destructive">
+      <div class="mx-5 sm:mx-7 lg:mx-9 mt-6 bg-destructive-soft border border-destructive-soft rounded-md px-4 py-3 text-[13px] text-destructive">
         {{.FormError}}
       </div>
       {{end}}
 
-      <form method="POST" action="/buy/{{.Product.ID}}" class="p-7 lg:p-9 space-y-7">
+      <form method="POST" action="/buy/{{.Product.ID}}" class="p-5 sm:p-7 lg:p-9 space-y-7">
         <div>
           <div class="flex items-baseline justify-between mb-2">
             <label class="text-[13px] font-medium text-foreground">邮箱 · 收件地址</label>

@@ -261,6 +261,12 @@
     border: 1px solid currentColor;
     background: color-mix(in oklch, currentColor 8%, transparent);
   }
+  /* Pills serve two jobs: static status badges and the order-list filter
+     controls. Only the interactive ones need a finger-sized target, and only
+     on touch input — widening them on desktop would just make them clumsy. */
+  @media (pointer: coarse) {
+    a.pill, button.pill { min-height: 40px; padding: 12px 14px; }
+  }
   .pulse::before {
     content: ''; display: inline-block; width: 7px; height: 7px;
     border-radius: 999px; background: currentColor;
@@ -313,24 +319,26 @@
 <body class="font-sans antialiased">
 
 <header class="hairline-b backdrop-blur sticky top-0 z-20" style="background: color-mix(in oklch, var(--background) 85%, transparent);">
-  <div class="mx-auto max-w-6xl px-6 lg:px-10 py-5 flex items-center justify-between">
-    <a href="/" class="flex items-center gap-3 group">
+  <div class="mx-auto max-w-6xl px-5 sm:px-6 lg:px-10 py-4 sm:py-5 flex items-center justify-between gap-3">
+    <a href="/" class="flex items-center gap-3 group min-w-0">
       <!-- Mark: terminal cursor / phosphor dot -->
       <span class="relative inline-flex items-center justify-center w-9 h-9 rounded-lg overflow-hidden" style="background: color-mix(in oklch, var(--primary) 12%, var(--card)); border: 1px solid var(--border);">
         <span class="absolute inset-0 opacity-60" style="background: radial-gradient(circle at 50% 50%, color-mix(in oklch, var(--primary) 50%, transparent) 0%, transparent 70%);"></span>
         <span class="font-mono text-[15px] font-bold relative" style="color: var(--primary);">$_</span>
       </span>
-      <span class="font-display text-[22px] leading-none tracking-tight font-medium text-foreground">{{.SiteName}}</span>
+      <span class="font-display text-[19px] sm:text-[22px] leading-none tracking-tight font-medium text-foreground truncate">{{.SiteName}}</span>
     </a>
-    <nav class="flex items-center gap-7 text-[13.5px]">
-      <a href="/" class="text-muted-fg hover:text-foreground transition-colors">商品</a>
-      <a href="/order" class="text-muted-fg hover:text-foreground transition-colors">订单查询</a>
+    <!-- `py-2.5 -my-2.5` grows the touch target to ~44px without moving the
+         baseline the header was designed around. -->
+    <nav class="flex items-center gap-4 sm:gap-7 text-[13.5px] shrink-0">
+      <a href="/" class="py-2.5 -my-2.5 text-muted-fg hover:text-foreground transition-colors">商品</a>
+      <a href="/order" class="py-2.5 -my-2.5 text-muted-fg hover:text-foreground transition-colors">订单查询</a>
       {{if .IsAdmin}}
-      <a href="/admin" class="text-muted-fg hover:text-foreground transition-colors flex items-center gap-1.5">
+      <a href="/admin" class="py-2.5 -my-2.5 text-muted-fg hover:text-foreground transition-colors flex items-center gap-1.5">
         <span class="inline-block w-1.5 h-1.5 rounded-full" style="background: var(--primary);"></span>管理
       </a>
       {{end}}
-      <button type="button" id="theme-toggle" class="ml-2 inline-flex items-center justify-center w-9 h-9 rounded-md hairline hover:border-primary transition-colors group" title="切换主题" aria-label="切换主题">
+      <button type="button" id="theme-toggle" class="ml-0 sm:ml-2 inline-flex items-center justify-center w-10 h-10 rounded-md hairline hover:border-primary transition-colors group" title="切换主题" aria-label="切换主题">
         <!-- sun -->
         <svg class="w-4 h-4 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
         <!-- moon -->
@@ -340,12 +348,12 @@
   </div>
 </header>
 
-<main class="mx-auto max-w-6xl px-6 lg:px-10 py-12 lg:py-16">
+<main class="mx-auto max-w-6xl px-5 sm:px-6 lg:px-10 py-10 sm:py-12 lg:py-16">
 {{block "content" .}}{{end}}
 </main>
 
 <footer class="hairline-t mt-20">
-  <div class="mx-auto max-w-6xl px-6 lg:px-10 py-8 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+  <div class="mx-auto max-w-6xl px-5 sm:px-6 lg:px-10 py-8 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
     <div class="eyebrow">© {{.SiteName}} · digital atelier</div>
     <div class="eyebrow flex items-center gap-2">
       <span class="inline-block w-1.5 h-1.5 rounded-full" style="background: var(--success);"></span>
