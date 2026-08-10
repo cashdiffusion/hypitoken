@@ -233,8 +233,8 @@ func bonus(t *testing.T, store *db.DB, userID int64, amt float64) {
 
 // TestGiftRequiresTopup replays the 2026-08-08 laundering route: a throwaway
 // account receives its $1 signup bonus and immediately gifts it to the farm's
-// main account. Bonus credit must not be forwardable; a real topup lifts the
-// block.
+// main account. Bonus credit must not be forwardable; real money lifts the
+// block, but only up to how much real money there is.
 func TestGiftRequiresTopup(t *testing.T) {
 	ctx := context.Background()
 	svc, store := newSvc(t, false)
@@ -256,44 +256,73 @@ func TestGiftRequiresTopup(t *testing.T) {
 		t.Fatalf("farmer must receive nothing: got %v", got)
 	}
 
-	// One cent of real money is enough — the gate is about provenance, not size.
+	// A token topup no longer unlocks the whole wallet: the mule now holds $1
+	// bonus + $0.01 real, so $1 is still refused and $0.01 goes through. Under
+	// the old boolean gate the first call here succeeded — that was the hole.
 	credit(t, store, mule, 0.01)
-	if _, err := svc.SendGift(ctx, mule, "mule@test.com", "farmer@test.com", 1, "", "claude", "dark"); err != nil {
-		t.Fatalf("after topup the gift must go through: %v", err)
+	if _, err := svc.SendGift(ctx, mule, "mule@test.com", "farmer@test.com", 1, "", "claude", "dark"); !errors.Is(err, ErrBonusNotGiftable) {
+		t.Fatalf("a $0.01 topup must not unlock $1 of bonus: got %v", err)
 	}
-	if got := bal(t, store, farmer); got != 1 {
-		t.Fatalf("farmer balance: want 1, got %v", got)
+	if _, err := svc.SendGift(ctx, mule, "mule@test.com", "farmer@test.com", 0.01, "", "claude", "dark"); err != nil {
+		t.Fatalf("gifting the real money must go through: %v", err)
+	}
+	if got := bal(t, store, farmer); got != 0.01 {
+		t.Fatalf("farmer balance: want 0.01, got %v", got)
 	}
 }
 
-// TestHasEverToppedUpIgnoresNonTopupCredit pins the ledger predicate itself:
-// only `topup` counts. A refund of a topup is money returning, not money
-// arriving, and an admin adjust is us granting credit — neither proves payment.
-func TestHasEverToppedUpIgnoresNonTopupCredit(t *testing.T) {
+// TestGiftableHeadroomIgnoresBonus pins the ledger predicate itself: bonus
+// credit (`adjust`) and a plain refund never make money giftable, a topup does,
+// and headroom is conserved across a transfer — the recipient of a gift can pass
+// it on, but the total giftable across both accounts never grows.
+func TestGiftableHeadroomIgnoresBonus(t *testing.T) {
 	ctx := context.Background()
-	_, store := newSvc(t, false)
+	svc, store := newSvc(t, false)
 	u := mkUser(t, store, "ledger@test.com")
 
 	for _, kind := range []string{db.TxKindAdjust, db.TxKindRefund} {
 		if _, err := store.AddBalance(ctx, u, kind, 5, "test", "", false); err != nil {
 			t.Fatalf("add %s: %v", kind, err)
 		}
-		paid, err := store.HasEverToppedUp(ctx, u)
+		got, err := svc.GiftableUSD(ctx, u)
 		if err != nil {
 			t.Fatalf("check: %v", err)
 		}
-		if paid {
-			t.Fatalf("%s must not count as payment", kind)
+		if got != 0 {
+			t.Fatalf("%s must not become giftable: got %v", kind, got)
 		}
 	}
 
-	credit(t, store, u, 1)
-	paid, err := store.HasEverToppedUp(ctx, u)
-	if err != nil {
-		t.Fatalf("check: %v", err)
+	credit(t, store, u, 4)
+	if got, _ := svc.GiftableUSD(ctx, u); got != 4 {
+		t.Fatalf("topup must be giftable: want 4, got %v", got)
 	}
-	if !paid {
-		t.Fatal("a topup must count as payment")
+
+	// Conservation: sending $3 moves the headroom, it does not duplicate it.
+	peer := mkUser(t, store, "peer@test.com")
+	if _, err := svc.SendGift(ctx, u, "ledger@test.com", "peer@test.com", 3, "", "claude", "dark"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if got, _ := svc.GiftableUSD(ctx, u); got != 1 {
+		t.Fatalf("sender headroom after gifting 3 of 4: want 1, got %v", got)
+	}
+	if got, _ := svc.GiftableUSD(ctx, peer); got != 3 {
+		t.Fatalf("recipient headroom: want 3, got %v", got)
+	}
+}
+
+// TestGiftableCappedByBalance covers the other half of the min(): real money
+// that has since been spent is no longer giftable, however it was funded.
+func TestGiftableCappedByBalance(t *testing.T) {
+	ctx := context.Background()
+	svc, store := newSvc(t, false)
+	u := mkUser(t, store, "spender@test.com")
+	credit(t, store, u, 10)
+	if _, err := store.AddBalance(ctx, u, db.TxKindCharge, -8, "req", "", false); err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	if got, _ := svc.GiftableUSD(ctx, u); got != 2 {
+		t.Fatalf("want 2 (balance-capped), got %v", got)
 	}
 }
 

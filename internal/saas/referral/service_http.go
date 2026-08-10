@@ -95,14 +95,18 @@ func (s *Service) handleMe(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Surfaced so the gift form can explain the restriction up front instead of
-	// letting the user compose a card and only then bounce it. On error assume
-	// eligible: a transient DB blip must not accuse a paying customer, and
-	// SendGift re-checks authoritatively either way.
-	canGift, cerr := s.DB.HasEverToppedUp(c.Request.Context(), u.ID)
+	// Surfaced so the gift form can cap its amount field and explain the
+	// restriction up front, instead of letting the user compose a card and only
+	// then bounce it. On error assume eligible: a transient DB blip must not
+	// accuse a paying customer, and SendGift re-checks authoritatively either way.
+	giftable, cerr := s.GiftableUSD(c.Request.Context(), u.ID)
 	if cerr != nil {
-		canGift = true
+		// Fall back to the plain balance rather than to zero, so a blip loosens
+		// the form instead of falsely telling a paying customer they have nothing
+		// to give.
+		giftable, _ = s.DB.GetBalance(c.Request.Context(), u.ID)
 	}
+	canGift := giftable > 0
 	c.JSON(http.StatusOK, gin.H{
 		"stats":         stats,
 		"card":          card,
@@ -110,6 +114,7 @@ func (s *Service) handleMe(c *gin.Context) {
 		"invite_code":   card.Code,
 		"campaign":      s.campaignPayload(c, u.ID),
 		"can_send_gift": canGift,
+		"giftable_usd":  giftable,
 	})
 }
 
@@ -238,6 +243,11 @@ func (s *Service) handleSendGift(c *gin.Context) {
 			// "payment required" would send the UI down the top-up-to-cover-this
 			// path. The block is on who may gift at all, not on the amount.
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error(), "code": "topup_required"})
+		case errors.Is(err, ErrBonusNotGiftable):
+			// Same reasoning: the balance covers the amount, it just isn't all
+			// real money. Hand back the cap so the form can correct itself.
+			giftable, _ := s.GiftableUSD(c.Request.Context(), u.ID)
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error(), "code": "bonus_not_giftable", "giftable_usd": giftable})
 		case errors.Is(err, db.ErrInsufficientBalance):
 			c.JSON(http.StatusPaymentRequired, gin.H{"error": "insufficient balance"})
 		default:

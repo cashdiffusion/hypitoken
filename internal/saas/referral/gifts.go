@@ -15,12 +15,28 @@ import (
 
 // Gift-flow validation errors (surfaced to the user verbatim by the handler).
 var (
-	ErrInvalidEmail   = errors.New("invalid recipient email")
-	ErrSelfGift       = errors.New("cannot gift to yourself")
-	ErrAmountTooSmall = errors.New("gift amount must be greater than zero")
-	ErrAmountTooLarge = errors.New("gift amount exceeds the per-gift limit")
-	ErrTopupRequired  = errors.New("add credit to your account before sending a gift")
+	ErrInvalidEmail     = errors.New("invalid recipient email")
+	ErrSelfGift         = errors.New("cannot gift to yourself")
+	ErrAmountTooSmall   = errors.New("gift amount must be greater than zero")
+	ErrAmountTooLarge   = errors.New("gift amount exceeds the per-gift limit")
+	ErrTopupRequired    = errors.New("add credit to your account before sending a gift")
+	ErrBonusNotGiftable = errors.New("bonus credit cannot be gifted")
 )
+
+// GiftableUSD is how much of a user's wallet may be sent on as a gift: the real
+// money it holds, never more than the balance actually sitting there. Bonus
+// credit is excluded — see db.GiftableHeadroom.
+func (s *Service) GiftableUSD(ctx context.Context, userID int64) (float64, error) {
+	headroom, err := s.DB.GiftableHeadroom(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	bal, err := s.DB.GetBalance(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	return roundCents(math.Max(0, math.Min(headroom, bal))), nil
+}
 
 func validEmail(email string) bool {
 	return strings.Contains(email, "@") && strings.Contains(email, ".") && len(email) >= 5 && len(email) < 200
@@ -63,19 +79,36 @@ func (s *Service) SendGift(ctx context.Context, senderID int64, senderEmail, rec
 	}
 
 	// A gift moves credit between accounts, so it is the one operation that lets
-	// bonus money escape the account it was granted to. Require that the sender
-	// has topped up at least once: paying customers gift freely, while an account
-	// holding nothing but signup/referral bonuses cannot forward them on. This is
-	// what the 2026-08-08 farm used — throwaway accounts gifted their $1 signup
-	// bonus to the operator's main account seconds after registering.
+	// bonus money escape the account it was granted to. Cap it at the real money
+	// the sender is holding: paying customers gift what they paid for, while
+	// signup/referral/goodwill credit stays put. This is what the 2026-08-08 farm
+	// used — throwaway accounts gifted their $1 signup bonus to the operator's
+	// main account seconds after registering.
+	//
+	// The cap is quantitative rather than a "has ever paid" boolean, so topping up
+	// $1 no longer unlocks forwarding an unlimited pile of bonus credit.
 	//
 	// Checked here rather than in the handler so every caller is covered, and
 	// placed after the cheap validation so a malformed request still gets the
 	// more specific error.
-	if paid, err := s.DB.HasEverToppedUp(ctx, senderID); err != nil {
+	//
+	// Only the provenance question is answered here. Asking for more than the
+	// wallet holds at all is left to GiftSendTx so it still reports the accurate
+	// ErrInsufficientBalance rather than blaming the bonus rule.
+	headroom, err := s.DB.GiftableHeadroom(ctx, senderID)
+	if err != nil {
 		return nil, err
-	} else if !paid {
+	}
+	bal, err := s.DB.GetBalance(ctx, senderID)
+	if err != nil {
+		return nil, err
+	}
+	giftable := roundCents(math.Max(0, math.Min(headroom, bal)))
+	switch {
+	case giftable <= 0 && amountUSD <= bal:
 		return nil, ErrTopupRequired
+	case amountUSD > giftable && amountUSD <= bal:
+		return nil, fmt.Errorf("%w: at most $%.2f of this balance is giftable", ErrBonusNotGiftable, giftable)
 	}
 
 	code, err := s.newRedeemCode(ctx)

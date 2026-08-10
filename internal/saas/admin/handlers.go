@@ -188,7 +188,15 @@ func (h *Handler) updateUser(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
-	c.JSON(http.StatusOK, u)
+	// Projected field by field rather than echoing db.User: that struct carries
+	// no json tags, so serialising it whole put the bcrypt password hash on the
+	// wire for every user edit.
+	c.JSON(http.StatusOK, gin.H{
+		"id": u.ID, "email": u.Email, "role": u.Role,
+		"balance_usd": u.BalanceUSD, "group_id": u.GroupID,
+		"email_verified": u.EmailVerified, "disabled": u.Disabled,
+		"created_at": u.CreatedAt.Unix(),
+	})
 }
 
 type balanceReq struct {

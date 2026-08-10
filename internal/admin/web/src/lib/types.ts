@@ -483,9 +483,13 @@ export interface ReferralMe {
   invite_url: string;
   invite_code: string;
   campaign: ReferralCampaign;
-  /** False until the account has topped up at least once — bonus credit alone
-   *  cannot be forwarded to another account. */
+  /** False while `giftable_usd` is zero — bonus credit alone cannot be
+   *  forwarded to another account. */
   can_send_gift: boolean;
+  /** Ceiling on a single gift: the real money in the wallet (topups + gifts
+   *  received − gifts sent), capped by the current balance. Bonus credit is
+   *  excluded, so this is usually below the displayed balance. */
+  giftable_usd: number;
 }
 
 export interface GiftCard {

@@ -225,34 +225,53 @@ func (db *DB) GetBalance(ctx context.Context, userID int64) (float64, error) {
 	return db.GetWorkspaceBalance(ctx, wsID)
 }
 
-// HasEverToppedUp reports whether real money has ever entered this user's
-// personal wallet — i.e. at least one `topup` row exists for it.
+// GiftableHeadroom reports how much of this user's wallet may be forwarded on
+// as a gift card — that is, how much *real* money the account is holding.
 //
-// It answers "has this account ever paid us anything", which is the cheapest
-// honest proxy for "is a human behind this account". Bonus credit (`adjust`)
-// deliberately does NOT count: on 2026-08-08 a referral farm swept the $1
-// signup bonus off its throwaway accounts by having each one issue a gift card
-// back to the operator's main account, seconds after registering. Gating gift
-// issuance on a topup closes that route without touching the bonus itself —
-// farmed credit can still be spent on the account that received it, it just
-// cannot be moved to another account.
+// A gift is the one operation that moves credit between accounts, so it is the
+// only way bonus money can escape the account it was granted to. On 2026-08-08
+// a referral farm used exactly that: each throwaway account gifted its $1 signup
+// bonus to the operator's main account seconds after registering. Bonus credit
+// (signup, referral, milestone, operator goodwill — all `adjust`) is therefore
+// not giftable at all. It stays spendable on the account that earned it; it just
+// cannot be moved.
 //
-// Both attribution shapes are checked: topups land on the personal workspace
+// Headroom is conserved across transfers rather than merely gated on "has this
+// account ever paid us anything":
+//
+//   - every topup                (real money in)
+//   - every gift claimed in      (someone else's real money, already debited
+//     from their headroom when they sent it)
+//   - every gift sent out        (already negative in the ledger)
+//   - every expired gift refunded back
+//
+// So A topping up $10 and gifting it to B leaves A at 0 and B at $10 — the total
+// never grows, and an account that never paid stays at 0 no matter how much
+// bonus it accumulates. Consumption is deliberately NOT subtracted: the caller
+// takes min(headroom, balance), and charging bonus-funded usage against the
+// headroom would punish a paying customer for using the service.
+//
+// The result may be negative if a legacy gift predates this accounting; callers
+// clamp at zero.
+//
+// Both attribution shapes are summed: money-in lands on the personal workspace
 // via addWorkspaceBalanceTx (workspace_id set, user_id = payer), but rows
 // written before workspaces existed carry only user_id.
-func (db *DB) HasEverToppedUp(ctx context.Context, userID int64) (bool, error) {
-	var found int
+func (db *DB) GiftableHeadroom(ctx context.Context, userID int64) (float64, error) {
+	var v sql.NullFloat64
 	err := db.QueryRowContext(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM wallet_tx
-			 WHERE kind = ?
-			   AND (user_id = ?
-			     OR workspace_id = (SELECT personal_workspace_id FROM users WHERE id = ?))
-		)`, TxKindTopup, userID, userID).Scan(&found)
+		SELECT COALESCE(SUM(amount_usd), 0) FROM wallet_tx
+		 WHERE (user_id = ?
+		     OR workspace_id = (SELECT personal_workspace_id FROM users WHERE id = ?))
+		   AND (kind = ?
+		     OR ref LIKE 'gift_claim:%'
+		     OR ref LIKE 'gift_send:%'
+		     OR ref LIKE 'gift_refund:%')`,
+		userID, userID, TxKindTopup).Scan(&v)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
-	return found == 1, nil
+	return v.Float64, nil
 }
 
 // ListWalletTx returns a page of the user's transactions plus the matching

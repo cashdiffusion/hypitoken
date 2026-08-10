@@ -377,6 +377,10 @@ function GiftTab({ me, onSent }: { me: ReferralMe; onSent: () => void }) {
     loadSent();
   }, []);
 
+  // Two ceilings apply: the campaign's per-gift limit and how much of this
+  // wallet is real money. Whichever binds first is the one to show.
+  const giftMax = Math.min(me.campaign.max_gift_usd, me.giftable_usd || 0);
+
   const card: TokenCardProps = useMemo(
     () => ({
       style,
@@ -467,17 +471,22 @@ function GiftTab({ me, onSent }: { me: ReferralMe; onSent: () => void }) {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="gift-amount">
-              {t("gift.amountLabel", { max: fmtUSD(me.campaign.max_gift_usd) })}
-            </Label>
+            <Label htmlFor="gift-amount">{t("gift.amountLabel", { max: fmtUSD(giftMax) })}</Label>
             <Input
               id="gift-amount"
               type="number"
               min={1}
-              max={me.campaign.max_gift_usd}
+              max={giftMax}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
+            {me.can_send_gift && (
+              // The wallet often shows more than this, so say why rather than
+              // letting the cap look arbitrary.
+              <p className="text-xs text-muted-foreground">
+                {t("gift.giftableHint", { amount: fmtUSD(me.giftable_usd) })}
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="gift-msg">{t("gift.messageLabel")}</Label>
@@ -491,7 +500,13 @@ function GiftTab({ me, onSent }: { me: ReferralMe; onSent: () => void }) {
           </div>
           <Button
             onClick={send}
-            disabled={sending || !email || Number(amount) <= 0 || !me.can_send_gift}
+            disabled={
+              sending ||
+              !email ||
+              Number(amount) <= 0 ||
+              Number(amount) > giftMax ||
+              !me.can_send_gift
+            }
           >
             <Send className="mr-1.5 size-4" /> {sending ? t("gift.sending") : t("gift.sendBtn")}
           </Button>

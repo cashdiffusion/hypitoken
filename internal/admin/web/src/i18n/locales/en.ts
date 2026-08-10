@@ -395,8 +395,9 @@ export default {
     sending: "Sending…",
     sent: "Gift sent",
     note: "Deducted from your wallet. The recipient claims after sign-up; unclaimed after {{days}} days it returns to you.",
+    giftableHint: "{{amount}} giftable — topped-up credit only; bonus credit does not count.",
     locked:
-      "Sending gift cards requires at least one top-up. Bonus credit (signup gift, referral rewards) is yours to spend, but cannot be transferred to another account.",
+      "Sending gift cards requires topped-up credit. Bonus credit (signup gift, referral rewards, goodwill) is yours to spend, but cannot be transferred to another account.",
     lockedCta: "Add credit →",
     sentTitle: "Sent by me",
     claimLabel: "Enter a redeem code",
