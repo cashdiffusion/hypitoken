@@ -18,6 +18,7 @@ import (
 
 	"github.com/wjsoj/cc-core/advisor"
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/downstream"
 	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/relay"
 	"github.com/wjsoj/cc-core/requestlog"
@@ -424,11 +425,23 @@ type deferredResponse struct {
 
 const claudePreparationAPIKeyFallbackKey = "claude_preparation_apikey_fallback"
 
+// copySafeRetryHeaders carries the backoff signal from a withheld upstream
+// response onto the synthesized error we return instead.
+//
+// Only Retry-After, and deliberately nothing else: the body here is our own
+// APIError JSON, so copying the upstream Content-Type (text/event-stream on a
+// streaming call) would misdescribe it.
+//
+// Going through the scrubber rather than reading the header directly is what
+// gains the derivation — when upstream sent no Retry-After, one is computed from
+// the unified reset timestamps before those are dropped. X-RateLimit-Reset is no
+// longer forwarded: on the relay path it publishes that relay's window, which is
+// the same class of disclosure as the Anthropic headers.
 func copySafeRetryHeaders(c *gin.Context, h http.Header) {
-	for _, key := range []string{"Retry-After", "X-RateLimit-Reset"} {
-		if value := h.Get(key); value != "" {
-			c.Header(key, value)
-		}
+	scrubbed := h.Clone()
+	downstream.ScrubUpstreamHeaders(scrubbed, time.Now())
+	if value := scrubbed.Get("Retry-After"); value != "" {
+		c.Header("Retry-After", value)
 	}
 }
 
@@ -1463,15 +1476,20 @@ func copyForwardableHeaders(src, dst http.Header) {
 	}
 }
 
+// writeResponseHeaders forwards the upstream response headers the client is
+// allowed to see.
+//
+// The allowlist lives in cc-core/downstream. Copying verbatim used to hand the
+// caller our pool's operational state: the twelve anthropic-ratelimit-unified-*
+// headers (the serving account's tier, its 5h/7d utilisation, its overage status
+// and exact reset timestamps), anthropic-organization-id,
+// anthropic-workspace-id, the upstream request-id and cf-ray.
+//
+// Safe by capture, not by hope: a real third-party gateway returns none of them
+// and Claude Code works against it unchanged (cc-core crack/thirdparty/SPEC.md
+// §4). Called after the retry loop has read those headers for scheduling.
 func writeResponseHeaders(c *gin.Context, resp *http.Response) {
-	for k, vs := range resp.Header {
-		if hopHeaders[http.CanonicalHeaderKey(k)] {
-			continue
-		}
-		for _, v := range vs {
-			c.Writer.Header().Add(k, v)
-		}
-	}
+	downstream.CopyResponseHeaders(c.Writer.Header(), resp.Header, time.Now())
 	c.Writer.WriteHeader(resp.StatusCode)
 }
 
@@ -1516,7 +1534,7 @@ func prepareClaudePreparedBody(body []byte, model string, a *auth.Auth, id mimic
 	// subsequently validates the prepared body, so these exact-byte edits cannot
 	// leave a partially rewritten request behind.
 	if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
-		rewritten, err := rewriteModelFieldPreservingBytes(working, upstreamModel)
+		rewritten, err := mimicry.RewriteModelFieldPreservingBytes(working, upstreamModel)
 		if err != nil {
 			return mimicry.BodyTransformResult{}, fmt.Errorf("model rewrite (%s -> %s): %w", model, upstreamModel, err)
 		}
@@ -1619,6 +1637,12 @@ func streamSSE(c *gin.Context, resp *http.Response, counts *usage.Counts, sub *a
 				events++
 			case "message_stop", "error":
 				terminal = true
+			}
+			// Strip the upstream request id out of error frames. Gated on the
+			// event name inside cc-core, so the thousands of delta frames in a
+			// response cost one string compare and are never parsed.
+			if scrubbed, changed := downstream.ScrubSSELine(sc.Event(), outLine); changed {
+				outLine = scrubbed
 			}
 		}
 		return outLine, terminal, nil
@@ -2144,84 +2168,6 @@ func rewriteModelField(body []byte, upstream string) ([]byte, error) {
 // rewriteModelFieldPreservingBytes is restricted to rewrite. It changes
 // only the top-level model value so the subsequent identity rewrite can verify
 // and atomically install the resulting genuine Claude Code request.
-func rewriteModelFieldPreservingBytes(body []byte, upstream string) ([]byte, error) {
-	span, err := requireTopLevelJSONFieldSpan(body, "model")
-	if err != nil {
-		return nil, err
-	}
-	var current string
-	if err = json.Unmarshal(body[span.start:span.end], &current); err != nil {
-		return nil, errors.New("top-level model is not a JSON string")
-	}
-	mb, err := json.Marshal(upstream)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]byte, 0, len(body)-span.end+span.start+len(mb))
-	out = append(out, body[:span.start]...)
-	out = append(out, mb...)
-	out = append(out, body[span.end:]...)
-	return out, nil
-}
-
-type jsonFieldSpan struct {
-	start int
-	end   int
-}
-
-func requireTopLevelJSONFieldSpan(body []byte, name string) (jsonFieldSpan, error) {
-	if !json.Valid(body) {
-		return jsonFieldSpan{}, errors.New("request body is not valid JSON")
-	}
-	dec := json.NewDecoder(bytes.NewReader(body))
-	opening, err := dec.Token()
-	if err != nil || opening != json.Delim('{') {
-		return jsonFieldSpan{}, errors.New("request body is not a JSON object")
-	}
-
-	var found jsonFieldSpan
-	count := 0
-	for dec.More() {
-		keyToken, tokenErr := dec.Token()
-		if tokenErr != nil {
-			return jsonFieldSpan{}, tokenErr
-		}
-		key, ok := keyToken.(string)
-		if !ok {
-			return jsonFieldSpan{}, errors.New("JSON object key is not a string")
-		}
-
-		before := int(dec.InputOffset())
-		var raw json.RawMessage
-		if decodeErr := dec.Decode(&raw); decodeErr != nil {
-			return jsonFieldSpan{}, decodeErr
-		}
-		after := int(dec.InputOffset())
-		if before < 0 || after < before || after > len(body) || len(raw) == 0 {
-			return jsonFieldSpan{}, errors.New("invalid JSON decoder offsets")
-		}
-		relativeStart := bytes.LastIndex(body[before:after], raw)
-		if relativeStart < 0 {
-			return jsonFieldSpan{}, errors.New("could not locate raw JSON value")
-		}
-		if key == name {
-			count++
-			start := before + relativeStart
-			found = jsonFieldSpan{start: start, end: start + len(raw)}
-		}
-	}
-	if _, err = dec.Token(); err != nil {
-		return jsonFieldSpan{}, err
-	}
-	if count == 0 {
-		return jsonFieldSpan{}, fmt.Errorf("JSON object has no %q field", name)
-	}
-	if count != 1 {
-		return jsonFieldSpan{}, fmt.Errorf("JSON object has duplicate %q fields", name)
-	}
-	return found, nil
-}
-
 // rewriteResponseModel substitutes the client-facing model name into the
 // response JSON so the client never sees the relay vendor's prefixed name
 // (e.g. "[0.16]稳定喵/claude-opus-4-6"). Handles both the non-streaming

@@ -179,7 +179,7 @@ func TestRewriteModelFieldPreservingBytesChangesOnlyModel(t *testing.T) {
 	want := bytes.Replace(body, []byte(`"claude-opus-4-7"`), []byte(`"vendor/claude-opus-4-8"`), 1)
 	original := bytes.Clone(body)
 
-	got, err := rewriteModelFieldPreservingBytes(body, "vendor/claude-opus-4-8")
+	got, err := mimicry.RewriteModelFieldPreservingBytes(body, "vendor/claude-opus-4-8")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestRewriteModelFieldPreservingBytesChangesOnlyModel(t *testing.T) {
 }
 
 func TestRewriteModelFieldPreservingBytesRejectsDuplicateModel(t *testing.T) {
-	if _, err := rewriteModelFieldPreservingBytes([]byte(`{"model":"a","model":"b"}`), "c"); err == nil {
+	if _, err := mimicry.RewriteModelFieldPreservingBytes([]byte(`{"model":"a","model":"b"}`), "c"); err == nil {
 		t.Fatal("duplicate top-level model was accepted")
 	}
 }
