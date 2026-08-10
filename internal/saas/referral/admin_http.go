@@ -48,6 +48,8 @@ type campaignReq struct {
 	MaxGiftUSD         float64 `json:"max_gift_usd"`
 	MaxRewardedInvites int     `json:"max_rewarded_invites"`
 	DailyBudgetUSD     float64 `json:"daily_budget_usd"`
+	MinInviteeSpendUSD float64 `json:"min_invitee_spend_usd"`
+	DailyInviteCap     int     `json:"daily_invite_cap"`
 	StartsAt           int64   `json:"starts_at"`
 	EndsAt             int64   `json:"ends_at"`
 	Headline           string  `json:"headline"`

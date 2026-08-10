@@ -14,7 +14,7 @@ Contents:
 - `saas.db.jwt_secret` — session signing key (lose it → all logins invalidated)
 - `shop.db` — storefront orders + card secrets (if shop enabled)
 - `tokens.json` — client API tokens
-- `auths/` + `kiro_auths/` — upstream OAuth/API credentials (refresh_tokens)
+- `auths/` — upstream OAuth/API credentials (refresh_tokens)
 - `config.yaml`
 - `external/` — payment secrets referenced via `@/path` (Stripe/Z-Pay keys, …)
   plus `external/MANIFEST.json` mapping each back to its original absolute path
@@ -46,7 +46,7 @@ hypitoken restore \
   --s3-secret-key <RESTORE_KEY_SECRET> \
   --dest /root/.config/hypitoken/
 #    Extracts saas.db, saas.db.jwt_secret, shop.db, tokens.json, auths/,
-#    kiro_auths/, config.yaml, external/ into the config dir.
+#    config.yaml, external/ into the config dir.
 
 # 4. Put external payment secrets back where config.yaml expects them.
 cat /root/.config/hypitoken/external/MANIFEST.json   # name → original abs path

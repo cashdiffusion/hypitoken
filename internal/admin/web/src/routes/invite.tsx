@@ -5,6 +5,7 @@ import {
   Download,
   Gift,
   Link2,
+  Lock,
   Send,
   Share2,
   Sparkles,
@@ -12,7 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CountUp, GlassPanel, PageHeader, StatTile } from "@/components/app/page-primitives";
 import {
@@ -442,6 +443,19 @@ function GiftTab({ me, onSent }: { me: ReferralMe; onSent: () => void }) {
 
       <div className="space-y-5">
         <GlassPanel className="space-y-4 p-5">
+          {!me.can_send_gift && (
+            // Stated before the form rather than on submit: composing a card and
+            // only then being refused reads as a bug, not a rule.
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+              <Lock className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
+              <div className="space-y-1.5 text-xs">
+                <p className="text-foreground/90">{t("gift.locked")}</p>
+                <Link to="/app/billing" className="inline-block text-amber-500 hover:underline">
+                  {t("gift.lockedCta")}
+                </Link>
+              </div>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="gift-email">{t("gift.emailLabel")}</Label>
             <Input
@@ -475,7 +489,10 @@ function GiftTab({ me, onSent }: { me: ReferralMe; onSent: () => void }) {
               onChange={(e) => setMessage(e.target.value)}
             />
           </div>
-          <Button onClick={send} disabled={sending || !email || Number(amount) <= 0}>
+          <Button
+            onClick={send}
+            disabled={sending || !email || Number(amount) <= 0 || !me.can_send_gift}
+          >
             <Send className="mr-1.5 size-4" /> {sending ? t("gift.sending") : t("gift.sendBtn")}
           </Button>
           <p className="text-xs text-muted-foreground">

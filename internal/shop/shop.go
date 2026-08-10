@@ -32,6 +32,14 @@ type Shop struct {
 	// may be called multiple times (per gin engine) but the sweeper must
 	// run exactly once.
 	expirySweeperOnce sync.Once
+
+	// deliveries tracks the in-flight delivery-email goroutines so shutdown
+	// can wait for them. They outlive the request that spawned them (SMTP is
+	// slow and the buyer's card must not wait on it), and the last thing each
+	// one does is flip email_sent — a write against the shop DB. Without a
+	// join point, closing the DB at shutdown races that write, and the losing
+	// order stays email_sent=0 forever even though the buyer got the mail.
+	deliveries sync.WaitGroup
 }
 
 // New returns a configured Shop. mailer may be nil — the constructor will

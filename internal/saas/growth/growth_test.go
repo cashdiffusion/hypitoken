@@ -121,7 +121,7 @@ func TestGrantSignupBonusAndROI(t *testing.T) {
 	}
 	uid := mkUser(t, store, "a@b.com")
 
-	bonus, channel, matched, fraud, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9", "", "")
+	bonus, channel, matched, fraud, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9", "fp-roi", "", "a@b.com")
 	if err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestGrantSignupBonusAndROI(t *testing.T) {
 
 	// Second grant for the same user is a no-op: one channel credited per user,
 	// and crucially the bonus is NOT paid out again.
-	bonus2, _, _, _, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9", "", "")
+	bonus2, _, _, _, err := svc.GrantSignupBonus(ctx, uid, "x", "vid-9", "fp-roi", "", "a@b.com")
 	if err != nil {
 		t.Fatalf("second grant: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestGrantUnknownOrDisabledChannel(t *testing.T) {
 	uid := mkUser(t, store, "u@b.com")
 
 	// Unknown ref: no error, no bonus, no match (caller falls back to trial).
-	if bonus, _, matched, _, err := svc.GrantSignupBonus(ctx, uid, "nope", "", "", ""); err != nil || bonus != 0 || matched {
+	if bonus, _, matched, _, err := svc.GrantSignupBonus(ctx, uid, "nope", "", "fp-n", "", "n@b.com"); err != nil || bonus != 0 || matched {
 		t.Fatalf("unknown ref: bonus=%v matched=%v err=%v", bonus, matched, err)
 	}
 	// Disabled channel: conversion recorded but no bonus.
@@ -199,7 +199,7 @@ func TestGrantUnknownOrDisabledChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Disabled channel: matched (so caller skips trial) but no bonus paid.
-	if bonus, _, matched, _, err := svc.GrantSignupBonus(ctx, uid, "off", "", "", ""); err != nil || bonus != 0 || !matched {
+	if bonus, _, matched, _, err := svc.GrantSignupBonus(ctx, uid, "off", "", "fp-o", "", "o@b.com"); err != nil || bonus != 0 || !matched {
 		t.Fatalf("disabled channel: bonus=%v matched=%v err=%v", bonus, matched, err)
 	}
 	if bal, _ := store.GetBalance(ctx, uid); bal != 0 {
@@ -219,7 +219,7 @@ func TestSignupFraudFingerprint(t *testing.T) {
 
 	// First user on fingerprint "fp-A": clean, bonus paid.
 	u1 := mkUser(t, store, "a@b.com")
-	bonus, _, matched, fraud, err := svc.GrantSignupBonus(ctx, u1, "x", "v1", "fp-A", "203.0.113.7")
+	bonus, _, matched, fraud, err := svc.GrantSignupBonus(ctx, u1, "x", "v1", "fp-A", "203.0.113.7", "a@b.com")
 	if err != nil || bonus != 3 || !matched || fraud {
 		t.Fatalf("first signup: bonus=%v matched=%v fraud=%v err=%v", bonus, matched, fraud, err)
 	}
@@ -229,7 +229,7 @@ func TestSignupFraudFingerprint(t *testing.T) {
 
 	// Second user, SAME fingerprint: flagged, no bonus, balance stays 0.
 	u2 := mkUser(t, store, "b@b.com")
-	bonus, _, matched, fraud, err = svc.GrantSignupBonus(ctx, u2, "x", "v2", "fp-A", "198.51.100.9")
+	bonus, _, matched, fraud, err = svc.GrantSignupBonus(ctx, u2, "x", "v2", "fp-A", "198.51.100.9", "b@b.com")
 	if err != nil || !fraud || bonus != 0 || !matched {
 		t.Fatalf("repeat fingerprint: bonus=%v matched=%v fraud=%v err=%v", bonus, matched, fraud, err)
 	}
@@ -239,7 +239,7 @@ func TestSignupFraudFingerprint(t *testing.T) {
 
 	// Third user, DIFFERENT fingerprint and subnet: clean again, bonus paid.
 	u3 := mkUser(t, store, "c@b.com")
-	bonus, _, _, fraud, err = svc.GrantSignupBonus(ctx, u3, "x", "v3", "fp-B", "192.0.2.5")
+	bonus, _, _, fraud, err = svc.GrantSignupBonus(ctx, u3, "x", "v3", "fp-B", "192.0.2.5", "c@b.com")
 	if err != nil || fraud || bonus != 3 {
 		t.Fatalf("third signup: bonus=%v fraud=%v err=%v", bonus, fraud, err)
 	}
@@ -256,15 +256,94 @@ func TestSignupFraudSubnet(t *testing.T) {
 	// Two clean signups from 203.0.113.0/24 (distinct fingerprints).
 	for i, ip := range []string{"203.0.113.1", "203.0.113.2"} {
 		uid := mkUser(t, store, string(rune('a'+i))+"@sub.com")
-		_, _, _, fraud, err := svc.GrantSignupBonus(ctx, uid, "", "", "fp-"+ip, ip)
+		_, _, _, fraud, err := svc.GrantSignupBonus(ctx, uid, "", "", "fp-"+ip, ip, "u@sub.com")
 		if err != nil || fraud {
 			t.Fatalf("subnet signup %d: fraud=%v err=%v", i, fraud, err)
 		}
 	}
 	// Third from the same /24 trips the threshold (2 prior distinct users).
 	uid := mkUser(t, store, "z@sub.com")
-	_, _, _, fraud, err := svc.GrantSignupBonus(ctx, uid, "", "", "fp-new", "203.0.113.250")
+	_, _, _, fraud, err := svc.GrantSignupBonus(ctx, uid, "", "", "fp-new", "203.0.113.250", "z@sub.com")
 	if err != nil || !fraud {
 		t.Fatalf("subnet threshold: want fraud, got fraud=%v err=%v", fraud, err)
+	}
+}
+
+// TestSignupFraudDisposableEmail covers the throwaway-mailbox rule. A wallet-
+// bearing account on a single-use address is never a customer we want to fund.
+func TestSignupFraudDisposableEmail(t *testing.T) {
+	ctx := context.Background()
+	store, svc := openTestDB(t)
+
+	uid := mkUser(t, store, "burner@yopmail.com")
+	_, _, _, fraud, err := svc.GrantSignupBonus(ctx, uid, "", "", "fp-1", "203.0.113.7", "burner@yopmail.com")
+	if err != nil || !fraud {
+		t.Fatalf("disposable domain: want fraud, got fraud=%v err=%v", fraud, err)
+	}
+	// Suffix rule: the 2026-08-08 farm rotated through sibling domains under one
+	// free-subdomain parent, so the parent itself has to match.
+	uid2 := mkUser(t, store, "farm@brandnew.dpdns.org")
+	_, _, _, fraud, err = svc.GrantSignupBonus(ctx, uid2, "", "", "fp-2", "198.51.100.9", "farm@brandnew.dpdns.org")
+	if err != nil || !fraud {
+		t.Fatalf("disposable suffix: want fraud, got fraud=%v err=%v", fraud, err)
+	}
+	// Operator-supplied entries extend the built-ins.
+	svc.ConfigureFraud(growth.FraudConfig{Enabled: true, DisposableDomains: []string{"blocked.example"}})
+	uid3 := mkUser(t, store, "x@blocked.example")
+	_, _, _, fraud, err = svc.GrantSignupBonus(ctx, uid3, "", "", "fp-3", "192.0.2.5", "x@blocked.example")
+	if err != nil || !fraud {
+		t.Fatalf("operator blocklist: want fraud, got fraud=%v err=%v", fraud, err)
+	}
+}
+
+// TestSignupFraudNoFingerprint covers the scripted-signup rule: a registration
+// that never ran the page's fingerprint script gets no bonus. 93 of the 168
+// signups in the 2026-08-08 farm looked exactly like this.
+func TestSignupFraudNoFingerprint(t *testing.T) {
+	ctx := context.Background()
+	store, svc := openTestDB(t)
+
+	uid := mkUser(t, store, "script@gmail.com")
+	_, _, _, fraud, err := svc.GrantSignupBonus(ctx, uid, "", "", "", "203.0.113.7", "script@gmail.com")
+	if err != nil || !fraud {
+		t.Fatalf("missing fingerprint: want fraud, got fraud=%v err=%v", fraud, err)
+	}
+	// Operators who register users server-side can turn the rule off.
+	svc.ConfigureFraud(growth.FraudConfig{Enabled: true, RequireFingerprint: false})
+	uid2 := mkUser(t, store, "legit@gmail.com")
+	_, _, _, fraud, err = svc.GrantSignupBonus(ctx, uid2, "", "", "", "198.51.100.9", "legit@gmail.com")
+	if err != nil || fraud {
+		t.Fatalf("rule disabled: want clean, got fraud=%v err=%v", fraud, err)
+	}
+}
+
+// TestSignupFraudEmailDomainBurst covers the domain-burst rule and its exemption
+// for mainstream providers, where real users genuinely cluster.
+func TestSignupFraudEmailDomainBurst(t *testing.T) {
+	ctx := context.Background()
+	store, svc := openTestDB(t)
+	svc.ConfigureFraud(growth.FraudConfig{Enabled: true, RequireFingerprint: true, EmailDomainThreshold: 2})
+
+	// Two signups on an attacker-controlled domain are still clean…
+	for i, addr := range []string{"a@farm.test", "b@farm.test"} {
+		uid := mkUser(t, store, addr)
+		_, _, _, fraud, err := svc.GrantSignupBonus(ctx, uid, "", "", "fp-"+string(rune('a'+i)), "203.0.113."+string(rune('1'+i)), addr)
+		if err != nil || fraud {
+			t.Fatalf("domain signup %d: fraud=%v err=%v", i, fraud, err)
+		}
+	}
+	// …the third trips the threshold.
+	uid := mkUser(t, store, "c@farm.test")
+	_, _, _, fraud, err := svc.GrantSignupBonus(ctx, uid, "", "", "fp-c", "192.0.2.5", "c@farm.test")
+	if err != nil || !fraud {
+		t.Fatalf("domain burst: want fraud, got fraud=%v err=%v", fraud, err)
+	}
+	// Mainstream providers are exempt however many sign up.
+	for i, addr := range []string{"p@gmail.com", "q@gmail.com", "r@gmail.com"} {
+		uid := mkUser(t, store, addr)
+		_, _, _, fraud, err := svc.GrantSignupBonus(ctx, uid, "", "", "fpg-"+string(rune('a'+i)), "198.51.100."+string(rune('1'+i)), addr)
+		if err != nil || fraud {
+			t.Fatalf("gmail signup %d: want clean, got fraud=%v err=%v", i, fraud, err)
+		}
 	}
 }

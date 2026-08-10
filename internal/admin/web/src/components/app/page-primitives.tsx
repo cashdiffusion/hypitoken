@@ -140,15 +140,18 @@ export function GlassPanel({
 }) {
   return (
     <div className={cn("glass overflow-hidden rounded-2xl", className)}>
+      {/* The header stacks on narrow screens — a wide action slot (several
+          buttons) would otherwise squeeze the shrink-0 title down to one
+          character per line. Same responsive shape as PageHeader. */}
       {(title || action) && (
-        <div className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4 md:px-6">
+        <div className="flex flex-col gap-3 border-b border-border/60 px-5 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 md:px-6">
           <div className="min-w-0">
             {title && (
               <h2 className="font-display text-lg font-semibold tracking-tight">{title}</h2>
             )}
             {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
           </div>
-          {action && <div className="shrink-0">{action}</div>}
+          {action && <div className="sm:shrink-0">{action}</div>}
         </div>
       )}
       <div className={cn("p-5 md:p-6", bodyClassName)}>{children}</div>

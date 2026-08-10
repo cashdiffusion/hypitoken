@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/codexerr"
 	"github.com/wjsoj/cc-core/codexws"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/usage"
@@ -133,7 +134,11 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	// slots this token does not already hold, so an established session is never
 	// torn down. Checked before the upgrade, while an HTTP status can still be
 	// returned.
-	if maxSess := s.cfg.ClientMaxSessions; maxSess > 0 && clientToken != "" {
+	// A trusted relay is exempt: the cap counts slots to stop ONE user hoarding
+	// the fleet, but a relay's slots belong to many users — capping it would
+	// refuse the very fan-out the relay headers exist to enable. Its aggregate
+	// pressure is still bounded by the RPM and concurrency limits on its token.
+	if maxSess := s.cfg.ClientMaxSessions; maxSess > 0 && clientToken != "" && !relayIsTrusted(c) {
 		if held, already := s.pool.SessionsHeld(provider, clientToken, slotID); !already && held >= maxSess {
 			log.Warnf("codex ws: token %s at its session cap (%d held, max %d) — refusing a new session",
 				maskClientToken(clientToken), held, maxSess)
@@ -168,7 +173,15 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	}
 	_ = clientConn.SetReadDeadline(time.Time{})
 
-	model := codexWSExtractModel(firstFrame)
+	// routingModel/routingTier feed the upstream x-codex-routing-hint and must
+	// stay the values the client actually asked for — in particular they must
+	// NOT inherit the "unknown" placeholder below, which exists only so billing
+	// and log rows have something to group on. A hint naming a model that does
+	// not exist is worse than no hint at all.
+	routingModel := codexWSExtractModel(firstFrame)
+	routingTier := codexWSExtractServiceTier(firstFrame)
+
+	model := routingModel
 	if model == "" {
 		model = "unknown"
 	}
@@ -211,7 +224,7 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 		snap := cand.Snapshot()
 		accessToken, _ := cand.Credentials()
 		accountID, _ := cand.CodexIdentity()
-		header := codexws.BuildUpstreamHeaders(accessToken, accountID, slotID, betaValue)
+		header := codexws.BuildUpstreamHeaders(accessToken, accountID, slotID, betaValue, routingModel, routingTier)
 		conn, resp, derr := codexws.Dial(c.Request.Context(), codexws.DialConfig{
 			URL:       wsURL,
 			Header:    header,
@@ -352,11 +365,20 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 			if err != nil {
 				return
 			}
+			// out is what the client sees; data stays the upstream original so
+			// classification, usage extraction and terminal detection all read
+			// what upstream actually said.
+			out := data
 			if mt == codexws.TextMessage && len(data) > 0 {
 				if rid := codexResponseID(data); rid != "" {
 					s.codexRespAccount.Bind(group, rid, a.ID)
 				}
 				counts.Add(extractCodexBackendUsageFromJSON(data))
+				var shed, capacity bool
+				if out, shed, capacity = codexerr.ClientFrame(data); shed {
+					log.Warnf("codex ws: %s shed a turn (capacity=%t): %s",
+						a.ID, capacity, truncate(data, 200))
+				}
 				if codexTerminalEvent(data) {
 					counts.Requests++
 					if onTurn != nil {
@@ -368,7 +390,7 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 				}
 			}
 			_ = client.SetWriteDeadline(time.Now().Add(codexWSWriteDeadline))
-			if err := client.WriteMessage(gorillaws.TextMessage, data); err != nil {
+			if err := client.WriteMessage(gorillaws.TextMessage, out); err != nil {
 				return
 			}
 		}
@@ -442,23 +464,25 @@ func codexTurnDelta(cur, billed usage.Counts) usage.Counts {
 // double-counts it. One request-log row is emitted per turn, so the admin panel
 // shows each turn's real cost as it happens rather than one hour-long row.
 func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToken, clientName string, turn usage.Counts, dur time.Duration) {
-	var costUSD float64
+	// CostUSD = official upstream price, BilledUSD = wallet debit.
+	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
 	if turn.Requests > 0 && clientToken != "" {
 		official := s.pricing.Cost(auth.ProviderOpenAI, model, turn)
 		costUSD = official
+		billedUSD = official
 		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
 			billed, err := s.saas.Charge(c.Request.Context(), info, auth.ProviderOpenAI, model, turn, official)
 			if err != nil {
 				log.Warnf("saas: ws charge failed for token user=%d: %v", info.UserID, err)
 			} else {
-				costUSD = billed
+				billedUSD = billed
 				userID = info.UserID
 				multiplier = s.saas.MultiplierFor(info, auth.ProviderOpenAI)
 			}
 		}
-		s.usage.RecordClient(clientToken, clientName, turn, costUSD)
+		s.usage.RecordClient(clientToken, clientName, turn, billedUSD)
 	}
 	s.emitLog(requestlog.Record{
 		Client:      clientName,
@@ -472,6 +496,7 @@ func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToke
 		Output:      turn.OutputTokens,
 		CacheRead:   turn.CacheReadTokens,
 		CostUSD:     costUSD,
+		BilledUSD:   billedUSD,
 		UserID:      userID,
 		Multiplier:  multiplier,
 		Status:      200,
@@ -517,6 +542,25 @@ func codexWSExtractModel(frame []byte) string {
 		return probe.Model
 	}
 	return probe.Response.Model
+}
+
+// codexWSExtractServiceTier best-effort reads service_tier from the first
+// client frame, in the same two shapes as codexWSExtractModel. Feeds the
+// routing hint only; an absent tier simply omits the ";tier=" segment.
+func codexWSExtractServiceTier(frame []byte) string {
+	var probe struct {
+		ServiceTier string `json:"service_tier"`
+		Response    struct {
+			ServiceTier string `json:"service_tier"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(frame, &probe) != nil {
+		return ""
+	}
+	if probe.ServiceTier != "" {
+		return probe.ServiceTier
+	}
+	return probe.Response.ServiceTier
 }
 
 // codexResponseID extracts response.id from a Codex backend event payload.

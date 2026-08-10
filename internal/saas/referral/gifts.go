@@ -19,6 +19,7 @@ var (
 	ErrSelfGift       = errors.New("cannot gift to yourself")
 	ErrAmountTooSmall = errors.New("gift amount must be greater than zero")
 	ErrAmountTooLarge = errors.New("gift amount exceeds the per-gift limit")
+	ErrTopupRequired  = errors.New("add credit to your account before sending a gift")
 )
 
 func validEmail(email string) bool {
@@ -59,6 +60,22 @@ func (s *Service) SendGift(ctx context.Context, senderID int64, senderEmail, rec
 	}
 	if amountUSD > maxGift {
 		return nil, ErrAmountTooLarge
+	}
+
+	// A gift moves credit between accounts, so it is the one operation that lets
+	// bonus money escape the account it was granted to. Require that the sender
+	// has topped up at least once: paying customers gift freely, while an account
+	// holding nothing but signup/referral bonuses cannot forward them on. This is
+	// what the 2026-08-08 farm used — throwaway accounts gifted their $1 signup
+	// bonus to the operator's main account seconds after registering.
+	//
+	// Checked here rather than in the handler so every caller is covered, and
+	// placed after the cheap validation so a malformed request still gets the
+	// more specific error.
+	if paid, err := s.DB.HasEverToppedUp(ctx, senderID); err != nil {
+		return nil, err
+	} else if !paid {
+		return nil, ErrTopupRequired
 	}
 
 	code, err := s.newRedeemCode(ctx)

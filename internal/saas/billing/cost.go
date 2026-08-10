@@ -35,5 +35,13 @@ func ChargeFromOfficial(official, multiplier float64) float64 {
 	if multiplier <= 0 {
 		multiplier = 1.0
 	}
-	return official * multiplier
+	// Quantize once, here, because this is the single point every charge passes
+	// through on its way to the wallet. The same rounded value then reaches both
+	// the balance decrement and the ledger row, so the two cannot disagree, and a
+	// client recomputing official x multiplier lands on the identical number.
+	//
+	// Without it the production ledger drifts: an audit of 576,049 charge rows
+	// found workspaces whose balance and their own summed ledger differed by 1e-8
+	// (e.g. 815.18275431 vs 815.18275432). See pricing.QuantizeUSD.
+	return pricing.QuantizeUSD(official * multiplier)
 }

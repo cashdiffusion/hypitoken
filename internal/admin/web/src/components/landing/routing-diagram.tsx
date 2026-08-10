@@ -34,8 +34,10 @@ export function RoutingDiagram() {
   const ref = useRef<SVGSVGElement>(null);
 
   const clients: Node[] = [
-    { label: t("home.archNodes.ccLabel"), sub: t("home.archNodes.ccSub"), tone: "primary" },
-    { label: t("home.archNodes.codexLabel"), sub: t("home.archNodes.codexSub"), tone: "info" },
+    // Codex leads the client column for the same reason it leads the hero: it
+    // is the majority of real traffic. `primary` tone follows it.
+    { label: t("home.archNodes.codexLabel"), sub: t("home.archNodes.codexSub"), tone: "primary" },
+    { label: t("home.archNodes.ccLabel"), sub: t("home.archNodes.ccSub"), tone: "info" },
     { label: t("home.archNodes.sdkLabel"), sub: t("home.archNodes.sdkSub"), tone: "muted" },
   ];
   const creds = (t("home.archCreds", { returnObjects: true }) as unknown as string[]) || [];

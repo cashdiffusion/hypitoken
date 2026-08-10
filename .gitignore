@@ -14,7 +14,6 @@
 /market.db-wal
 /market.db-shm
 /market_images/
-/kiro_auths/
 /logs/
 /bin/
 *.log

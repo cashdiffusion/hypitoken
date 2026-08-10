@@ -35,6 +35,18 @@ func newTestShop(t *testing.T, db *DB, mailer *chanMailer) *Shop {
 	if err != nil {
 		t.Fatalf("shop new: %v", err)
 	}
+	// Settling an order spawns a delivery-email goroutine that ends in an
+	// email_sent write. Cleanups run LIFO and openTestDB registered db.Close
+	// first, so joining here lands before the close — without it the write
+	// races the close and leaves a -wal file behind, failing t.TempDir's
+	// removal in whichever test happens to lose.
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.WaitDeliveries(ctx); err != nil {
+			t.Errorf("delivery goroutines still running at test end: %v", err)
+		}
+	})
 	return s
 }
 

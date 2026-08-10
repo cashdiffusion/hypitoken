@@ -144,3 +144,54 @@ func TestClientCancelIsNotUpstreamTruncation(t *testing.T) {
 		})
 	}
 }
+
+// Upstream sheds capacity as an in-band error frame inside an otherwise-200
+// stream. Forwarded verbatim it reaches the CLI as ApiError::ServerOverloaded,
+// which ends the session ("Selected model is at capacity"); under nearly any
+// other code the CLI just backs off and retries. This path commits headers
+// eagerly so it cannot withhold and fail over — demotion is the fix available
+// here.
+func TestStreamSSECodexBackendDemotesCapacityCodes(t *testing.T) {
+	for _, code := range []string{"server_is_overloaded", "slow_down"} {
+		t.Run(code, func(t *testing.T) {
+			c, w := newCodexStreamCtx()
+			body := "event: error\n" +
+				`data: {"type":"error","error":{"code":"` + code + `","message":"we are full"}}` + "\n\n"
+			resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+
+			var counts usage.Counts
+			_, _ = streamSSECodexBackend(c, resp, &counts)
+
+			out := w.Body.String()
+			if strings.Contains(out, code) {
+				t.Errorf("session-ending code %q must be demoted, got %q", code, out)
+			}
+			if !strings.Contains(out, "server_error") {
+				t.Errorf("expected the demoted code, got %q", out)
+			}
+			if !strings.Contains(out, "we are full") {
+				t.Errorf("the upstream message must survive verbatim, got %q", out)
+			}
+		})
+	}
+}
+
+// Codes the CLI already retries, and errors that are the request's own fault,
+// must both pass through untouched — the former needs no help, the latter must
+// keep its real reason.
+func TestStreamSSECodexBackendLeavesOtherErrorsAlone(t *testing.T) {
+	for _, frame := range []string{
+		`{"type":"error","error":{"code":"rate_limit_exceeded","message":"limited"}}`,
+		`{"type":"error","error":{"type":"invalid_request_error","code":"content_policy_violation","message":"blocked"}}`,
+	} {
+		c, w := newCodexStreamCtx()
+		resp := &http.Response{Body: io.NopCloser(strings.NewReader("event: error\ndata: " + frame + "\n\n"))}
+
+		var counts usage.Counts
+		_, _ = streamSSECodexBackend(c, resp, &counts)
+
+		if out := w.Body.String(); !strings.Contains(out, frame) {
+			t.Errorf("frame must be forwarded verbatim:\n want %q\n  got %q", frame, out)
+		}
+	}
+}

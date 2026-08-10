@@ -50,7 +50,7 @@ func (db *DB) SnapshotTo(ctx context.Context, dst string) error {
 // siblings) which makes off-host shipping a single-file copy.
 func (db *DB) RunDailyBackups(ctx context.Context, keep int) {
 	if keep <= 0 {
-		keep = 30
+		keep = 14
 	}
 	dir := filepath.Join(filepath.Dir(db.path), "backups")
 

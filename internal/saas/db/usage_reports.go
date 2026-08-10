@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 )
@@ -100,6 +101,20 @@ func (f ReportFilter) where() (string, []any) {
 		args = append(args, f.Tag)
 	}
 	return "WHERE " + strings.Join(clauses, " AND "), args
+}
+
+// breakdownIndexHint pins SpendBreakdown to the v16 covering index for the
+// filter's scope. Empty when the filter has no scope (the fail-closed branch),
+// which never returns rows anyway.
+func (f ReportFilter) breakdownIndexHint() string {
+	switch {
+	case f.WorkspaceID > 0:
+		return ` INDEXED BY idx_wallet_tx_ws_charge`
+	case f.UserID > 0:
+		return ` INDEXED BY idx_wallet_tx_user_charge`
+	default:
+		return ""
+	}
 }
 
 // TokenSpend is one key's rollup over the filtered window.
@@ -530,4 +545,259 @@ func (db *DB) SpendSummary(ctx context.Context, f ReportFilter) (*SpendTotals, e
 		return nil, fmt.Errorf("spend summary: %w", err)
 	}
 	return &s, nil
+}
+
+// ---- Merged single-pass breakdown ----------------------------------------
+//
+// SpendBreakdown answers what SpendSummary + SpendByToken + SpendByModel +
+// SpendByTag + SpendByDay answer together, from ONE pass over the ledger.
+//
+// Those five were five independent scans of the identical row set. On
+// production that measured 2.3 s for a single user's 90-day window (208k charge
+// rows) and there was no cache in front of it, so every dashboard load paid it
+// again. The grain (token_id, model, day) is the coarsest that still supports
+// all four breakdowns, and it collapses hundreds of thousands of ledger rows
+// into a few hundred before Go ever sees them.
+//
+// The individual functions stay: /usage/tokens and the CSV export use them, and
+// TestSpendBreakdownMatchesIndividualQueries asserts this agrees with them.
+
+// SpendBreakdown is the merged rollup. Field-for-field equivalent to calling
+// the five individual reports.
+type SpendBreakdown struct {
+	Total   *SpendTotals
+	ByToken []*TokenSpend
+	ByModel []*ModelSpend
+	ByTag   []*TagSpend
+	ByDay   []*DaySpend
+}
+
+// breakdownRow is one (token_id, model, day) cell of the merged aggregate.
+type breakdownRow struct {
+	tokenID           int64
+	model             string
+	dayEpoch          int64 // days since the Unix epoch, UTC
+	spentUSD          float64
+	events            int64
+	inputTokens       int64
+	outputTokens      int64
+	cacheReadTokens   int64
+	cacheCreateTokens int64
+	firstAt, lastAt   int64
+}
+
+func (db *DB) SpendBreakdown(ctx context.Context, f ReportFilter) (*SpendBreakdown, error) {
+	where, args := f.where()
+	// The tag predicate references `t`, so the join is only emitted when it is
+	// actually needed — carrying it unconditionally costs the covering index.
+	join := ""
+	if f.Tag != "" {
+		join = ` JOIN user_tokens t ON t.id = w.token_id`
+	}
+	// Two deliberate departures from the individual queries, both measured on a
+	// copy of production (user with 208k charge rows in the window):
+	//
+	//  - `created_at / 86400` instead of strftime(): identical UTC day bucket,
+	//    but strftime on every row cost ~30% of the query (the driver is pure
+	//    Go, so its date parsing is not cheap). The bucket is turned back into
+	//    YYYY-MM-DD below.
+	//  - INDEXED BY: the GROUP BY leads with token_id, so the planner picks
+	//    idx_wallet_tx_{user,ws}_token to get grouping order — but the three
+	//    grouping columns force a temp b-tree regardless, so that ordering buys
+	//    nothing while costing the covering index and a rowid lookup per row.
+	rows, err := db.QueryContext(ctx, `
+		SELECT w.token_id, w.model, w.created_at / 86400 AS day,
+		       COALESCE(SUM(-w.amount_usd), 0), COUNT(*),
+		       COALESCE(SUM(w.input_tokens), 0), COALESCE(SUM(w.output_tokens), 0),
+		       COALESCE(SUM(w.cache_read_tokens), 0), COALESCE(SUM(w.cache_create_tokens), 0),
+		       COALESCE(MIN(w.created_at), 0), COALESCE(MAX(w.created_at), 0)
+		  FROM wallet_tx w`+f.breakdownIndexHint()+join+`
+		`+where+` GROUP BY w.token_id, w.model, day`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("spend breakdown: %w", err)
+	}
+	defer rows.Close()
+
+	cells := []breakdownRow{}
+	for rows.Next() {
+		var r breakdownRow
+		if err := rows.Scan(&r.tokenID, &r.model, &r.dayEpoch,
+			&r.spentUSD, &r.events,
+			&r.inputTokens, &r.outputTokens, &r.cacheReadTokens, &r.cacheCreateTokens,
+			&r.firstAt, &r.lastAt); err != nil {
+			return nil, err
+		}
+		cells = append(cells, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := &SpendBreakdown{Total: &SpendTotals{}}
+	tokenIdx := map[int64]*TokenSpend{}
+	modelIdx := map[string]*ModelSpend{}
+	dayIdx := map[string]*DaySpend{}
+
+	for _, r := range cells {
+		out.Total.SpentUSD += r.spentUSD
+		out.Total.ChargeEvents += r.events
+		out.Total.InputTokens += r.inputTokens
+		out.Total.OutputTokens += r.outputTokens
+		out.Total.CacheReadTokens += r.cacheReadTokens
+		out.Total.CacheCreateTokens += r.cacheCreateTokens
+
+		ts, ok := tokenIdx[r.tokenID]
+		if !ok {
+			ts = &TokenSpend{TokenID: r.tokenID}
+			tokenIdx[r.tokenID] = ts
+			out.ByToken = append(out.ByToken, ts)
+		}
+		ts.SpentUSD += r.spentUSD
+		ts.ChargeEvents += r.events
+		ts.InputTokens += r.inputTokens
+		ts.OutputTokens += r.outputTokens
+		ts.CacheReadTokens += r.cacheReadTokens
+		ts.CacheCreateTokens += r.cacheCreateTokens
+		if r.firstAt > 0 && (ts.FirstAt.IsZero() || r.firstAt < ts.FirstAt.Unix()) {
+			ts.FirstAt = time.Unix(r.firstAt, 0)
+		}
+		if r.lastAt > 0 && (ts.LastAt.IsZero() || r.lastAt > ts.LastAt.Unix()) {
+			ts.LastAt = time.Unix(r.lastAt, 0)
+		}
+
+		ms, ok := modelIdx[r.model]
+		if !ok {
+			ms = &ModelSpend{Model: r.model}
+			modelIdx[r.model] = ms
+			out.ByModel = append(out.ByModel, ms)
+		}
+		ms.SpentUSD += r.spentUSD
+		ms.ChargeEvents += r.events
+		ms.InputTokens += r.inputTokens
+		ms.OutputTokens += r.outputTokens
+		ms.CacheReadTokens += r.cacheReadTokens
+		ms.CacheCreateTokens += r.cacheCreateTokens
+
+		day := time.Unix(r.dayEpoch*86400, 0).UTC().Format("2006-01-02")
+		ds, ok := dayIdx[day]
+		if !ok {
+			ds = &DaySpend{Day: day}
+			dayIdx[day] = ds
+			out.ByDay = append(out.ByDay, ds)
+		}
+		ds.SpentUSD += r.spentUSD
+		ds.ChargeEvents += r.events
+	}
+	// SpendSummary counts DISTINCT token_id over the raw rows, so the 0
+	// (pre-v15 unattributed) bucket counts as one — match that exactly.
+	out.Total.ActiveTokens = int64(len(tokenIdx))
+
+	if err := db.decorateTokenSpend(ctx, out.ByToken); err != nil {
+		return nil, err
+	}
+	out.ByTag = tagsFromTokenSpend(out.ByToken)
+
+	// Match the individual queries' ORDER BY. Ties are broken by the grouping
+	// key so the output is deterministic — SQLite's ordering among equal sums
+	// is not, and a jittering dashboard is its own kind of bug.
+	sort.Slice(out.ByToken, func(i, j int) bool {
+		if out.ByToken[i].SpentUSD != out.ByToken[j].SpentUSD {
+			return out.ByToken[i].SpentUSD > out.ByToken[j].SpentUSD
+		}
+		return out.ByToken[i].TokenID < out.ByToken[j].TokenID
+	})
+	sort.Slice(out.ByModel, func(i, j int) bool {
+		if out.ByModel[i].SpentUSD != out.ByModel[j].SpentUSD {
+			return out.ByModel[i].SpentUSD > out.ByModel[j].SpentUSD
+		}
+		return out.ByModel[i].Model < out.ByModel[j].Model
+	})
+	sort.Slice(out.ByDay, func(i, j int) bool { return out.ByDay[i].Day < out.ByDay[j].Day })
+	return out, nil
+}
+
+// decorateTokenSpend fills in each key's name / tags / owner. Separate from the
+// aggregate because joining user_tokens into the main query costs the covering
+// index — and this is a handful of rows keyed by primary key.
+func (db *DB) decorateTokenSpend(ctx context.Context, spends []*TokenSpend) error {
+	if len(spends) == 0 {
+		return nil
+	}
+	ids := make([]any, 0, len(spends))
+	holes := make([]string, 0, len(spends))
+	for _, s := range spends {
+		ids = append(ids, s.TokenID)
+		holes = append(holes, "?")
+	}
+	//nolint:gosec // G101 false positive: user_tokens.token is never selected.
+	rows, err := db.QueryContext(ctx, `
+		SELECT t.id, COALESCE(t.name, ''), COALESCE(t.tags, ''),
+		       COALESCE(t.user_id, 0), COALESCE(u.email, '')
+		  FROM user_tokens t
+		  LEFT JOIN users u ON u.id = t.user_id
+		 WHERE t.id IN (`+strings.Join(holes, ",")+`)`, ids...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type meta struct {
+		name, tags, email string
+		userID            int64
+	}
+	found := map[int64]meta{}
+	for rows.Next() {
+		var id int64
+		var m meta
+		if err := rows.Scan(&id, &m.name, &m.tags, &m.userID, &m.email); err != nil {
+			return err
+		}
+		found[id] = m
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, s := range spends {
+		m, ok := found[s.TokenID]
+		if ok {
+			s.Name = m.name
+			s.Tags = parseGroupsJSON(m.tags)
+			s.UserID = m.userID
+			s.Email = m.email
+		}
+		// token_id = 0 is the pre-v15 "unattributed" bucket, not a deleted key.
+		s.Deleted = !ok && s.TokenID != 0
+	}
+	return nil
+}
+
+// tagsFromTokenSpend reproduces SpendByTag from the per-key rollup. SpendByTag
+// INNER JOINs user_tokens, so a deleted key contributes to no tag — the check on
+// Deleted keeps that behaviour.
+func tagsFromTokenSpend(spends []*TokenSpend) []*TagSpend {
+	idx := map[string]*TagSpend{}
+	out := []*TagSpend{}
+	for _, s := range spends {
+		if s.Deleted || s.TokenID == 0 {
+			continue
+		}
+		for _, tag := range s.Tags {
+			t, ok := idx[tag]
+			if !ok {
+				t = &TagSpend{Tag: tag}
+				idx[tag] = t
+				out = append(out, t)
+			}
+			t.SpentUSD += s.SpentUSD
+			t.ChargeEvents += s.ChargeEvents
+			t.Tokens++
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].SpentUSD != out[j].SpentUSD {
+			return out[i].SpentUSD > out[j].SpentUSD
+		}
+		return out[i].Tag < out[j].Tag
+	})
+	return out
 }

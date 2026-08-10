@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { apiPost } from "@/lib/api";
 import type { User } from "@/lib/types";
-import { cn, errMsg } from "@/lib/utils";
+import { cn, errMsg, errStatus } from "@/lib/utils";
 
 const ParticleField = lazy(() => import("@/components/landing/particle-field"));
 
@@ -51,7 +51,20 @@ export default function LoginPage() {
       toast.success(t("auth.login.welcomeBack"));
       nav("/app");
     } catch (e) {
-      toast.error(errMsg(e, t("auth.login.invalidCredentials")));
+      // A disabled account is the one login failure with somewhere to go: the
+      // appeal channel. Anti-abuse enforcement is probabilistic and does catch
+      // real users, so the 403 has to offer them the door rather than a dead end.
+      if (errStatus(e) === 403) {
+        toast.error(t("auth.login.disabled"), {
+          action: {
+            label: t("auth.login.appealAction"),
+            onClick: () => nav(`/appeal?email=${encodeURIComponent(email)}`),
+          },
+          duration: 10000,
+        });
+      } else {
+        toast.error(errMsg(e, t("auth.login.invalidCredentials")));
+      }
     } finally {
       setBusy(false);
     }

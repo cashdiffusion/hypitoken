@@ -181,6 +181,11 @@ saas:
   # directory.
   db_path: ./saas.db
 
+  # Daily on-disk snapshots kept in <db_path dir>/backups. These are the
+  # local safety net — the off-host encrypted archive (see `backup:` above)
+  # is the real one, so a long tail here mostly just costs disk. Default 14.
+  local_snapshot_days: 14
+
   # JWT signing key. Leave empty and the server generates a 32-byte
   # random secret on first start, persisted to <db_path>.jwt_secret.
   jwt_secret: ""
@@ -321,7 +326,7 @@ shop:
 # ---------------------------------------------------------------------------
 # Off-host disaster-recovery backup (the `backup` subcommand + systemd timer).
 # Daily, the binary snapshots the critical state (saas.db + jwt_secret, shop.db,
-# tokens.json, auths/, kiro_auths/, config.yaml, payment secrets), encrypts it
+# tokens.json, auths/, config.yaml, payment secrets), encrypts it
 # to an X25519 PUBLIC key, and uploads it to an S3-compatible bucket as
 # <prefix>YYYY-MM-DD.tar.gz.enc, pruning anything older than retention_days.
 #

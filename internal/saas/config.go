@@ -24,6 +24,13 @@ type Config struct {
 	// the dir of the loaded config file.
 	DBPath string `yaml:"db_path"`
 
+	// LocalSnapshotDays is how many daily on-disk snapshots to keep in
+	// <dbdir>/backups. These are the local safety net; the off-host encrypted
+	// backup (see the top-level `backup:` block) is the real one, so this does
+	// not need a long tail. Default 14 — at ~190 MB per snapshot and growing,
+	// the previous hardcoded 30 was heading for ~6 GB. Set 0 for the default.
+	LocalSnapshotDays int `yaml:"local_snapshot_days,omitempty"`
+
 	// JWTSecret is the HS256 signing key. If empty on first start, a 32-byte
 	// random secret is generated and persisted to <DBPath>.jwt_secret (mode
 	// 0600) so subsequent starts reuse it.
@@ -54,6 +61,11 @@ type Config struct {
 	// SignupFraud tunes the signup anti-abuse check that withholds the welcome
 	// bonus from a device/network that already registered.
 	SignupFraud SignupFraudConfig `yaml:"signup_fraud"`
+
+	// Invoice configures the 开票 flow: where company-name lookups go and which
+	// 对公 account customers transfer to. Both have working built-in defaults —
+	// set these only to override.
+	Invoice InvoiceConfig `yaml:"invoice"`
 
 	// SMTP outbound mail. If Host is empty, mailer logs to stderr and
 	// (in dev) prints verification codes inline.
@@ -112,6 +124,19 @@ type SMTPConfig struct {
 	UseTLS   bool   `yaml:"use_tls"`
 }
 
+// InvoiceConfig overrides the 开票 defaults. Empty fields keep the built-in
+// value, so a partial block is safe.
+type InvoiceConfig struct {
+	// TitleSuggestURL is the company-name suggest endpoint proxied for the
+	// 抬头 picker. Defaults to 天眼查's public one.
+	TitleSuggestURL string `yaml:"title_suggest_url,omitempty"`
+	// The 对公转账 destination shown after an invoice request is filed.
+	AccountNo   string `yaml:"account_no,omitempty"`
+	AccountName string `yaml:"account_name,omitempty"`
+	BankBranch  string `yaml:"bank_branch,omitempty"`
+	BankCode    string `yaml:"bank_code,omitempty"`
+}
+
 // SignupFraudConfig tunes the welcome-bonus anti-abuse check (internal/saas/
 // growth/fraud.go). A new signup is flagged — and its bonus withheld — when its
 // browser fingerprint matches a prior user, or when its /24 (IPv6 /48) subnet
@@ -121,6 +146,17 @@ type SignupFraudConfig struct {
 	Enabled           *bool `yaml:"enabled"`             // default true
 	IPSubnetThreshold int   `yaml:"ip_subnet_threshold"` // default 3
 	WindowHours       int   `yaml:"window_hours"`        // default 720 (30 days)
+	// RequireFingerprint withholds the bonus from a signup carrying no browser
+	// fingerprint at all — the shape of a scripted registration that never
+	// loaded the page. Default true. Set false only if a legitimate integration
+	// registers users server-side.
+	RequireFingerprint *bool `yaml:"require_fingerprint"`
+	// EmailDomainThreshold flags a burst of signups sharing one non-mainstream
+	// email domain within the window. Default 3.
+	EmailDomainThreshold int `yaml:"email_domain_threshold"`
+	// DisposableDomains extends the built-in throwaway-mailbox blocklist. Exact
+	// domains, or a leading "." for a suffix match (".example.tld").
+	DisposableDomains []string `yaml:"disposable_domains"`
 }
 
 // ZPayConfig configures the Z-Pay aggregator gateway. Key is sensitive
@@ -185,6 +221,9 @@ func (c *Config) ApplyDefaults(configDir string) {
 		c.DBPath = filepath.Join(configDir, "saas.db")
 	} else if !filepath.IsAbs(c.DBPath) {
 		c.DBPath = filepath.Join(configDir, c.DBPath)
+	}
+	if c.LocalSnapshotDays <= 0 {
+		c.LocalSnapshotDays = 14
 	}
 	if c.JWTTTL == 0 {
 		c.JWTTTL = 24 * time.Hour

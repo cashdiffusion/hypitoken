@@ -34,7 +34,13 @@ interface RequestEntry {
   output_tokens: number;
   cache_read_tokens: number;
   cache_create_tokens: number;
+  /** 1h-TTL subset of cache_create_tokens; absent when the upstream sent no breakdown. */
+  cache_create_1h_tokens?: number;
+  /** Official upstream price. On rows written before the field split this held
+   *  the BILLED amount instead — see chargedUSD(). */
   cost_usd: number;
+  /** What the wallet was actually debited. Absent on pre-split rows. */
+  billed_usd?: number;
   status: number;
   duration_ms: number;
   stream: boolean;
@@ -51,7 +57,11 @@ interface Aggregate {
   output_tokens: number;
   cache_read_tokens: number;
   cache_create_tokens: number;
+  /** Official upstream price, summed. */
   cost_usd: number;
+  /** What wallets were actually debited, summed. Server-side this already
+   *  falls back to cost_usd for rows predating the field split. */
+  billed_usd?: number;
   errors: number;
 }
 
@@ -64,6 +74,18 @@ interface QueryResult {
 }
 
 const PAGE = 50;
+
+// What the user actually paid for a row.
+//
+// The server used to write the billed figure into `cost_usd` and leave
+// `billed_usd` unset; it now writes the official upstream price into `cost_usd`
+// and the wallet debit into `billed_usd`. Both shapes coexist in the log
+// directory (it retains 90 days), so read `billed_usd` when present and fall
+// back to `cost_usd` otherwise — under either shape that yields the amount
+// charged, which is the only number a customer is reconciling.
+function chargedUSD(e: RequestEntry): number {
+  return e.billed_usd ?? e.cost_usd ?? 0;
+}
 
 function fmtTokens(n: number): string {
   if (!n) return "0";
@@ -167,7 +189,11 @@ export default function LogsPage() {
             <SumTile label={t("logs.summary.cacheRead")} value={fmtTokens(sum.cache_read_tokens)} />
           </RevealItem>
           <RevealItem className="flex">
-            <SumTile label={t("logs.summary.totalBilled")} value={fmtUSD(sum.cost_usd)} accent />
+            <SumTile
+              label={t("logs.summary.totalBilled")}
+              value={fmtUSD(sum.billed_usd ?? sum.cost_usd)}
+              accent
+            />
           </RevealItem>
         </RevealStagger>
       )}
@@ -305,7 +331,7 @@ function SumTile({ label, value, accent }: { label: string; value: string; accen
 function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: PriceCard }) {
   const { t } = useTranslation();
   if (!priceCard) {
-    return <span>{fmtUSD(entry.cost_usd)}</span>;
+    return <span>{fmtUSD(chargedUSD(entry))}</span>;
   }
   const inUSD = (entry.input_tokens * priceCard.input_per_1m) / 1e6;
   const outUSD = (entry.output_tokens * priceCard.output_per_1m) / 1e6;
@@ -314,10 +340,13 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
   const officialUSD = inUSD + outUSD + crUSD + cwUSD;
   const mult = entry.multiplier && entry.multiplier > 0 ? entry.multiplier : 1;
   const computed = officialUSD * mult;
-  // Sanity-check: server-side cost_usd should match our recompute. Drift
-  // hints at a stale pricing card; surface it visually so it doesn't go
-  // unnoticed.
-  const drift = Math.abs(computed - entry.cost_usd) > 0.0005;
+  const charged = chargedUSD(entry);
+  // Sanity-check: our recompute should reproduce the server's figure. The
+  // server now rounds every charge to 8 decimals (pricing.QuantizeUSD) so the
+  // two agree to within IEEE-754 noise rather than the 5e-4 fudge this used to
+  // need. A real gap means a stale price card or an advisor sub-call billed on
+  // its own row.
+  const drift = Math.abs(computed - charged) > 1e-6;
 
   const rows: Array<{
     key: string;
@@ -371,7 +400,7 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
               drift && "text-amber-500 hover:text-amber-400",
             )}
           >
-            <span>{fmtUSD(entry.cost_usd)}</span>
+            <span>{fmtUSD(charged)}</span>
             {/* Animated dotted-underline that draws in on hover. */}
             <span
               aria-hidden
@@ -426,7 +455,7 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
                 Total
               </div>
               <div className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
-                {fmtUSD(entry.cost_usd)}
+                {fmtUSD(charged)}
               </div>
             </div>
           </div>
@@ -507,7 +536,7 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
               {t("logs.popup.youPaid")}
             </span>
             <span className="font-mono text-sm font-semibold tabular-nums text-foreground">
-              {fmtUSD(entry.cost_usd)}
+              {fmtUSD(charged)}
             </span>
             <span aria-hidden className="absolute inset-y-0 left-0 w-[2px] bg-primary" />
           </div>
@@ -523,7 +552,7 @@ function ChargedCell({ entry, priceCard }: { entry: RequestEntry; priceCard?: Pr
             >
               {t("logs.popup.drift", {
                 recomputed: `$${computed.toFixed(6)}`,
-                stored: fmtUSD(entry.cost_usd),
+                stored: fmtUSD(charged),
               })}
             </div>
           )}

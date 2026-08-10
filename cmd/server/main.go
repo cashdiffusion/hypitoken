@@ -33,6 +33,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/mail"
 	saasprofile "github.com/wjsoj/CPA-Claude/internal/saas/profile"
 	"github.com/wjsoj/CPA-Claude/internal/saas/referral"
+	"github.com/wjsoj/CPA-Claude/internal/saas/support"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	saasworkspace "github.com/wjsoj/CPA-Claude/internal/saas/workspace"
 	"github.com/wjsoj/CPA-Claude/internal/server"
@@ -62,6 +63,9 @@ func main() {
 			return
 		case "restore":
 			runRestoreCmd(os.Args[2:])
+			return
+		case "export-requests":
+			runExportRequestsCmd(os.Args[2:])
 			return
 		}
 	}
@@ -136,12 +140,42 @@ func main() {
 	}
 
 	var reqLog *requestlog.Writer
+	var logIndex *requestlog.Store
 	if cfg.LogDir != "" {
-		reqLog, err = requestlog.Open(cfg.LogDir, cfg.LogRetentionDays)
+		// The index opens FIRST because the writer may depend on it: with the
+		// JSONL archive off it is the only place a record can go, and
+		// OpenWithOptions refuses to start without it.
+		//
+		// Without it every aggregate re-parses the whole archive. That is
+		// worse here than on the operator panel: each customer opening their
+		// own usage page triggers a full-archive scan of its own, and the
+		// health checker scans per credential.
+		//
+		// While the archive is on the index is derived state, so a failure is
+		// logged and ignored — the query paths fall back to scanning on their
+		// own.
+		if !cfg.LogIndexDisabled {
+			if st, err := requestlog.OpenStore(cfg.LogDir); err != nil {
+				log.Warnf("request log: index unavailable (%v); queries fall back to scanning", err)
+			} else {
+				logIndex = st
+			}
+		} else {
+			log.Info("request log: index disabled by config (log_index_disabled)")
+		}
+
+		reqLog, err = requestlog.OpenWithOptions(cfg.LogDir, requestlog.Options{
+			RetentionDays: cfg.LogRetentionDays,
+			JSONLArchive:  !cfg.LogJSONLDisabled,
+		})
 		if err != nil {
 			log.Fatalf("open request log: %v", err)
 		}
-		log.Infof("request log: writing to %s (retain %d days)", cfg.LogDir, cfg.LogRetentionDays)
+		if cfg.LogJSONLDisabled {
+			log.Infof("request log: index-only at %s (retain %d days, no .jsonl archive)", cfg.LogDir, cfg.LogRetentionDays)
+		} else {
+			log.Infof("request log: writing to %s (retain %d days)", cfg.LogDir, cfg.LogRetentionDays)
+		}
 	} else {
 		log.Info("request log: disabled (set log_dir in config to enable)")
 	}
@@ -166,15 +200,6 @@ func main() {
 
 	s := server.New(cfg, pool, store, reqLog, clientTokens)
 
-	// Kiro side-channel (anthropic-format → kirobridge → kiroapi). Initialized
-	// only when a token_group declares upstream=kiro; nil-safe otherwise.
-	if err := s.InitKiro(); err != nil {
-		log.Fatalf("kiro: init: %v", err)
-	}
-	if k := s.KiroAccess(); k != nil {
-		s.LegacyAdmin().SetKiroAccess(k)
-	}
-
 	// SaaS layer (multi-tenant). Wires SQLite-backed user/token resolution +
 	// wallet billing on top of the proxy. Disabled by default — when off,
 	// nothing changes from the OSS build.
@@ -192,11 +217,15 @@ func main() {
 		bootstrapAdmin(saasDB, cfg.SaaS)
 		bootstrapPricingFromCatalog(cfg.SaaS, saasDB)
 
-		// Daily VACUUM INTO snapshot, retained for 30 days. Atomic /
-		// online — request handlers don't see a pause, and each snapshot
-		// is a clean self-contained .db file (no WAL/SHM siblings) which
-		// makes off-host shipping a single-file copy.
-		go saasDB.RunDailyBackups(refresherCtx, 30)
+		// Daily VACUUM INTO snapshot. Atomic / online — request handlers
+		// don't see a pause, and each snapshot is a clean self-contained
+		// .db file (no WAL/SHM siblings) which makes off-host shipping a
+		// single-file copy.
+		//
+		// Retention is saas.local_snapshot_days (default 14). It used to be a
+		// hardcoded 30: at ~190 MB per snapshot and growing that was ~6 GB of
+		// disk for a tier of backup the off-host archive already covers.
+		go saasDB.RunDailyBackups(refresherCtx, cfg.SaaS.LocalSnapshotDays)
 
 		mailer := mail.New(mail.SMTPConfig{
 			Host: cfg.SaaS.SMTP.Host, Port: cfg.SaaS.SMTP.Port,
@@ -257,10 +286,17 @@ func main() {
 		if cfg.SaaS.SignupFraud.Enabled != nil {
 			fraudEnabled = *cfg.SaaS.SignupFraud.Enabled
 		}
+		requireFP := true
+		if cfg.SaaS.SignupFraud.RequireFingerprint != nil {
+			requireFP = *cfg.SaaS.SignupFraud.RequireFingerprint
+		}
 		growthSvc.ConfigureFraud(growth.FraudConfig{
-			Enabled:         fraudEnabled,
-			SubnetThreshold: cfg.SaaS.SignupFraud.IPSubnetThreshold,
-			Window:          time.Duration(cfg.SaaS.SignupFraud.WindowHours) * time.Hour,
+			Enabled:              fraudEnabled,
+			SubnetThreshold:      cfg.SaaS.SignupFraud.IPSubnetThreshold,
+			Window:               time.Duration(cfg.SaaS.SignupFraud.WindowHours) * time.Hour,
+			RequireFingerprint:   requireFP,
+			EmailDomainThreshold: cfg.SaaS.SignupFraud.EmailDomainThreshold,
+			DisposableDomains:    cfg.SaaS.SignupFraud.DisposableDomains,
 		})
 		// authH.Referral is set below to the referral service, which composes
 		// growthSvc (personal invite codes first, then admin marketing channels).
@@ -288,6 +324,19 @@ func main() {
 		authH.Referral = referralSvc
 		authH.GiftClaimer = referralSvc
 		workspaceH := saasworkspace.New(saasDB, mailer, cfg.SaaS.SiteURL, cfg.SaaS.SiteName)
+
+		// Support desk. Owns tickets from signed-in users AND the appeal channel
+		// for accounts the anti-abuse rules got wrong — which must work without a
+		// session (a disabled account cannot authenticate) and without email (the
+		// mail provider's quota is itself a casualty of the kind of attack that
+		// triggers mass disabling).
+		supportSvc := support.New(saasDB, cfg.SaaS.SiteName, cfg.SaaS.SiteURL)
+		supportSvc.ConfigureInvoicing(cfg.SaaS.Invoice.TitleSuggestURL, support.PaymentInfo{
+			AccountNo:   cfg.SaaS.Invoice.AccountNo,
+			AccountName: cfg.SaaS.Invoice.AccountName,
+			BankBranch:  cfg.SaaS.Invoice.BankBranch,
+			BankCode:    cfg.SaaS.Invoice.BankCode,
+		})
 
 		// Catalog used for pricing computation (same instance as the proxy's
 		// internal billing — the SaaS layer only adds the multiplier on top).
@@ -325,7 +374,7 @@ func main() {
 			return true, claims.Role == "admin"
 		}
 		for _, h := range s.GinEngines() {
-			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH, referralSvc, workspaceH)
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH, referralSvc, workspaceH, supportSvc)
 			if spaFS != nil {
 				saasadapter.MountSPA(h, spaFS)
 			}
@@ -370,7 +419,17 @@ func main() {
 		shopInst.RegisterRoutes(shopEng)
 		addr := fmt.Sprintf("%s:%d", cfg.Endpoints.Shop.Host, cfg.Endpoints.Shop.Port)
 		s.AttachExtraEndpoint("shop", addr, shopEng)
-		saasShutdown = append(saasShutdown, func() { _ = shopDB.Close() })
+		// Delivery emails outlive the request that spawned them and end in a
+		// write (email_sent). Join them before closing the DB, or a buyer who
+		// was mailed during shutdown stays flagged undelivered.
+		saasShutdown = append(saasShutdown, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := shopInst.WaitDeliveries(ctx); err != nil {
+				log.Warnf("shop: delivery emails still in flight at shutdown: %v", err)
+			}
+			_ = shopDB.Close()
+		})
 		log.Infof("shop: enabled at %s (site=%q stripe currency=%s webhook=%t)", addr, cfg.Shop.SiteName, shopGw.Currency(), shopGw.HasWebhookSecret())
 	}
 
@@ -395,6 +454,12 @@ func main() {
 		defer cancel()
 		_ = s.Shutdown(ctx)
 		store.Close()
+		// Stop the index before the writer: it tails the file the writer
+		// owns, so shutting it down first means no catch-up races the final
+		// flush.
+		if logIndex != nil {
+			logIndex.Close()
+		}
 		if reqLog != nil {
 			reqLog.Close()
 		}

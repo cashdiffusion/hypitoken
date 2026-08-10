@@ -285,7 +285,11 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 
 	var counts usage.Counts
 	var errSnippet string
-	var missingUsage bool
+	outcome := usage.StreamComplete
+	// logStatus defaults to the upstream's. A mid-stream client hang-up
+	// overrides it to 499 so a cancellation stops masquerading as a clean 200
+	// in every "success rate" view.
+	logStatus := resp.StatusCode
 	switch {
 	case resp.StatusCode >= 400:
 		errBody, _ := io.ReadAll(resp.Body)
@@ -303,11 +307,23 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		br := bufio.NewReaderSize(resp.Body, 64*1024)
 		if stream && responseIsSSE(resp.Header, br) {
 			writeResponseHeaders(c, resp)
-			streamSSEOpenAI(c, br, &counts, rewriteClientModel)
-			if usage.MissingUsage(counts) {
-				missingUsage = true
-				counts = usage.MissingUsageFallbackCounts(body)
-				log.Warnf("codex proxy(apikey): %s streamed success without usage; applying fallback charge and cooling credential", a.ID)
+			clientGone := streamSSEOpenAI(c, br, &counts, rewriteClientModel)
+			outcome = usage.ClassifyStreamOutcome(counts, clientGone)
+			switch outcome {
+			case usage.StreamClientCanceled:
+				// The user walked away. Bill whatever usage arrived before they
+				// did (often nothing) and leave the credential untouched — this
+				// path used to charge a full-prompt estimate AND cool a healthy
+				// key on every Ctrl-C.
+				logStatus = 499
+				a.MarkClientCancel(usage.ClientCanceledError)
+				log.Infof("codex proxy(apikey): client canceled mid-stream via %s (observed in=%d out=%d)",
+					a.ID, counts.InputTokens, counts.OutputTokens)
+			case usage.StreamUpstreamNoUsage:
+				// The relay served a stream it cannot account for. Bill nothing
+				// — there is no honest number to put on the invoice — and cool
+				// the credential so traffic rotates to one that reports usage.
+				log.Warnf("codex proxy(apikey): %s streamed success without usage; billing $0 and cooling credential", a.ID)
 				s.reportCodexAPIKeyFault(a, http.StatusBadGateway, time.Time{})
 			}
 		} else {
@@ -341,39 +357,45 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	// having already been reported to the breaker by reportCodexAPIKeyFault.
 	// What reaches here with a >=400 status is a client-side fault (400, 404,
 	// 422 …), which by design leaves credential health untouched.
-	if resp.StatusCode < 400 && !missingUsage {
+	//
+	// A client cancellation is a success for the credential: it served bytes
+	// until the caller stopped listening. Only StreamUpstreamNoUsage withholds
+	// MarkSuccess, and it has already reported the fault above.
+	if resp.StatusCode < 400 && !outcome.CredentialFault() {
 		a.MarkSuccess()
 	}
 
-	var costUSD float64
+	// CostUSD = official upstream price, BilledUSD = wallet debit.
+	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
 	if resp.StatusCode < 400 {
 		s.usage.Record(a.ID, a.Label, counts)
-		if counts.Requests > 0 && clientToken != "" {
-			official := s.pricing.Cost(auth.ProviderOpenAI, model, counts)
-			costUSD = official
+		// outcome.Billable gates on OBSERVED usage — never on an estimate. A
+		// stream the relay failed to account for costs the customer $0; the
+		// credential's breaker, not the customer's wallet, absorbs it.
+		if outcome.Billable(counts) && clientToken != "" {
+			costUSD = s.pricing.Cost(auth.ProviderOpenAI, model, counts)
+			billedUSD = costUSD
 			// Codex apikey path used to skip the SaaS Charge funnel entirely,
 			// so wallets weren't deducted for Codex traffic. Route it through
 			// the same path Anthropic uses now.
 			if info, ok := saasInfoFrom(c); ok && s.saas != nil {
-				billed, err := s.saas.Charge(c.Request.Context(), info, auth.ProviderOpenAI, model, counts, official)
+				billed, err := s.saas.Charge(c.Request.Context(), info, auth.ProviderOpenAI, model, counts, costUSD)
 				if err != nil {
 					log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 				} else {
-					costUSD = billed
+					billedUSD = billed
 					userID = info.UserID
 					multiplier = s.saas.MultiplierFor(info, auth.ProviderOpenAI)
 				}
 			}
-			s.usage.RecordClient(clientToken, clientName, counts, costUSD)
+			s.usage.RecordClient(clientToken, clientName, counts, billedUSD)
 		}
 	}
-	errField := ""
+	errField := outcome.LogError()
 	if resp.StatusCode >= 400 {
 		errField = fmt.Sprintf("upstream %d: %s", resp.StatusCode, truncate([]byte(errSnippet), 200))
-	} else if missingUsage {
-		errField = usage.MissingUsageError
 	}
 	s.emitLog(requestlog.Record{
 		Client:      clientName,
@@ -390,7 +412,8 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		UserID:      userID,
 		Multiplier:  multiplier,
 		CostUSD:     costUSD,
-		Status:      resp.StatusCode,
+		BilledUSD:   billedUSD,
+		Status:      logStatus,
 		DurationMs:  time.Since(start).Milliseconds(),
 		Stream:      stream,
 		Path:        path,
@@ -476,8 +499,25 @@ func looksLikeSSE(br *bufio.Reader) bool {
 // <json>\n\n` with a terminal `data: [DONE]`. Usage arrives in the final
 // chunk when stream_options.include_usage is on (we always ensure that);
 // parsing it here keeps billing correct for streaming clients.
-func streamSSEOpenAI(c *gin.Context, reader *bufio.Reader, counts *usage.Counts, rewriteClientModel string) {
+//
+// It returns whether the CLIENT is what ended the stream. That distinction is
+// load-bearing for billing: an upstream that never reported usage is a relay
+// fault (bill nothing, cool the credential), while a client hang-up is the
+// user's own choice (bill the partial usage, leave health alone). Conflating
+// the two is what made every Ctrl-C both overcharge and trip the breaker.
+//
+// The read error alone cannot tell them apart — an upstream RST and a client
+// disconnect surface identically at the reader — so the signal comes from the
+// request context plus the write side, exactly as the Anthropic and
+// Codex-OAuth paths already do.
+func streamSSEOpenAI(c *gin.Context, reader *bufio.Reader, counts *usage.Counts, rewriteClientModel string) (clientGone bool) {
 	flusher, _ := c.Writer.(http.Flusher)
+	// c.Request is nil in unit tests that drive the relay directly; treat that
+	// as "no cancellation signal" rather than panicking on the hot path.
+	var ctx context.Context
+	if c.Request != nil {
+		ctx = c.Request.Context()
+	}
 	for {
 		line, err := reader.ReadBytes('\n')
 		if len(line) > 0 {
@@ -500,13 +540,19 @@ func streamSSEOpenAI(c *gin.Context, reader *bufio.Reader, counts *usage.Counts,
 					counts.Add(extractOpenAIUsageFromJSON(payload))
 				}
 			}
-			_, _ = c.Writer.Write(outLine)
+			if _, werr := c.Writer.Write(outLine); werr != nil {
+				// Writing to the client failed — it hung up. Nothing further can
+				// be delivered, and the credential is blameless.
+				return true
+			}
 			if flusher != nil {
 				flusher.Flush()
 			}
 		}
 		if err != nil {
-			break
+			// A read error with our own context already canceled means the
+			// client left and the transport tore the upstream down behind it.
+			return ctx != nil && ctx.Err() != nil
 		}
 	}
 }

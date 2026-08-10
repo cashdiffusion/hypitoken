@@ -225,7 +225,7 @@ func (s *Shop) handleAdminResendEmail(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/admin/orders/"+trade+"?err=only-paid-orders")
 		return
 	}
-	go s.dispatchOrderEmail(o)
+	s.goDispatchOrderEmail(o)
 	c.Redirect(http.StatusFound, "/admin/orders/"+trade+"?ok=email-queued")
 }
 
@@ -247,7 +247,7 @@ func (s *Shop) handleAdminManualFulfil(c *gin.Context) {
 	}
 	o, err := s.db.GetOrder(ctx, trade)
 	if err == nil && c.PostForm("send_email") == "1" {
-		go s.dispatchOrderEmail(o)
+		s.goDispatchOrderEmail(o)
 	}
 	if err != nil {
 		log.Warnf("shop: post-fulfil reload: %v", err)

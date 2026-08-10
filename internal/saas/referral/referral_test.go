@@ -14,11 +14,11 @@ import (
 // the channel-fallback path returns "no channel".
 type stubChannel struct{ fraud bool }
 
-func (s stubChannel) RecordSignupDevice(_ context.Context, _ int64, _, _ string) (bool, string, error) {
+func (s stubChannel) RecordSignupDevice(_ context.Context, _ int64, _, _, _ string) (bool, string, error) {
 	return s.fraud, "", nil
 }
 
-func (s stubChannel) GrantSignupBonus(_ context.Context, _ int64, _, _, _, _ string) (float64, string, bool, bool, error) {
+func (s stubChannel) GrantSignupBonus(_ context.Context, _ int64, _, _, _, _, _ string) (float64, string, bool, bool, error) {
 	return 0, "", false, s.fraud, nil
 }
 
@@ -48,6 +48,16 @@ func credit(t *testing.T, store *db.DB, userID int64, amt float64) {
 	}
 }
 
+// spend records a charge against a user, the way the billing adapter does. The
+// inviter-reward gate reads these rows, so tests that exercise it must burn real
+// ledger entries rather than just adjusting a balance.
+func spend(t *testing.T, store *db.DB, userID int64, amt float64) {
+	t.Helper()
+	if _, err := store.AddBalance(context.Background(), userID, db.TxKindCharge, -amt, "token=1 model=test", "", false); err != nil {
+		t.Fatalf("spend: %v", err)
+	}
+}
+
 func bal(t *testing.T, store *db.DB, userID int64) float64 {
 	t.Helper()
 	b, err := store.GetBalance(context.Background(), userID)
@@ -67,7 +77,7 @@ func TestInviteTwoSidedGrant(t *testing.T) {
 	}
 	invitee := mkUser(t, store, "newbie@test.com")
 
-	bonus, _, matched, fraud, err := svc.GrantSignupBonus(ctx, invitee, card.Code, "", "fp1", "1.2.3.4")
+	bonus, _, matched, fraud, err := svc.GrantSignupBonus(ctx, invitee, card.Code, "", "fp1", "1.2.3.4", "newbie@test.com")
 	if err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -80,19 +90,74 @@ func TestInviteTwoSidedGrant(t *testing.T) {
 	if got := bal(t, store, invitee); got != 1 {
 		t.Fatalf("invitee balance: want 1, got %v", got)
 	}
-	if got := bal(t, store, inviter); got != 1 {
-		t.Fatalf("inviter balance: want 1, got %v", got)
+	// The inviter is NOT paid at signup: the default campaign rewards on
+	// first_spend, gated on min_invitee_spend_usd. Paying here is what let one
+	// account collect $20 of invite bonus in a day on 2026-08-08.
+	if got := bal(t, store, inviter); got != 0 {
+		t.Fatalf("inviter balance before invitee spends: want 0, got %v", got)
 	}
 	// lifetime_invites bumped + a conversion recorded (idempotent on replay).
 	if n := svc.countConfirmedInvites(ctx, inviter); n != 1 {
 		t.Fatalf("confirmed invites: want 1, got %d", n)
 	}
+	// A token amount of spend does not clear the bar (default $0.25).
+	spend(t, store, invitee, 0.01)
+	svc.ReleaseInviterReward(ctx, invitee)
+	if got := bal(t, store, inviter); got != 0 {
+		t.Fatalf("inviter paid below the spend threshold: want 0, got %v", got)
+	}
+	// Past the threshold the reward is released, exactly once.
+	spend(t, store, invitee, 0.30)
+	svc.ReleaseInviterReward(ctx, invitee)
+	if got := bal(t, store, inviter); got != 1 {
+		t.Fatalf("inviter balance after invitee spends: want 1, got %v", got)
+	}
+	svc.ReleaseInviterReward(ctx, invitee)
+	if got := bal(t, store, inviter); got != 1 {
+		t.Fatalf("inviter reward released twice: want 1, got %v", got)
+	}
 	// Replaying the same invitee must not double-credit.
-	if _, _, _, _, err := svc.GrantSignupBonus(ctx, invitee, card.Code, "", "fp1", "1.2.3.4"); err != nil {
+	if _, _, _, _, err := svc.GrantSignupBonus(ctx, invitee, card.Code, "", "fp1", "1.2.3.4", "newbie@test.com"); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	if got := bal(t, store, inviter); got != 1 {
 		t.Fatalf("inviter balance after replay: want 1, got %v", got)
+	}
+}
+
+// TestInviteVelocityCap covers the per-inviter daily cap: past it a conversion
+// is still attributed (the invitee keeps their own bonus) but the inviter earns
+// nothing, which bounds one identity's yield even when no per-signup rule fires.
+func TestInviteVelocityCap(t *testing.T) {
+	ctx := context.Background()
+	svc, store := newSvc(t, false)
+	inviter := mkUser(t, store, "farmer@test.com")
+	card, _ := svc.MintCard(ctx, inviter, "claude", "dark", "", "")
+
+	camp, err := svc.ActiveCampaign(ctx)
+	if err != nil {
+		t.Fatalf("campaign: %v", err)
+	}
+	if camp.DailyInviteCap != 5 {
+		t.Fatalf("default daily invite cap: want 5, got %d", camp.DailyInviteCap)
+	}
+
+	// Convert cap+2 invitees, each spending past the threshold so the reward
+	// gate itself never withholds anything — the cap must be what bites.
+	for i := 0; i < camp.DailyInviteCap+2; i++ {
+		invitee := mkUser(t, store, "v"+string(rune('a'+i))+"@test.com")
+		if _, _, _, _, err := svc.GrantSignupBonus(ctx, invitee, card.Code, "", "fp", "", "v@test.com"); err != nil {
+			t.Fatalf("grant %d: %v", i, err)
+		}
+		spend(t, store, invitee, 1)
+		svc.ReleaseInviterReward(ctx, invitee)
+	}
+	// Only the first cap conversions carry an inviter bonus. The tier ladder
+	// pays $0 at 1 (NOIR) and $2 at 3 (PLATINUM) on top.
+	want := float64(camp.DailyInviteCap) + 2
+	if got := bal(t, store, inviter); got != want {
+		t.Fatalf("inviter balance under velocity cap: want %v (%d×$1 + $2 tier), got %v",
+			want, camp.DailyInviteCap, got)
 	}
 }
 
@@ -103,7 +168,7 @@ func TestInviteFraudWithheld(t *testing.T) {
 	card, _ := svc.MintCard(ctx, inviter, "claude", "dark", "", "")
 	invitee := mkUser(t, store, "farm@test.com")
 
-	bonus, _, matched, fraud, err := svc.GrantSignupBonus(ctx, invitee, card.Code, "", "fp", "ip")
+	bonus, _, matched, fraud, err := svc.GrantSignupBonus(ctx, invitee, card.Code, "", "fp", "ip", "farm@test.com")
 	if err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -125,13 +190,27 @@ func TestMilestoneSingleGrant(t *testing.T) {
 	card, _ := svc.MintCard(ctx, inviter, "claude", "dark", "", "")
 
 	// Default campaign tiers: 1 NOIR ($0), 3 PLATINUM ($2). Invite 3 → +$2 once.
+	// Tiers count QUALIFIED invites (reward released), so each invitee must
+	// actually spend past the threshold — attribution alone earns nothing, which
+	// is what stopped the 2026-08-08 farm from collecting the ladder.
+	invitees := make([]int64, 0, 3)
 	for i := 0; i < 3; i++ {
 		invitee := mkUser(t, store, "u"+string(rune('a'+i))+"@test.com")
-		if _, _, _, _, err := svc.GrantSignupBonus(ctx, invitee, card.Code, "", "fp", ""); err != nil {
+		if _, _, _, _, err := svc.GrantSignupBonus(ctx, invitee, card.Code, "", "fp", "", "u@test.com"); err != nil {
 			t.Fatalf("grant %d: %v", i, err)
 		}
+		invitees = append(invitees, invitee)
 	}
-	// 3 invitee bonuses ($1 each) + 3 inviter bonuses ($1) + 1 milestone ($2).
+	// Attributed but unspent: no inviter bonus and no tier.
+	if got := bal(t, store, inviter); got != 0 {
+		t.Fatalf("inviter balance before invitees spend: want 0, got %v", got)
+	}
+	for _, invitee := range invitees {
+		spend(t, store, invitee, 1)
+		svc.ReleaseInviterReward(ctx, invitee)
+	}
+	// 3 inviter bonuses ($1 each) + 1 milestone ($2). The invitee bonuses land
+	// in the invitees' own wallets, not here.
 	if got := bal(t, store, inviter); got != 5 {
 		t.Fatalf("inviter balance after 3 invites: want 5 (3×$1 + $2 tier), got %v", got)
 	}
@@ -140,6 +219,81 @@ func TestMilestoneSingleGrant(t *testing.T) {
 	svc.checkMilestones(ctx, inviter, camp)
 	if got := bal(t, store, inviter); got != 5 {
 		t.Fatalf("milestone re-grant leaked: want 5, got %v", got)
+	}
+}
+
+// bonus credits a user the way a signup/referral grant does — an `adjust` row,
+// not a `topup`. The distinction is the whole point of the gift gate.
+func bonus(t *testing.T, store *db.DB, userID int64, amt float64) {
+	t.Helper()
+	if _, err := store.AddBalance(context.Background(), userID, db.TxKindAdjust, amt, "test-bonus", "", false); err != nil {
+		t.Fatalf("bonus: %v", err)
+	}
+}
+
+// TestGiftRequiresTopup replays the 2026-08-08 laundering route: a throwaway
+// account receives its $1 signup bonus and immediately gifts it to the farm's
+// main account. Bonus credit must not be forwardable; a real topup lifts the
+// block.
+func TestGiftRequiresTopup(t *testing.T) {
+	ctx := context.Background()
+	svc, store := newSvc(t, false)
+
+	mule := mkUser(t, store, "mule@test.com")
+	farmer := mkUser(t, store, "farmer@test.com")
+	bonus(t, store, mule, 1)
+
+	// The balance is real and sufficient — only the provenance disqualifies it,
+	// so a wrong implementation would fail with ErrInsufficientBalance here and
+	// look like it worked.
+	if _, err := svc.SendGift(ctx, mule, "mule@test.com", "farmer@test.com", 1, "", "claude", "dark"); !errors.Is(err, ErrTopupRequired) {
+		t.Fatalf("bonus-only account must not gift: got %v", err)
+	}
+	if got := bal(t, store, mule); got != 1 {
+		t.Fatalf("refused gift must not debit: want 1, got %v", got)
+	}
+	if got := bal(t, store, farmer); got != 0 {
+		t.Fatalf("farmer must receive nothing: got %v", got)
+	}
+
+	// One cent of real money is enough — the gate is about provenance, not size.
+	credit(t, store, mule, 0.01)
+	if _, err := svc.SendGift(ctx, mule, "mule@test.com", "farmer@test.com", 1, "", "claude", "dark"); err != nil {
+		t.Fatalf("after topup the gift must go through: %v", err)
+	}
+	if got := bal(t, store, farmer); got != 1 {
+		t.Fatalf("farmer balance: want 1, got %v", got)
+	}
+}
+
+// TestHasEverToppedUpIgnoresNonTopupCredit pins the ledger predicate itself:
+// only `topup` counts. A refund of a topup is money returning, not money
+// arriving, and an admin adjust is us granting credit — neither proves payment.
+func TestHasEverToppedUpIgnoresNonTopupCredit(t *testing.T) {
+	ctx := context.Background()
+	_, store := newSvc(t, false)
+	u := mkUser(t, store, "ledger@test.com")
+
+	for _, kind := range []string{db.TxKindAdjust, db.TxKindRefund} {
+		if _, err := store.AddBalance(ctx, u, kind, 5, "test", "", false); err != nil {
+			t.Fatalf("add %s: %v", kind, err)
+		}
+		paid, err := store.HasEverToppedUp(ctx, u)
+		if err != nil {
+			t.Fatalf("check: %v", err)
+		}
+		if paid {
+			t.Fatalf("%s must not count as payment", kind)
+		}
+	}
+
+	credit(t, store, u, 1)
+	paid, err := store.HasEverToppedUp(ctx, u)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if !paid {
+		t.Fatal("a topup must count as payment")
 	}
 }
 

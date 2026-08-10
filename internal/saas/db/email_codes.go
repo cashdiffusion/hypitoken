@@ -14,6 +14,9 @@ import (
 const (
 	PurposeVerify = "verify"
 	PurposeReset  = "reset"
+	// PurposeAppeal proves ownership of an address for a support appeal filed
+	// without a session — the only channel a disabled account has left.
+	PurposeAppeal = "appeal"
 )
 
 // PutEmailCode stores (or replaces) a verification code for (email, purpose)

@@ -40,8 +40,8 @@ type Mailer interface {
 // *growth.Service satisfies it. Kept an interface so referral neither imports
 // growth nor double-records a device, and so it's stubbable in tests.
 type ChannelGranter interface {
-	RecordSignupDevice(ctx context.Context, userID int64, fp, ip string) (fraud bool, reason string, err error)
-	GrantSignupBonus(ctx context.Context, userID int64, ref, vid, fp, ip string) (bonusUSD float64, channel string, matched, fraud bool, err error)
+	RecordSignupDevice(ctx context.Context, userID int64, fp, ip, email string) (fraud bool, reason string, err error)
+	GrantSignupBonus(ctx context.Context, userID int64, ref, vid, fp, ip, email string) (bonusUSD float64, channel string, matched, fraud bool, err error)
 }
 
 // Service is the referral module. Construct with New and hold one instance; it

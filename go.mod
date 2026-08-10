@@ -9,8 +9,9 @@ require (
 	github.com/sirupsen/logrus v1.9.4
 	github.com/smartwalle/alipay/v3 v3.2.29
 	github.com/stripe/stripe-go/v82 v82.5.1
-	github.com/wjsoj/cc-core v0.8.60-0.20260805125417-d954ed2381dc
+	github.com/wjsoj/cc-core v0.8.81
 	golang.org/x/crypto v0.53.0
+	golang.org/x/sync v0.21.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.53.0
 )

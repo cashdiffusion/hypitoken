@@ -147,8 +147,8 @@ WHERE  is_default = 1
 	// 4: per-user-token priority-ordered group list. Stored as a JSON
 	//    array column on user_tokens. Empty / NULL → uses the user's
 	//    pricing group (legacy behavior). Non-empty → the token-side
-	//    priority list takes over for credential routing (e.g. drop
-	//    through Kiro → official Anthropic). Billing still happens
+	//    priority list takes over for credential routing (fall through
+	//    a chain of groups in order). Billing still happens
 	//    via the resolved group's discount, so existing rate cards
 	//    continue to apply unchanged.
 	`
@@ -607,6 +607,160 @@ CREATE INDEX idx_wallet_tx_ws_time    ON wallet_tx(workspace_id, created_at);
 CREATE INDEX idx_wallet_tx_ws_token   ON wallet_tx(workspace_id, token_id, created_at);
 CREATE INDEX idx_wallet_tx_user_token ON wallet_tx(user_id, token_id, created_at);
 CREATE INDEX idx_user_tokens_ws       ON user_tokens(workspace_id);
+`,
+
+	// v16 — make the spend reports index-only.
+	//
+	// The v15 indexes select the right rows but carry none of the aggregated
+	// columns, so every report did an index range scan *plus* one main-table
+	// rowid lookup per matching row. /me/usage/summary runs five such passes
+	// over the same slice, and on production that measured 1.9–3.4 s for a
+	// 10 KB response — paid by every customer on every dashboard load.
+	//
+	// These two are partial (kind='charge', which every report's predicate
+	// states literally) and cover every column the aggregates read, so the
+	// planner can satisfy them without touching the table at all. Partial +
+	// covering also keeps them far smaller than a plain 9-column index would
+	// be: topup/adjust/refund rows are excluded entirely.
+	//
+	// idx_wallet_tx_kind_id fixes a different query: /admin/adjustments counts
+	// with `WHERE kind = 'adjust'`, and with no index on kind that was a full
+	// scan of the whole table to produce a single number.
+	`
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_user_charge ON wallet_tx(
+    user_id, created_at, token_id, model,
+    amount_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens
+) WHERE kind = 'charge';
+
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_ws_charge ON wallet_tx(
+    workspace_id, created_at, token_id, model,
+    amount_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens
+) WHERE kind = 'charge';
+
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_kind_id ON wallet_tx(kind, id DESC);
+
+-- The planner picks between the v15 and v16 indexes on cost estimates; with no
+-- sqlite_stat1 it guesses, and guessed wrong often enough to keep choosing a
+-- non-covering path. ANALYZE is cheap here and runs once per migration.
+ANALYZE;
+`,
+
+	// v17 — close the invite-farming hole exploited on 2026-08-08.
+	//
+	// That day 168 accounts registered (baseline 1–6) from five throwaway mail
+	// domains. The per-signup anti-abuse (v6) flagged 107 of them and withheld
+	// the $1 trial, exactly as designed — but the money never left through the
+	// trial. It left through invite referral: three "farmer" accounts collected
+	// $78 of two-sided invite bonus plus $16 of milestone tiers, because
+	//
+	//   * 93 of the 168 signups carried NO browser fingerprint at all (they hit
+	//     /api/v2/auth/register directly, so ThumbmarkJS never ran) — the
+	//     fingerprint rule cannot match what was never sent;
+	//   * every signup came through Cloudflare WARP, one distinct /24 per
+	//     account, so the ip_subnet rule never reached its threshold either; and
+	//   * inviter_reward_on='signup' paid the inviter the instant the invitee's
+	//     row existed, with no spend of any kind required.
+	//
+	// The schema half of the fix (the rules themselves live in
+	// internal/saas/growth/fraud.go and internal/saas/referral/grant.go):
+	//
+	//   * min_invitee_spend_usd — the inviter reward is now released only after
+	//     the invitee has actually burned this much. Combined with flipping
+	//     inviter_reward_on to 'first_spend', farming an invite costs real
+	//     upstream money instead of being free. NOTE the existing release path
+	//     fired on ANY charge, and charges here go down to $0.000005, so the
+	//     threshold is what gives 'first_spend' teeth.
+	//   * daily_invite_cap — per-inviter velocity. One account converted 20
+	//     invitees in a single day, none of which any rule flagged. Beyond this
+	//     many confirmed invites in 24h the conversion is still attributed but
+	//     pays nothing, which bounds a farm's yield per identity instead of
+	//     trying to detect each signup individually.
+	//   * daily_budget_usd 50 — the v12 circuit breaker shipped defaulting to 0
+	//     (unlimited), which is why $116 paid out with nothing braking it.
+	//   * email_domain on signup_devices — the signal that actually separates
+	//     this attack from organic traffic (26 signups on one .web.id domain),
+	//     recorded per signup so the burst rule has history to match against.
+	//
+	// Backfilled from users.email for existing rows so the domain rule has depth
+	// on day one rather than starting blind.
+	`
+ALTER TABLE referral_campaigns ADD COLUMN min_invitee_spend_usd REAL NOT NULL DEFAULT 0.25;
+ALTER TABLE referral_campaigns ADD COLUMN daily_invite_cap INTEGER NOT NULL DEFAULT 5;
+
+UPDATE referral_campaigns SET inviter_reward_on = 'first_spend' WHERE inviter_reward_on = 'signup';
+UPDATE referral_campaigns SET daily_budget_usd = 50 WHERE daily_budget_usd <= 0;
+
+ALTER TABLE signup_devices ADD COLUMN email_domain TEXT NOT NULL DEFAULT '';
+
+UPDATE signup_devices
+   SET email_domain = lower(substr(
+           (SELECT u.email FROM users u WHERE u.id = signup_devices.user_id),
+           instr((SELECT u.email FROM users u WHERE u.id = signup_devices.user_id), '@') + 1))
+ WHERE email_domain = ''
+   AND instr(COALESCE((SELECT u.email FROM users u WHERE u.id = signup_devices.user_id), ''), '@') > 0;
+
+CREATE INDEX idx_signup_devices_domain ON signup_devices(email_domain, created_at);
+`,
+
+	// v18 — support tickets, and with them an appeal channel for disabled
+	// accounts.
+	//
+	// The anti-abuse rules above withhold money on probabilistic evidence, and
+	// the enforcement they feed (disabling an account) is something a real
+	// customer can land in by accident: a shared campus /24, a browser that
+	// blocked the fingerprint script, a corporate mail domain that three
+	// colleagues signed up from the same week. Every one of those users must
+	// have a way to reach a human, and the ones who need it most are exactly the
+	// ones who can no longer log in — RequireUser 403s a disabled account before
+	// any authenticated route runs.
+	//
+	// Hence user_id = 0 is legal here: an appeal is keyed on the email address
+	// alone, proven by an emailed OTP, and read back with access_key (a
+	// capability the submitter holds, so no session is needed). A ticket from a
+	// signed-in user carries their user_id and needs no key.
+	`
+CREATE TABLE support_tickets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL DEFAULT 0,        -- 0 = anonymous appeal, identified by email
+    email       TEXT    NOT NULL,
+    kind        TEXT    NOT NULL DEFAULT 'support', -- support | appeal
+    subject     TEXT    NOT NULL DEFAULT '',
+    status      TEXT    NOT NULL DEFAULT 'open',    -- open | pending | resolved | rejected
+    access_key  TEXT    NOT NULL DEFAULT '',        -- read capability for anonymous appeals
+    last_actor  TEXT    NOT NULL DEFAULT 'user',    -- who spoke last: user | admin
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+CREATE INDEX idx_support_tickets_email  ON support_tickets(email, created_at DESC);
+CREATE INDEX idx_support_tickets_user   ON support_tickets(user_id, created_at DESC);
+CREATE INDEX idx_support_tickets_status ON support_tickets(status, updated_at DESC);
+
+CREATE TABLE ticket_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id  INTEGER NOT NULL,
+    author     TEXT    NOT NULL DEFAULT 'user',     -- user | admin
+    body       TEXT    NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_ticket_messages_ticket ON ticket_messages(ticket_id, created_at);
+`,
+
+	// v19 — structured payload on a ticket, for the invoice flow.
+	//
+	// A 开票申请 carries an 抬头 an operator has to transcribe onto a real 发票:
+	// company name, 统一社会信用代码, sometimes address / bank details. Left as
+	// prose in the message body, that is a copy-by-eye job where a single
+	// transposed digit in an 18-character tax number produces an invoice the
+	// customer's finance department will reject.
+	//
+	// meta holds it as JSON so the operator panel can render discrete
+	// copy-to-clipboard fields. Deliberately opaque to the support package —
+	// whatever creates a ticket owns the shape, and today only the invoice flow
+	// writes it. The body still restates everything in prose, so a plain-text
+	// read of the thread (export, DB dump) loses nothing.
+	`
+ALTER TABLE support_tickets ADD COLUMN meta TEXT NOT NULL DEFAULT '';
 `,
 }
 

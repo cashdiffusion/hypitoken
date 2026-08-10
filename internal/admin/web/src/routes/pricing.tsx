@@ -10,7 +10,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { SpotlightCard } from "@/components/landing/interactions";
 import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
@@ -23,148 +23,37 @@ const FloatingGeometry = lazy(() => import("@/components/landing/floating-geomet
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-// Official Anthropic & OpenAI model pricing (USD per 1M tokens, as of May 2025)
-const CLAUDE_MODELS = [
-  {
-    name: "claude-opus-4-8",
-    display: "Claude Opus 4.8",
-    tier: "flagship",
-    input: 5.0,
-    output: 25.0,
-    cacheWrite: 6.25,
-    cacheRead: 0.5,
-  },
-  {
-    name: "claude-opus-4-7",
-    display: "Claude Opus 4.7",
-    tier: "advanced",
-    input: 5.0,
-    output: 25.0,
-    cacheWrite: 6.25,
-    cacheRead: 0.5,
-  },
-  {
-    name: "claude-opus-4-6",
-    display: "Claude Opus 4.6",
-    tier: "advanced",
-    input: 5.0,
-    output: 25.0,
-    cacheWrite: 6.25,
-    cacheRead: 0.5,
-  },
-  {
-    name: "claude-sonnet-5",
-    display: "Claude Sonnet 5",
-    tier: "balanced",
-    input: 2.0,
-    output: 10.0,
-    cacheWrite: 2.5,
-    cacheRead: 0.2,
-  },
-  {
-    name: "claude-sonnet-4-6",
-    display: "Claude Sonnet 4.6",
-    tier: "standard",
-    input: 3.0,
-    output: 15.0,
-    cacheWrite: 3.75,
-    cacheRead: 0.3,
-  },
-  {
-    name: "claude-sonnet-4-5",
-    display: "Claude Sonnet 4.5",
-    tier: "standard",
-    input: 3.0,
-    output: 15.0,
-    cacheWrite: 3.75,
-    cacheRead: 0.3,
-  },
-  {
-    name: "claude-haiku-4-5",
-    display: "Claude Haiku 4.5",
-    tier: "fast",
-    input: 1.0,
-    output: 5.0,
-    cacheWrite: 1.25,
-    cacheRead: 0.1,
-  },
-];
+// ─── Catalogue-driven model rows ─────────────────────────────────────────────
+//
+// Rates come from GET /api/v2/pricing, which serves the same pricing.Catalog
+// the billing path charges against. This file used to carry its own copy of the
+// table; that second source of truth drifted, and the drift was invisible
+// because nothing compared the two. claude-opus-5 and claude-fable-5 were being
+// billed at $5/$25 and $10/$50 while appearing on no published price list, and
+// the gpt-5.6 tiers advertised no cache-write rate although the catalogue
+// charges 1.25x input for one.
+//
+// Nothing below may reintroduce a hardcoded RATE. Presentation metadata
+// (display name, tier label, ordering) is cosmetic and may live here, but every
+// model the catalogue prices is rendered whether or not it has an entry —
+// PRESENTATION is a lookup with a derived fallback, never an allowlist.
 
-// Codex CLI OAuth models — covered by ChatGPT Plus/Pro/Team subscription.
-const CODEX_OAUTH_MODELS = [
-  {
-    name: "gpt-5.6-sol",
-    display: "GPT-5.6 Sol",
-    tier: "flagship",
-    input: 5.0,
-    output: 30.0,
-    cacheWrite: null,
-    cacheRead: 0.5,
-  },
-  {
-    name: "gpt-5.6-terra",
-    display: "GPT-5.6 Terra",
-    tier: "advanced",
-    input: 2.5,
-    output: 15.0,
-    cacheWrite: null,
-    cacheRead: 0.25,
-  },
-  {
-    name: "gpt-5.6-luna",
-    display: "GPT-5.6 Luna",
-    tier: "fast",
-    input: 1.0,
-    output: 6.0,
-    cacheWrite: null,
-    cacheRead: 0.1,
-  },
-  {
-    name: "gpt-5.5",
-    display: "GPT-5.5",
-    tier: "flagship",
-    input: 5.0,
-    output: 30.0,
-    cacheWrite: null,
-    cacheRead: 0.5,
-  },
-  {
-    name: "gpt-5.4",
-    display: "GPT-5.4",
-    tier: "advanced",
-    input: 2.5,
-    output: 15.0,
-    cacheWrite: null,
-    cacheRead: 0.25,
-  },
-  {
-    name: "gpt-5.4-mini",
-    display: "GPT-5.4 mini",
-    tier: "fast",
-    input: 0.75,
-    output: 4.5,
-    cacheWrite: null,
-    cacheRead: 0.075,
-  },
-  {
-    name: "gpt-5.3-codex",
-    display: "GPT-5.3 Codex",
-    tier: "coding",
-    input: 1.75,
-    output: 14.0,
-    cacheWrite: null,
-    cacheRead: 0.175,
-  },
-  {
-    name: "gpt-5.2",
-    display: "GPT-5.2",
-    tier: "standard",
-    input: 1.75,
-    output: 14.0,
-    cacheWrite: null,
-    cacheRead: 0.175,
-  },
-];
+/** One `<provider>/<model>` entry as served by /api/v2/pricing. */
+interface PriceCard {
+  input_per_1m: number;
+  output_per_1m: number;
+  cache_read_per_1m: number;
+  cache_create_per_1m: number;
+  /** Distinct 1h-TTL cache-write rate. Absent/0 means 1h bills at the 5m rate. */
+  cache_create_1h_per_1m?: number;
+}
+
+interface Catalogue {
+  default: PriceCard;
+  provider_defaults: Record<string, PriceCard>;
+  /** Keyed "<provider>/<model>", lowercase — matches pricing.Catalog.Models(). */
+  models: Record<string, PriceCard>;
+}
 
 type ModelRow = {
   name: string;
@@ -175,6 +64,83 @@ type ModelRow = {
   cacheWrite: number | null;
   cacheRead: number | null;
 };
+
+/** Tier label + sort weight. Keys are catalogue model ids. */
+const PRESENTATION: Record<string, { display: string; tier: string }> = {
+  "claude-fable-5": { display: "Claude Fable 5", tier: "flagship" },
+  "claude-opus-5": { display: "Claude Opus 5", tier: "flagship" },
+  "claude-opus-4-8": { display: "Claude Opus 4.8", tier: "advanced" },
+  "claude-opus-4-7": { display: "Claude Opus 4.7", tier: "advanced" },
+  "claude-opus-4-6": { display: "Claude Opus 4.6", tier: "advanced" },
+  "claude-sonnet-5": { display: "Claude Sonnet 5", tier: "balanced" },
+  "claude-sonnet-4-6": { display: "Claude Sonnet 4.6", tier: "standard" },
+  "claude-haiku-4-5": { display: "Claude Haiku 4.5", tier: "fast" },
+  "gpt-5.6-sol": { display: "GPT-5.6 Sol", tier: "flagship" },
+  "gpt-5.6-terra": { display: "GPT-5.6 Terra", tier: "advanced" },
+  "gpt-5.6-luna": { display: "GPT-5.6 Luna", tier: "fast" },
+  "gpt-5.5": { display: "GPT-5.5", tier: "flagship" },
+  "gpt-5.4": { display: "GPT-5.4", tier: "advanced" },
+  "gpt-5.4-mini": { display: "GPT-5.4 mini", tier: "fast" },
+  "gpt-5.3-codex": { display: "GPT-5.3 Codex", tier: "coding" },
+  "gpt-5.3-codex-spark": { display: "GPT-5.3 Codex Spark", tier: "coding" },
+  "gpt-5.2": { display: "GPT-5.2", tier: "standard" },
+};
+
+// Dated snapshots (claude-sonnet-5-20260901) resolve to the same card as their
+// undated base via the catalogue's prefix fallback, so listing both would show
+// one model twice at one price. Keep the base, drop the snapshot.
+const DATED_SUFFIX = /-\d{8}$/;
+
+// Which OpenAI ids are Codex subscription tiers rather than BYOK API models.
+// The catalogue prices gpt-5 / gpt-5-mini / gpt-5-nano / gpt-4o* too, but those
+// are only reachable with a customer's own key and are not sold here. Every
+// tier shipped so far is gpt-5.<minor>; anything else is treated as BYOK.
+const CODEX_TIER = /^gpt-5\.\d/;
+
+/** Title-case a catalogue id when PRESENTATION has no entry for it. */
+function deriveDisplay(model: string): string {
+  return model
+    .split("-")
+    .map((w) => (/^[a-z]/.test(w) ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ")
+    .replace(/^Claude /, "Claude ")
+    .replace(/^Gpt/, "GPT");
+}
+
+/**
+ * Turn the catalogue into the rows for one provider tab.
+ *
+ * Ordering is by input rate descending, so the priciest model is index 0 and
+ * gets the featured card — that ranking follows the data instead of a
+ * hand-maintained list that can fall out of step with it.
+ */
+function rowsFor(cat: Catalogue | null, provider: "anthropic" | "openai"): ModelRow[] {
+  if (!cat?.models) return [];
+  const rows: ModelRow[] = [];
+  for (const [key, card] of Object.entries(cat.models)) {
+    const slash = key.indexOf("/");
+    if (slash < 0 || key.slice(0, slash) !== provider) continue;
+    const name = key.slice(slash + 1);
+    if (DATED_SUFFIX.test(name)) continue;
+    if (provider === "openai" && !CODEX_TIER.test(name)) continue;
+    const meta = PRESENTATION[name];
+    rows.push({
+      name,
+      display: meta?.display ?? deriveDisplay(name),
+      // "standard" is the neutral label for a model shipped after this file was
+      // last touched — it still gets listed, just without a curated tier.
+      tier: meta?.tier ?? "standard",
+      input: card.input_per_1m,
+      output: card.output_per_1m,
+      // 0 means the catalogue has no rate for that axis (OpenAI cards carry no
+      // cache-write until the 5.6 line); render it as "—" rather than "$0".
+      cacheWrite: card.cache_create_per_1m > 0 ? card.cache_create_per_1m : null,
+      cacheRead: card.cache_read_per_1m > 0 ? card.cache_read_per_1m : null,
+    });
+  }
+  rows.sort((a, b) => b.input - a.input || a.name.localeCompare(b.name));
+  return rows;
+}
 
 // Format a USD/M-token rate: up to 3 decimals, trailing zeros trimmed ($5, $2.4, $0.075).
 function fmtPrice(n: number): string {
@@ -408,13 +374,18 @@ function PriceCol({ label, official, mult }: { label: string; official: number; 
   );
 }
 
+// Label above value rather than beside it. Side-by-side worked while only the
+// featured card showed cache rates; now that every card does, the labels have
+// a quarter of the width and "缓存读取 / 缓存输入" wrapped to three lines.
 function CacheRow({ label, value, mult }: { label: string; value: number | null; mult: number }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="font-mono text-sm tabular-nums">
+    <div className="rounded-lg border border-border bg-background/40 px-3 py-2">
+      <div className="truncate text-[11px] leading-tight text-muted-foreground" title={label}>
+        {label}
+      </div>
+      <div className="mt-0.5 font-mono text-sm tabular-nums">
         {value == null ? <span className="text-muted-foreground">—</span> : fmtPrice(value * mult)}
-      </span>
+      </div>
     </div>
   );
 }
@@ -440,7 +411,7 @@ function ModelCard({
       transition={{ duration: 0.45, delay: index * 0.05, ease: EASE }}
       className={cn(
         "glass group relative flex flex-col overflow-hidden rounded-2xl p-5 transition-transform duration-300 hover:-translate-y-0.5",
-        featured && "sm:col-span-2 lg:row-span-2 lg:col-span-2",
+        featured && "sm:col-span-2",
       )}
     >
       {/* engraved top highlight */}
@@ -466,7 +437,8 @@ function ModelCard({
       <div className="relative flex items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-display text-sm font-medium text-foreground">
+            <span className="font-display text-sm font-medium text-foreground">{m.display}</span>
+            <span className="rounded-full border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
               {t(`pricing.tiers.${m.tier}`)}
             </span>
             <span className="text-xs text-muted-foreground">{t("pricing.modelTag")}</span>
@@ -493,14 +465,13 @@ function ModelCard({
         <PriceCol label={t("pricing.columns.output")} official={m.output} mult={mult} />
       </div>
 
-      {featured && (
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <CacheRow label={t("pricing.columns.cacheWrite")} value={m.cacheWrite} mult={mult} />
-          <CacheRow label={t("pricing.columns.cacheRead")} value={m.cacheRead} mult={mult} />
-        </div>
-      )}
-
-      {featured && <div className="flex-1" />}
+      {/* Cache rates on every card, not just the featured one. On Claude Code
+          traffic cache reads and writes are the majority of a bill, so hiding
+          them on six of seven models hid most of what a customer actually pays. */}
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <CacheRow label={t("pricing.columns.cacheWrite")} value={m.cacheWrite} mult={mult} />
+        <CacheRow label={t("pricing.columns.cacheRead")} value={m.cacheRead} mult={mult} />
+      </div>
     </motion.div>
   );
 }
@@ -510,7 +481,9 @@ function ModelBento({ models, mult }: { models: ModelRow[]; mult: number }) {
   const reduce = useReducedMotion();
   return (
     <div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:grid-rows-2">
+      {/* Auto-flowing rows: the card count now follows the catalogue, so a fixed
+          row count would overflow the moment a model is added. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {models.map((m, i) => (
           <ModelCard
             key={m.name}
@@ -527,23 +500,35 @@ function ModelBento({ models, mult }: { models: ModelRow[]; mult: number }) {
   );
 }
 
-function ModelTables({ claudeMult, codexMult }: { claudeMult: number; codexMult: number }) {
+function ModelTables({
+  claude,
+  codex,
+  claudeMult,
+  codexMult,
+}: {
+  claude: ModelRow[];
+  codex: ModelRow[];
+  claudeMult: number;
+  codexMult: number;
+}) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"claude" | "codex">("claude");
+  // Codex opens the table: it is the majority of billed traffic and carries the
+  // deeper discount, so it is what a visitor arriving from the hero expects.
+  const [tab, setTab] = useState<"claude" | "codex">("codex");
   const tabs = [
-    {
-      id: "claude" as const,
-      label: t("pricing.claudeTitle"),
-      sub: t("pricing.claudeSub"),
-      models: CLAUDE_MODELS,
-      mult: claudeMult,
-    },
     {
       id: "codex" as const,
       label: t("pricing.codexTitle"),
       sub: t("pricing.codexSub"),
-      models: CODEX_OAUTH_MODELS,
+      models: codex,
       mult: codexMult,
+    },
+    {
+      id: "claude" as const,
+      label: t("pricing.claudeTitle"),
+      sub: t("pricing.claudeSub"),
+      models: claude,
+      mult: claudeMult,
     },
   ];
   // biome-ignore lint/style/noNonNullAssertion: tab state is always one of the two tab ids defined above
@@ -637,8 +622,8 @@ function AccessGroups({ groups }: { groups: PricingGroup[] }) {
                 <p className="mt-1 text-xs text-muted-foreground">{g.Description}</p>
               )}
               <div className="mt-4 space-y-2">
-                <MultRow label="Claude" value={g.ClaudeMultiplier} />
                 <MultRow label="Codex" value={g.CodexMultiplier} />
+                <MultRow label="Claude" value={g.ClaudeMultiplier} />
                 <p className="pt-1 text-xs text-muted-foreground">{t("pricing.formulaCaption")}</p>
               </div>
             </SpotlightCard>
@@ -770,13 +755,23 @@ function PricingCta() {
 
 export default function PricingPage({ embedded }: { embedded?: boolean }) {
   const [groups, setGroups] = useState<PricingGroup[]>([]);
+  const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
 
   useEffect(() => {
     api<{ groups: PricingGroup[] }>("/groups").then((r) =>
       // 企业 VIP 分组不对外展示在价格页。
       setGroups((r.groups || []).filter((g) => g.Name !== "企业VIP")),
     );
+    // Rates come from the live billing catalogue. A failure leaves the tables
+    // empty rather than falling back to a stale local copy — showing no price
+    // is recoverable, showing a wrong one is what this fetch exists to prevent.
+    api<Catalogue>("/pricing")
+      .then(setCatalogue)
+      .catch(() => setCatalogue(null));
   }, []);
+
+  const claudeRows = useMemo(() => rowsFor(catalogue, "anthropic"), [catalogue]);
+  const codexRows = useMemo(() => rowsFor(catalogue, "openai"), [catalogue]);
 
   // The default group's multipliers drive the "official vs ours" framing on the
   // model bento. Fall back to 1× (no discount) until groups load.
@@ -788,7 +783,12 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
     <div className="space-y-20 md:space-y-28">
       <Hero />
       <BillingFormula />
-      <ModelTables claudeMult={claudeMult} codexMult={codexMult} />
+      <ModelTables
+        claude={claudeRows}
+        codex={codexRows}
+        claudeMult={claudeMult}
+        codexMult={codexMult}
+      />
       <AccessGroups groups={groups} />
       <Faq />
       {!embedded && <PricingCta />}

@@ -14,7 +14,9 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wjsoj/cc-core/apicompat"
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/codexerr"
 	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/requestlog"
 	ccstream "github.com/wjsoj/cc-core/stream"
@@ -23,7 +25,8 @@ import (
 
 // The Codex CLI fingerprint (codex-tui/0.135.0 identity over the legacy HTTP
 // POST /codex/responses path) is now centralized in cc-core's mimicry package
-// (mimicry.ApplyCodexCLIHeaders), shared with CPA-Claude so every relay stays
+// (mimicry.ApplyCodexCLIHeaders — no OpenAI-Beta on this path; real Codex sets
+// it only on the WS handshake), shared with CPA-Claude so every relay stays
 // in lockstep when the version target is bumped. See cc-core/mimicry/codex.go
 // and cc-core/crack/codex/SPEC.md.
 
@@ -38,14 +41,18 @@ import (
 // fresh per-request session UUID, and the `codex-tui` User-Agent /
 // Originator that the backend fingerprints on.
 func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, clientName string, start time.Time, attempts int) (retry, done bool) {
-	if path != "/v1/responses" && path != "/v1/responses/compact" {
-		// The ChatGPT backend only hosts /codex/responses{,/compact}; OAuth
-		// creds can't serve /v1/chat/completions. Ask the retry loop to try a
-		// different credential (API-key creds handle chat/completions fine).
-		// Don't MarkFailure — this credential isn't broken, just the wrong
-		// kind. forward() has already fast-failed if no API-key alternatives
-		// exist.
-		log.Debugf("codex oauth: %s skipping %s (OAuth path supports /v1/responses{,/compact} only)", a.ID, path)
+	// /v1/chat/completions is bridged onto the backend's /codex/responses route
+	// (codex_chat_bridge.go): the request is translated into a Responses body on
+	// the way up and the Responses stream/object is rendered back as
+	// chat.completion{,.chunk} on the way down. Without the bridge every
+	// OpenAI-compatible client was unroutable to an OAuth subscription
+	// credential and could only be served by a paid relay key.
+	isChat := path == "/v1/chat/completions"
+	if !isChat && path != "/v1/responses" && path != "/v1/responses/compact" {
+		// Any other route genuinely has no backend equivalent. Ask the retry
+		// loop to try a different credential; don't MarkFailure — this
+		// credential isn't broken, just the wrong kind.
+		log.Debugf("codex oauth: %s skipping %s (no ChatGPT backend equivalent)", a.ID, path)
 		return true, false
 	}
 
@@ -55,12 +62,32 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	if ab := strings.TrimRight(snap.BaseURL, "/"); ab != "" {
 		baseURL = ab
 	}
-	upURL := baseURL + mimicry.CodexOAuthPath(path)
+	// A bridged chat request is a Responses request from here on: same backend
+	// route, same sanitizer, same fingerprint.
+	upstreamPath := path
+	if isChat {
+		upstreamPath = "/v1/responses"
+	}
+	upURL := baseURL + mimicry.CodexOAuthPath(upstreamPath)
 
-	upstreamBody, _, err := mimicry.SanitizeCodexRequestBody(body, path)
+	sourceBody := body
+	if isChat {
+		converted, cerr := apicompat.ChatCompletionsToResponses(body)
+		if cerr != nil {
+			// A body we can't translate is a client-shape problem, not a
+			// credential problem — but an API-key credential forwards
+			// chat/completions verbatim and may well accept it, so roll back to
+			// the loop instead of failing the request here.
+			log.Infof("codex oauth: chat/completions bridge declined body via %s: %v — deferring to API-key path", a.ID, cerr)
+			return true, false
+		}
+		sourceBody = converted
+	}
+
+	upstreamBody, _, err := mimicry.SanitizeCodexRequestBody(sourceBody, upstreamPath)
 	if err != nil {
 		log.Warnf("codex oauth: body sanitize failed via %s: %v", a.ID, err)
-		upstreamBody = body
+		upstreamBody = sourceBody
 	}
 
 	ctx := c.Request.Context()
@@ -75,11 +102,16 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	accessToken, _ := a.Credentials()
 	accountID, _ := a.CodexIdentity()
 	isCompactPath := path == "/v1/responses/compact"
-	// Apply the Codex CLI fingerprint — codex-tui/0.135.0 identity (Originator /
-	// User-Agent / Version) over the legacy HTTP POST /codex/responses{,/compact}
+	// Apply the Codex CLI fingerprint — codex-tui identity (Originator /
+	// User-Agent / Version) over the HTTP POST /codex/responses{,/compact}
 	// path. Centralized in cc-core (mimicry.ApplyCodexCLIHeaders) so every relay
 	// stays in lockstep when the version target is bumped. See cc-core/crack/codex/SPEC.md.
-	mimicry.ApplyCodexCLIHeaders(upReq, accessToken, accountID, isCompactPath)
+	//
+	// The routing hint is derived from upstreamBody — the bytes actually going
+	// out, after sanitization — so the header can never name a different model
+	// than the body does.
+	routingModel, routingTier := mimicry.CodexModelAndTier(upstreamBody)
+	mimicry.ApplyCodexCLIHeaders(upReq, accessToken, accountID, isCompactPath, routingModel, routingTier)
 
 	// Shared pooled transport (per proxyURL). Reusing HTTP/2 connections is
 	// critical here: chatgpt.com's CF edge rate-limits new TCP/TLS connections
@@ -152,6 +184,17 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			s.pool.ReportUpstreamError(a, http.StatusTooManyRequests, resetAt)
 			return true, false
 		}
+		// Bridged chat clients routinely ask for relay-only model names
+		// (gpt-5.6-terra-high, gpt-4o-mini, …) that the ChatGPT backend doesn't
+		// host. Before the bridge those requests went straight to an API key;
+		// now that OAuth is tried first, a model rejection must roll back to
+		// the API-key pool rather than surface a 400 the client can't act on.
+		// Scoped to the bridged route so native /v1/responses keeps relaying
+		// its upstream 4xx verbatim. The credential is healthy — no MarkFailure.
+		if isChat && codexModelUnsupported(resp.StatusCode, errBody) {
+			log.Infof("codex oauth: %s does not host model %s (upstream %d) — rotating to an API-key credential", a.ID, model, resp.StatusCode)
+			return true, false
+		}
 		copySafeRetryHeaders(c, resp.Header)
 		writeAPIError(c, auth.ProviderOpenAI, publicUpstreamError(resp.StatusCode, errBody))
 		s.emitLog(requestlog.Record{
@@ -206,10 +249,22 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		_, _ = c.Writer.Write(payload)
 	case stream:
 		// Streaming client: passthrough SSE verbatim (with keepalive + terminal
-		// tracking). A truncated upstream (no terminal event) is surfaced in the
-		// request log instead of looking like a clean stream end.
+		// tracking), or — on the bridged chat route — translated frame by frame
+		// into chat.completion.chunk. A truncated upstream (no terminal event)
+		// is surfaced in the request log instead of looking like a clean stream
+		// end, on both paths.
 		writeResponseHeaders(c, resp)
-		if sawTerminal, rerr := streamSSECodexBackend(c, resp, &counts); !sawTerminal {
+		// Branching here rather than through a relay closure is deliberate:
+		// capturing resp in a closure makes bodyclose lose track of the
+		// unconditional Close after this switch and report a false leak.
+		var sawTerminal bool
+		var rerr error
+		if isChat {
+			sawTerminal, rerr = streamCodexAsChatCompletions(c, resp, &counts, model, chatStreamWantsUsage(body))
+		} else {
+			sawTerminal, rerr = streamSSECodexBackend(c, resp, &counts)
+		}
+		if !sawTerminal {
 			// A stream that ends without a terminal event is only an upstream
 			// fault when the upstream is what went away. The far more common
 			// cause is the client hanging up mid-turn — Codex CLI aborts the
@@ -254,6 +309,23 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			})
 			return false, true
 		}
+		if isChat {
+			converted, cerr := apicompat.ResponsesToChatCompletion(payload, model, time.Now().Unix())
+			if cerr != nil {
+				log.Warnf("codex oauth: chat/completions render via %s failed: %v", a.ID, cerr)
+				writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusBadGateway, Code: "service_response_error", Message: "The model service returned an incomplete response. Please try again."})
+				_ = resp.Body.Close()
+				s.emitLog(requestlog.Record{
+					Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.ProviderOpenAI,
+					AuthID: a.ID, AuthLabel: a.Label, AuthKind: "oauth", Model: model,
+					Stream: stream, Path: path, Status: 502, Attempts: attempts,
+					DurationMs: time.Since(start).Milliseconds(),
+					Error:      cerr.Error(),
+				})
+				return false, true
+			}
+			payload = converted
+		}
 		// Drop the upstream's Content-Type: we're returning JSON, not SSE.
 		for k, v := range resp.Header {
 			if strings.EqualFold(k, "Content-Type") || strings.EqualFold(k, "Content-Length") || strings.EqualFold(k, "Transfer-Encoding") {
@@ -270,12 +342,14 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	_ = resp.Body.Close()
 
 	s.usage.Record(a.ID, a.Label, counts)
-	var costUSD float64
+	// CostUSD = official upstream price, BilledUSD = wallet debit.
+	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
 		official := s.pricing.Cost(auth.ProviderOpenAI, model, counts)
 		costUSD = official
+		billedUSD = official
 		// Same single-funnel as Anthropic: hand the official cost to the
 		// SaaS adapter, get back the billed amount, log/charge with it.
 		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
@@ -283,12 +357,12 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			if err != nil {
 				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 			} else {
-				costUSD = billed
+				billedUSD = billed
 				userID = info.UserID
 				multiplier = s.saas.MultiplierFor(info, auth.ProviderOpenAI)
 			}
 		}
-		s.usage.RecordClient(clientToken, clientName, counts, costUSD)
+		s.usage.RecordClient(clientToken, clientName, counts, billedUSD)
 	}
 	s.emitLog(requestlog.Record{
 		Client:      clientName,
@@ -302,6 +376,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		Output:      counts.OutputTokens,
 		CacheRead:   counts.CacheReadTokens,
 		CostUSD:     costUSD,
+		BilledUSD:   billedUSD,
 		UserID:      userID,
 		Multiplier:  multiplier,
 		Status:      logStatus,
@@ -457,6 +532,34 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 				payload := bytes.TrimSpace(trim[5:])
 				if len(payload) > 0 && payload[0] == '{' {
 					counts.Add(extractCodexBackendUsageFromJSON(payload))
+
+					// Upstream sheds capacity as an in-band error frame inside
+					// an otherwise-200 stream. Forwarded verbatim it reaches the
+					// CLI as ApiError::ServerOverloaded, which is TERMINAL for
+					// the session ("Selected model is at capacity") — while the
+					// same failure under nearly any other code lands in the
+					// CLI's Retryable arm and is simply backed off. Demote just
+					// those two codes; the message is left untouched, so the
+					// user still sees why. See cc-core/codexerr.
+					//
+					// Unlike CPA-Claude this path cannot instead WITHHOLD the
+					// frame and fail over: the caller commits response headers
+					// eagerly above (writeResponseHeaders before the relay), so
+					// by the time any frame is classified the response is
+					// already committed. Demotion is the whole fix available
+					// here; giving this path lazy commit would be a separate
+					// change.
+					if codexerr.Classify(payload) == codexerr.ClassRetryable {
+						if demoted, ok := codexerr.DemoteCapacityCode(payload); ok {
+							tail := line[len(trim):]
+							rebuilt := make([]byte, 0, len("data: ")+len(demoted)+len(tail))
+							rebuilt = append(rebuilt, []byte("data: ")...)
+							rebuilt = append(rebuilt, demoted...)
+							rebuilt = append(rebuilt, tail...)
+							line = rebuilt
+						}
+					}
+
 					if codexTerminalEvent(payload) {
 						terminal = true
 					}

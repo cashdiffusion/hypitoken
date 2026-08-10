@@ -14,25 +14,36 @@ var ErrNotFound = errors.New("not found")
 // gift expiry, caps, and A/B copy all live here so the behaviour is tunable from
 // the admin panel without a code change.
 type Campaign struct {
-	ID                 int64     `json:"id"`
-	Slug               string    `json:"slug"`
-	Name               string    `json:"name"`
-	Kind               string    `json:"kind"`   // invite | gift | both
-	Status             string    `json:"status"` // active | paused | ended
-	InviteeBonusUSD    float64   `json:"invitee_bonus_usd"`
-	InviterBonusUSD    float64   `json:"inviter_bonus_usd"`
-	InviterRewardOn    string    `json:"inviter_reward_on"` // signup | first_spend
-	GiftExpiryDays     int       `json:"gift_expiry_days"`
-	MaxGiftUSD         float64   `json:"max_gift_usd"`
-	MaxRewardedInvites int       `json:"max_rewarded_invites"` // 0 = unlimited
-	DailyBudgetUSD     float64   `json:"daily_budget_usd"`     // circuit breaker; 0 = unlimited
-	StartsAt           int64     `json:"starts_at"`
-	EndsAt             int64     `json:"ends_at"`
-	Headline           string    `json:"headline"`
-	Subcopy            string    `json:"subcopy"`
-	VariantB           string    `json:"variant_b"` // JSON {headline,subcopy}, optional
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 int64   `json:"id"`
+	Slug               string  `json:"slug"`
+	Name               string  `json:"name"`
+	Kind               string  `json:"kind"`   // invite | gift | both
+	Status             string  `json:"status"` // active | paused | ended
+	InviteeBonusUSD    float64 `json:"invitee_bonus_usd"`
+	InviterBonusUSD    float64 `json:"inviter_bonus_usd"`
+	InviterRewardOn    string  `json:"inviter_reward_on"` // signup | first_spend
+	GiftExpiryDays     int     `json:"gift_expiry_days"`
+	MaxGiftUSD         float64 `json:"max_gift_usd"`
+	MaxRewardedInvites int     `json:"max_rewarded_invites"` // 0 = unlimited
+	DailyBudgetUSD     float64 `json:"daily_budget_usd"`     // circuit breaker; 0 = unlimited
+	// MinInviteeSpendUSD is how much the invitee must actually burn before a
+	// deferred (reward_on=first_spend) inviter reward is released. Without it
+	// "first spend" is satisfied by a $0.000005 charge, which is no barrier at
+	// all to someone farming invites. 0 = any spend releases.
+	MinInviteeSpendUSD float64 `json:"min_invitee_spend_usd"`
+	// DailyInviteCap bounds how many confirmed invites one inviter can be paid
+	// for in a rolling 24h. Past it the conversion is still attributed (the
+	// invitee keeps their bonus) but the inviter earns nothing, so a farm's
+	// yield per identity is capped even when no per-signup rule fires.
+	// 0 = unlimited.
+	DailyInviteCap int       `json:"daily_invite_cap"`
+	StartsAt       int64     `json:"starts_at"`
+	EndsAt         int64     `json:"ends_at"`
+	Headline       string    `json:"headline"`
+	Subcopy        string    `json:"subcopy"`
+	VariantB       string    `json:"variant_b"` // JSON {headline,subcopy}, optional
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // Tier is one milestone rung: reaching `threshold` confirmed invites unlocks the
@@ -48,13 +59,14 @@ type Tier struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
-const campaignCols = `id, slug, name, kind, status, invitee_bonus_usd, inviter_bonus_usd, inviter_reward_on, gift_expiry_days, max_gift_usd, max_rewarded_invites, daily_budget_usd, starts_at, ends_at, headline, subcopy, variant_b, created_at, updated_at`
+const campaignCols = `id, slug, name, kind, status, invitee_bonus_usd, inviter_bonus_usd, inviter_reward_on, gift_expiry_days, max_gift_usd, max_rewarded_invites, daily_budget_usd, min_invitee_spend_usd, daily_invite_cap, starts_at, ends_at, headline, subcopy, variant_b, created_at, updated_at`
 
 func scanCampaign(row interface{ Scan(...any) error }) (*Campaign, error) {
 	var c Campaign
 	var created, updated int64
 	if err := row.Scan(&c.ID, &c.Slug, &c.Name, &c.Kind, &c.Status, &c.InviteeBonusUSD, &c.InviterBonusUSD,
-		&c.InviterRewardOn, &c.GiftExpiryDays, &c.MaxGiftUSD, &c.MaxRewardedInvites, &c.DailyBudgetUSD, &c.StartsAt, &c.EndsAt,
+		&c.InviterRewardOn, &c.GiftExpiryDays, &c.MaxGiftUSD, &c.MaxRewardedInvites, &c.DailyBudgetUSD,
+		&c.MinInviteeSpendUSD, &c.DailyInviteCap, &c.StartsAt, &c.EndsAt,
 		&c.Headline, &c.Subcopy, &c.VariantB, &created, &updated); err != nil {
 		return nil, err
 	}
@@ -150,6 +162,8 @@ type CampaignParams struct {
 	MaxGiftUSD         float64
 	MaxRewardedInvites int
 	DailyBudgetUSD     float64
+	MinInviteeSpendUSD float64
+	DailyInviteCap     int
 	StartsAt           int64
 	EndsAt             int64
 	Headline           string
@@ -192,11 +206,11 @@ func (s *Service) CreateCampaign(ctx context.Context, p CampaignParams) (*Campai
 		p.MaxGiftUSD = 100
 	}
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO referral_campaigns
-		(slug, name, kind, status, invitee_bonus_usd, inviter_bonus_usd, inviter_reward_on, gift_expiry_days, max_gift_usd, max_rewarded_invites, daily_budget_usd, starts_at, ends_at, headline, subcopy, variant_b, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(slug, name, kind, status, invitee_bonus_usd, inviter_bonus_usd, inviter_reward_on, gift_expiry_days, max_gift_usd, max_rewarded_invites, daily_budget_usd, min_invitee_spend_usd, daily_invite_cap, starts_at, ends_at, headline, subcopy, variant_b, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.Slug, p.Name, normalizeKind(p.Kind), normalizeStatus(p.Status), p.InviteeBonusUSD, p.InviterBonusUSD,
 		normalizeRewardOn(p.InviterRewardOn), p.GiftExpiryDays, p.MaxGiftUSD, p.MaxRewardedInvites, p.DailyBudgetUSD,
-		p.StartsAt, p.EndsAt, p.Headline, p.Subcopy, p.VariantB, now, now)
+		p.MinInviteeSpendUSD, p.DailyInviteCap, p.StartsAt, p.EndsAt, p.Headline, p.Subcopy, p.VariantB, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -218,11 +232,11 @@ func (s *Service) UpdateCampaign(ctx context.Context, id int64, p CampaignParams
 	}
 	if _, err := s.DB.ExecContext(ctx, `UPDATE referral_campaigns SET
 		name=?, kind=?, status=?, invitee_bonus_usd=?, inviter_bonus_usd=?, inviter_reward_on=?,
-		gift_expiry_days=?, max_gift_usd=?, max_rewarded_invites=?, daily_budget_usd=?, starts_at=?, ends_at=?,
-		headline=?, subcopy=?, variant_b=?, updated_at=? WHERE id=?`,
+		gift_expiry_days=?, max_gift_usd=?, max_rewarded_invites=?, daily_budget_usd=?, min_invitee_spend_usd=?,
+		daily_invite_cap=?, starts_at=?, ends_at=?, headline=?, subcopy=?, variant_b=?, updated_at=? WHERE id=?`,
 		p.Name, normalizeKind(p.Kind), normalizeStatus(p.Status), p.InviteeBonusUSD, p.InviterBonusUSD,
 		normalizeRewardOn(p.InviterRewardOn), p.GiftExpiryDays, p.MaxGiftUSD, p.MaxRewardedInvites, p.DailyBudgetUSD,
-		p.StartsAt, p.EndsAt, p.Headline, p.Subcopy, p.VariantB, now, id); err != nil {
+		p.MinInviteeSpendUSD, p.DailyInviteCap, p.StartsAt, p.EndsAt, p.Headline, p.Subcopy, p.VariantB, now, id); err != nil {
 		return nil, err
 	}
 	return s.GetCampaign(ctx, id)

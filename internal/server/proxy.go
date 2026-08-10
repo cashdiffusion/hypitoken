@@ -18,7 +18,9 @@ import (
 
 	"github.com/wjsoj/cc-core/advisor"
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/downstream"
 	"github.com/wjsoj/cc-core/mimicry"
+	"github.com/wjsoj/cc-core/relay"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/sidecar"
 	ccstream "github.com/wjsoj/cc-core/stream"
@@ -92,14 +94,6 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	// pricing group. Legacy weekly-budget logic still applies to non-SaaS tokens.
 	saasInfo, saasOK := saasInfoFrom(c)
 	var clientGroup string
-	// clientGroups is the priority-ordered fallthrough list for multi-channel
-	// routing (anthropic vs kiro). Populated from token.EffectiveGroups() in
-	// the non-SaaS branch, and from saasInfo.Groups (when non-empty) in the
-	// SaaS branch. Empty = single-channel anthropic, like before.
-	var clientGroups []string
-	if saasOK && len(saasInfo.Groups) > 0 {
-		clientGroups = append(clientGroups, saasInfo.Groups...)
-	}
 	if saasOK && s.saas != nil {
 		clientGroup = s.saas.CredentialGroup(saasInfo)
 		if pre := s.saas.PreCheck(c.Request.Context(), saasInfo); pre != nil {
@@ -117,9 +111,6 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		if tokOK {
 			weeklyLimit = entry.WeeklyUSD
 			clientGroup = entry.Group
-			// Capture the priority-ordered Groups for kiro routing below.
-			// Falls back to [Group] (or [""]) when only the legacy field is set.
-			clientGroups = entry.EffectiveGroups()
 		}
 		if tokOK && weeklyLimit > 0 {
 			spent := s.usage.WeeklyCostUSD(clientToken)
@@ -142,23 +133,13 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 		}
 	}
 
-	// Fail fast when the route can't be served by any available credential.
-	// OAuth Codex credentials only speak /v1/responses — they can't serve
-	// /v1/chat/completions, and without this check the forward loop would
-	// cycle every OAuth cred (each returning retry=true), then surface a
-	// misleading 503 "all upstream credentials exhausted". If no API-key
-	// credential of this provider can serve the requested model, tell the
-	// client directly what's wrong.
-	if auth.NormalizeProvider(provider) == auth.ProviderOpenAI && path == "/v1/chat/completions" && !s.pool.HasAPIKeyFor(provider, clientGroup, model) {
-		msg := fmt.Sprintf("model %q is only available via /v1/responses on this server (no OpenAI-compatible API-key credential is configured for it); retry with the /v1/responses endpoint", model)
-		writeAPIError(c, provider, APIError{Status: http.StatusBadRequest, Code: "unsupported_endpoint", Message: msg})
-		s.emitLog(requestlog.Record{
-			Client: clientName, ClientToken: maskClientToken(clientToken), Provider: provider, Model: model,
-			Stream: peek.Stream, Path: path, Status: 400,
-			DurationMs: time.Since(start).Milliseconds(), Error: "route unsupported for available credentials",
-		})
-		return
-	}
+	// There used to be a fail-fast here that rejected /v1/chat/completions
+	// outright when no API-key credential could serve the model, because OAuth
+	// Codex credentials only spoke /v1/responses. That is no longer true:
+	// codex_chat_bridge.go translates the route onto the backend's
+	// /codex/responses, so an OAuth credential is a legitimate candidate and
+	// the normal failover loop (OAuth → model-unsupported rollback → API key)
+	// resolves the route correctly.
 
 	// Rate limit (RPM) per client token. Sliding 60s window; scoped
 	// per-provider to match the inflight budget so Claude and Codex don't
@@ -209,14 +190,6 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 			})
 			return
 		}
-	}
-
-	// Kiro side-channel: if the resolved token has a kiro-routed group in its
-	// priority list, AND that group has healthy Kiro credentials, dispatch via
-	// kirobridge and return. Falls through to the anthropic path below when no
-	// kiro group matches OR no kiro creds are healthy.
-	if path == "/v1/messages" && s.tryKiro(c, body, model, peek.Stream, clientToken, clientName, path, clientGroups, start) {
-		return
 	}
 
 	// Hand off to the credential-failover retry loop.
@@ -419,6 +392,13 @@ func (s *Server) emitLog(r requestlog.Record) {
 // different credentials. Returns "" when the client supplies neither (raw API
 // callers) — the pool then keeps one slot per client token.
 func clientSlotID(c *gin.Context) string {
+	// A trusted relay speaks for the caller behind it. Its declaration wins over
+	// the session headers on the wire, which describe the relay's own hop rather
+	// than the user — without this every user behind one relay token shares a
+	// slot and therefore a single upstream credential.
+	if id, ok := relayIdentity(c); ok {
+		return id.SlotID()
+	}
 	if v := strings.TrimSpace(c.GetHeader("X-Claude-Code-Session-Id")); v != "" {
 		return v
 	}
@@ -470,11 +450,23 @@ type deferredResponse struct {
 
 const claudePreparationAPIKeyFallbackKey = "claude_preparation_apikey_fallback"
 
+// copySafeRetryHeaders carries the backoff signal from a withheld upstream
+// response onto the synthesized error we return instead.
+//
+// Only Retry-After, and deliberately nothing else: the body here is our own
+// APIError JSON, so copying the upstream Content-Type (text/event-stream on a
+// streaming call) would misdescribe it.
+//
+// Going through the scrubber rather than reading the header directly is what
+// gains the derivation — when upstream sent no Retry-After, one is computed from
+// the unified reset timestamps before those are dropped. X-RateLimit-Reset is no
+// longer forwarded: on the relay path it publishes that relay's window, which is
+// the same class of disclosure as the Anthropic headers.
 func copySafeRetryHeaders(c *gin.Context, h http.Header) {
-	for _, key := range []string{"Retry-After", "X-RateLimit-Reset"} {
-		if value := h.Get(key); value != "" {
-			c.Header(key, value)
-		}
+	scrubbed := h.Clone()
+	downstream.ScrubUpstreamHeaders(scrubbed, time.Now())
+	if value := scrubbed.Get("Retry-After"); value != "" {
+		c.Header("Retry-After", value)
 	}
 }
 
@@ -924,9 +916,20 @@ recoveredFromSignature:
 	if a.Kind == auth.KindAPIKey {
 		authKind = "apikey"
 	}
+
+	// counts.Requests is left at ZERO here and set only where usage is actually
+	// observed (usageJSON.toCounts / mergeSSEUsage). It used to be hard-set to 1
+	// on this line, which quietly turned the downstream `counts.Requests > 0`
+	// billing gate into a tautology: a 200 that carried no usage at all still
+	// passed it, priced out to $0, and was served for free. A 2026-08 audit of
+	// the production request log found 3,808 such rows — 3,805 of them belonging
+	// to paying accounts, concentrated in the most expensive models (opus-4-8
+	// ×2013, fable-5 ×1046, opus-4-7 ×335, opus-5 ×75).
+	//
+	// The auth-side ledger still counts every served request; see the `ledger`
+	// copy below, which restores Requests=1 for that purpose only.
 	var counts usage.Counts
 	var sub advisor.SubUsage
-	counts.Requests = 1
 
 	// When this credential rewrote the request's model name (relay vendors
 	// with vendor-prefixed names), rewrite it back in the response so the
@@ -986,23 +989,50 @@ recoveredFromSignature:
 		counts.Add(extractUsageFromJSON(respBody, &sub))
 	}
 	_ = resp.Body.Close()
-	s.usage.Record(a.ID, a.Label, counts)
+
+	// Auth-side ledger: every request this credential served counts toward its
+	// load, whether or not the upstream reported usage. Requests is restored on
+	// a copy so the billing gate below keeps reading the honest signal.
+	ledger := counts
+	ledger.Requests = 1
+	s.usage.Record(a.ID, a.Label, ledger)
+
+	// A 200 that reported no usage at all is an upstream accounting failure, not
+	// a free lunch. It cannot be billed (there is no observed quantity to price)
+	// but it must be visible: log it with the stable marker so the admin panel
+	// and any audit can find these instead of them looking like ordinary $0 rows.
+	if resp.StatusCode < 400 && usage.MissingUsage(counts) {
+		log.Warnf("proxy: %s returned %d without usage accounting (model=%s stream=%v) — billing $0; "+
+			"upstream cannot account for what it served", a.ID, resp.StatusCode, model, stream)
+	}
+
 	// Compute the wallet-side cost: hand the official upstream price to the
 	// SaaS adapter, which applies the per-(group × provider) multiplier and
 	// returns the dollar amount actually deducted. The same value gets
 	// written into the request log so the log row matches the wallet ledger.
-	var costUSD float64
+	//
+	// CostUSD carries the OFFICIAL upstream price and BilledUSD what the wallet
+	// was actually debited — the same split CPA-Claude has always used. CostUSD
+	// used to be overwritten with the billed figure here, which left the two
+	// forks writing opposite meanings into the same JSONL column and made the
+	// request-log UI's "official x multiplier == stored" check unverifiable.
+	//
+	// Rows predating this change have no billed_usd, so readers must fall back
+	// to cost_usd for them; the frontend does exactly that.
+	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
-		officialCost := s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
-		costUSD = officialCost
+		// Priced on the model we actually bought upstream (see billingModelFor);
+		// every label below stays on the client-facing name.
+		costUSD = s.pricing.Cost(auth.NormalizeProvider(a.Provider), billingModelFor(a, model), counts)
+		billedUSD = costUSD
 		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
-			billed, err := s.saas.Charge(c.Request.Context(), info, auth.NormalizeProvider(a.Provider), model, counts, officialCost)
+			billed, err := s.saas.Charge(c.Request.Context(), info, auth.NormalizeProvider(a.Provider), model, counts, costUSD)
 			if err != nil {
 				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 			} else {
-				costUSD = billed
+				billedUSD = billed
 				userID = info.UserID
 				multiplier = s.saas.MultiplierFor(info, auth.NormalizeProvider(a.Provider))
 			}
@@ -1022,7 +1052,7 @@ recoveredFromSignature:
 		for _, sc := range sub.Snapshot() {
 			clientCounts.Add(sc)
 		}
-		s.usage.RecordClient(clientToken, clientName, clientCounts, costUSD+advisorCost)
+		s.usage.RecordClient(clientToken, clientName, clientCounts, billedUSD+advisorCost)
 	}
 	if claudeAudit != nil {
 		log.Infof(
@@ -1034,29 +1064,60 @@ recoveredFromSignature:
 		)
 	}
 	s.emitLog(requestlog.Record{
-		Client:      clientName,
-		ClientToken: maskClientToken(clientToken),
-		Provider:    auth.NormalizeProvider(a.Provider),
-		AuthID:      a.ID,
-		AuthLabel:   a.Label,
-		AuthKind:    authKind,
-		Model:       model,
-		Input:       counts.InputTokens,
-		Output:      counts.OutputTokens,
-		CacheRead:   counts.CacheReadTokens,
-		CacheCreate: counts.CacheCreateTokens,
-		CostUSD:     costUSD,
-		Status:      resp.StatusCode,
-		DurationMs:  time.Since(start).Milliseconds(),
-		Stream:      stream,
-		Path:        path,
-		Attempts:    attempts,
-		Error:       terminalError,
-		UserID:      userID,
-		Multiplier:  multiplier,
-		ClaudeAudit: claudeAudit,
+		Client:        clientName,
+		ClientToken:   maskClientToken(clientToken),
+		Provider:      auth.NormalizeProvider(a.Provider),
+		AuthID:        a.ID,
+		AuthLabel:     a.Label,
+		AuthKind:      authKind,
+		Model:         model,
+		Input:         counts.InputTokens,
+		Output:        counts.OutputTokens,
+		CacheRead:     counts.CacheReadTokens,
+		CacheCreate:   counts.CacheCreateTokens,
+		CacheCreate1h: counts.CacheCreate1hTokens,
+		CostUSD:       costUSD,
+		BilledUSD:     billedUSD,
+		Status:        resp.StatusCode,
+		DurationMs:    time.Since(start).Milliseconds(),
+		Stream:        stream,
+		Path:          path,
+		Attempts:      attempts,
+		Error:         terminalError,
+		UserID:        userID,
+		Multiplier:    multiplier,
+		ClaudeAudit:   claudeAudit,
 	})
 	return false, true, nil
+}
+
+// billingModelFor returns the model name a request should be PRICED on, which
+// is not always the name the client asked for.
+//
+// On an Anthropic OAuth credential, cc-core's DefaultClaudeOAuthModelMap folds
+// retired generations onto the current model (claude-opus-4-7 → claude-opus-5,
+// claude-sonnet-4-6 → claude-sonnet-5). What we actually buy from Anthropic is
+// the resolved model, so that is what we cost. The client keeps seeing the name
+// it asked for everywhere else — the response model is rewritten back
+// (rewriteClientModel), the request log records the client-facing name, and the
+// wallet/workspace ledger records it in ChargeMeta — so this changes the
+// amount, never the label. For Opus the two are identical anyway (same price
+// card); for Sonnet the resolved name is cheaper until the sonnet-5
+// introductory rate lapses on 2026-08-31, and the customer gets that difference.
+//
+// API-key credentials are deliberately excluded. Their model_map is a relay
+// vendor's naming convention, not a model substitution: it rewrites to names
+// like "[0.1]a/claude-sonnet-4-6" that match no price card, so pricing them on
+// the upstream name would silently drop every such request onto the provider
+// default.
+func billingModelFor(a *auth.Auth, clientModel string) string {
+	if a == nil || a.Kind != auth.KindOAuth {
+		return clientModel
+	}
+	if upstream, ok := a.ResolveUpstreamModel(clientModel); ok && upstream != "" {
+		return upstream
+	}
+	return clientModel
 }
 
 // doForwardAnthropicAPIKey is the API-key passthrough for Anthropic-shaped
@@ -1283,7 +1344,10 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		writeAPIError(c, auth.NormalizeProvider(a.Provider), publicUpstreamError(resp.StatusCode, errBody))
 	} else {
 		writeResponseHeaders(c, resp)
-		counts.Requests = 1
+		// counts.Requests stays zero until usage is actually observed — see the
+		// OAuth path above for why hard-setting it here made the billing gate a
+		// tautology. This branch carried the larger half of the 3,808 free rows
+		// (3,104 of them, against 704 on OAuth).
 		// Dispatch on the client's stream flag + the actual bytes, not the
 		// upstream Content-Type alone: relays are known to stream the SSE
 		// back as text/plain, which under a header-only check fell through to
@@ -1310,20 +1374,28 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	}
 	_ = resp.Body.Close()
 
-	var costUSD float64
+	// CostUSD = official upstream price, BilledUSD = wallet debit. See the OAuth
+	// path above for why the two are now distinct columns.
+	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
 	if resp.StatusCode < 400 {
-		s.usage.Record(a.ID, a.Label, counts)
+		ledger := counts
+		ledger.Requests = 1
+		s.usage.Record(a.ID, a.Label, ledger)
+		if usage.MissingUsage(counts) {
+			log.Warnf("proxy(apikey): %s returned %d without usage accounting (model=%s stream=%v) — billing $0",
+				a.ID, resp.StatusCode, model, stream)
+		}
 		if counts.Requests > 0 && clientToken != "" {
-			officialCost := s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
-			costUSD = officialCost
+			costUSD = s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
+			billedUSD = costUSD
 			if info, ok := saasInfoFrom(c); ok && s.saas != nil {
-				billed, err := s.saas.Charge(c.Request.Context(), info, auth.NormalizeProvider(a.Provider), model, counts, officialCost)
+				billed, err := s.saas.Charge(c.Request.Context(), info, auth.NormalizeProvider(a.Provider), model, counts, costUSD)
 				if err != nil {
 					log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 				} else {
-					costUSD = billed
+					billedUSD = billed
 					userID = info.UserID
 					multiplier = s.saas.MultiplierFor(info, auth.NormalizeProvider(a.Provider))
 				}
@@ -1336,7 +1408,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 			for _, sc := range sub.Snapshot() {
 				clientCounts.Add(sc)
 			}
-			s.usage.RecordClient(clientToken, clientName, clientCounts, costUSD+advisorCost)
+			s.usage.RecordClient(clientToken, clientName, clientCounts, billedUSD+advisorCost)
 		}
 	}
 	errField := ""
@@ -1344,26 +1416,28 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		errField = fmt.Sprintf("upstream %d: %s", resp.StatusCode, truncate([]byte(errSnippet), 200))
 	}
 	s.emitLog(requestlog.Record{
-		Client:      clientName,
-		ClientToken: maskClientToken(clientToken),
-		Provider:    auth.NormalizeProvider(a.Provider),
-		AuthID:      a.ID,
-		AuthLabel:   a.Label,
-		AuthKind:    "apikey",
-		Model:       model,
-		Input:       counts.InputTokens,
-		Output:      counts.OutputTokens,
-		CacheRead:   counts.CacheReadTokens,
-		CacheCreate: counts.CacheCreateTokens,
-		CostUSD:     costUSD,
-		Status:      resp.StatusCode,
-		DurationMs:  time.Since(start).Milliseconds(),
-		Stream:      stream,
-		Path:        path,
-		Attempts:    attempts,
-		UserID:      userID,
-		Multiplier:  multiplier,
-		Error:       errField,
+		Client:        clientName,
+		ClientToken:   maskClientToken(clientToken),
+		Provider:      auth.NormalizeProvider(a.Provider),
+		AuthID:        a.ID,
+		AuthLabel:     a.Label,
+		AuthKind:      "apikey",
+		Model:         model,
+		Input:         counts.InputTokens,
+		Output:        counts.OutputTokens,
+		CacheRead:     counts.CacheReadTokens,
+		CacheCreate:   counts.CacheCreateTokens,
+		CacheCreate1h: counts.CacheCreate1hTokens,
+		CostUSD:       costUSD,
+		BilledUSD:     billedUSD,
+		Status:        resp.StatusCode,
+		DurationMs:    time.Since(start).Milliseconds(),
+		Stream:        stream,
+		Path:          path,
+		Attempts:      attempts,
+		UserID:        userID,
+		Multiplier:    multiplier,
+		Error:         errField,
 	})
 	return false, true, nil
 }
@@ -1396,6 +1470,10 @@ func stripAnthropicOAuthBeta(h http.Header) {
 // behind CF — seeing those headers triggers CF's loop-prevention WAF and
 // returns 403 HTML. Prefix match so future CF additions are covered.
 func stripIngressHeaders(h http.Header) {
+	// Relay identity is for us to act on, not to propagate: forwarding it would
+	// hand an upstream vendor the shape of our client base, and would let an
+	// untrusted caller's forged header reach a peer that does trust us.
+	relay.Strip(h)
 	for k := range h {
 		lower := strings.ToLower(k)
 		if strings.HasPrefix(lower, "cf-") || strings.HasPrefix(lower, "cdn-") ||
@@ -1423,15 +1501,20 @@ func copyForwardableHeaders(src, dst http.Header) {
 	}
 }
 
+// writeResponseHeaders forwards the upstream response headers the client is
+// allowed to see.
+//
+// The allowlist lives in cc-core/downstream. Copying verbatim used to hand the
+// caller our pool's operational state: the twelve anthropic-ratelimit-unified-*
+// headers (the serving account's tier, its 5h/7d utilisation, its overage status
+// and exact reset timestamps), anthropic-organization-id,
+// anthropic-workspace-id, the upstream request-id and cf-ray.
+//
+// Safe by capture, not by hope: a real third-party gateway returns none of them
+// and Claude Code works against it unchanged (cc-core crack/thirdparty/SPEC.md
+// §4). Called after the retry loop has read those headers for scheduling.
 func writeResponseHeaders(c *gin.Context, resp *http.Response) {
-	for k, vs := range resp.Header {
-		if hopHeaders[http.CanonicalHeaderKey(k)] {
-			continue
-		}
-		for _, v := range vs {
-			c.Writer.Header().Add(k, v)
-		}
-	}
+	downstream.CopyResponseHeaders(c.Writer.Header(), resp.Header, time.Now())
 	c.Writer.WriteHeader(resp.StatusCode)
 }
 
@@ -1476,7 +1559,7 @@ func prepareClaudePreparedBody(body []byte, model string, a *auth.Auth, id mimic
 	// subsequently validates the prepared body, so these exact-byte edits cannot
 	// leave a partially rewritten request behind.
 	if upstreamModel, ok := a.ResolveUpstreamModel(model); ok && upstreamModel != model && upstreamModel != "" {
-		rewritten, err := rewriteModelFieldPreservingBytes(working, upstreamModel)
+		rewritten, err := mimicry.RewriteModelFieldPreservingBytes(working, upstreamModel)
 		if err != nil {
 			return mimicry.BodyTransformResult{}, fmt.Errorf("model rewrite (%s -> %s): %w", model, upstreamModel, err)
 		}
@@ -1587,6 +1670,12 @@ func streamSSE(c *gin.Context, resp *http.Response, counts *usage.Counts, sub *a
 			case "message_stop", "error":
 				terminal = true
 			}
+			// Strip the upstream request id out of error frames. Gated on the
+			// event name inside cc-core, so the thousands of delta frames in a
+			// response cost one string compare and are never parsed.
+			if scrubbed, changed := downstream.ScrubSSELine(sc.Event(), outLine); changed {
+				outLine = scrubbed
+			}
 		}
 		return outLine, terminal, nil
 	}
@@ -1631,15 +1720,44 @@ type usageJSON struct {
 	CacheCreationInputTokens int64                    `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int64                    `json:"cache_read_input_tokens"`
 	Iterations               []advisor.IterationUsage `json:"iterations,omitempty"`
+
+	// CacheCreation is Anthropic's per-TTL breakdown of the cache writes that
+	// CacheCreationInputTokens totals. Present since the extended-TTL beta; a
+	// response that omits it leaves the sub-counts at zero, which the pricing
+	// layer reads as "don't distinguish" and bills exactly as before.
+	//
+	// It matters because mimicry rewrites every cache breakpoint to ttl:"1h"
+	// (mimicry/body.go, ClaudeDefaultCacheTTL) and Anthropic prices a 1h write
+	// at 2× input against a 5m write's 1.25×. Without this field there is no
+	// way to tell after the fact which rate a request should have paid.
+	CacheCreation *struct {
+		Ephemeral5m int64 `json:"ephemeral_5m_input_tokens"`
+		Ephemeral1h int64 `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation,omitempty"`
+}
+
+// observed reports whether this payload carried any billable quantity. Used to
+// derive Counts.Requests so "we saw usage" stays distinguishable from "the
+// request completed" — conflating them served 3,808 production requests free.
+func (u usageJSON) observed() bool {
+	return u.InputTokens > 0 || u.OutputTokens > 0 ||
+		u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0
 }
 
 func (u usageJSON) toCounts() usage.Counts {
-	return usage.Counts{
+	c := usage.Counts{
 		InputTokens:       u.InputTokens,
 		OutputTokens:      u.OutputTokens,
 		CacheCreateTokens: u.CacheCreationInputTokens,
 		CacheReadTokens:   u.CacheReadInputTokens,
 	}
+	if u.CacheCreation != nil {
+		c.CacheCreate1hTokens = u.CacheCreation.Ephemeral1h
+	}
+	if u.observed() {
+		c.Requests = 1
+	}
+	return c
 }
 
 // recordSubUsage charges advisor (and any future server-side sub-model)
@@ -1677,13 +1795,13 @@ func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientTo
 		// Advisor cost goes through the same Charge funnel as the parent
 		// request so the wallet ledger and the request log agree on what
 		// the user actually paid for the sub-call.
-		cost := official
+		billed := official
 		if hasSaaS && s.saas != nil {
-			if billed, err := s.saas.Charge(c.Request.Context(), info, provider, subModel, sc, official); err == nil {
-				cost = billed
+			if b, err := s.saas.Charge(c.Request.Context(), info, provider, subModel, sc, official); err == nil {
+				billed = b
 			}
 		}
-		total += cost
+		total += billed
 		s.emitLog(requestlog.Record{
 			Client:      clientName,
 			ClientToken: maskClientToken(clientToken),
@@ -1696,7 +1814,8 @@ func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientTo
 			Output:      sc.OutputTokens,
 			CacheRead:   sc.CacheReadTokens,
 			CacheCreate: sc.CacheCreateTokens,
-			CostUSD:     cost,
+			CostUSD:     official,
+			BilledUSD:   billed,
 			Status:      status,
 			// DurationMs/Stream/Attempts intentionally zero: this row is a
 			// sub-call summary, not an independent request — adding wall
@@ -1772,6 +1891,14 @@ func mergeSSEUsage(dst *usage.Counts, sub *advisor.SubUsage, payload []byte) {
 	}
 	if u.CacheReadInputTokens > 0 {
 		dst.CacheReadTokens = u.CacheReadInputTokens
+	}
+	if u.CacheCreation != nil && u.CacheCreation.Ephemeral1h > 0 {
+		dst.CacheCreate1hTokens = u.CacheCreation.Ephemeral1h
+	}
+	// Requests marks "usage was observed at least once in this stream", so it
+	// latches on and is never cleared by a later event that omits the fields.
+	if u.observed() {
+		dst.Requests = 1
 	}
 	if sub != nil && len(u.Iterations) > 0 {
 		// message_delta.usage.iterations is cumulative — last non-empty
@@ -2073,84 +2200,6 @@ func rewriteModelField(body []byte, upstream string) ([]byte, error) {
 // rewriteModelFieldPreservingBytes is restricted to rewrite. It changes
 // only the top-level model value so the subsequent identity rewrite can verify
 // and atomically install the resulting genuine Claude Code request.
-func rewriteModelFieldPreservingBytes(body []byte, upstream string) ([]byte, error) {
-	span, err := requireTopLevelJSONFieldSpan(body, "model")
-	if err != nil {
-		return nil, err
-	}
-	var current string
-	if err = json.Unmarshal(body[span.start:span.end], &current); err != nil {
-		return nil, errors.New("top-level model is not a JSON string")
-	}
-	mb, err := json.Marshal(upstream)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]byte, 0, len(body)-span.end+span.start+len(mb))
-	out = append(out, body[:span.start]...)
-	out = append(out, mb...)
-	out = append(out, body[span.end:]...)
-	return out, nil
-}
-
-type jsonFieldSpan struct {
-	start int
-	end   int
-}
-
-func requireTopLevelJSONFieldSpan(body []byte, name string) (jsonFieldSpan, error) {
-	if !json.Valid(body) {
-		return jsonFieldSpan{}, errors.New("request body is not valid JSON")
-	}
-	dec := json.NewDecoder(bytes.NewReader(body))
-	opening, err := dec.Token()
-	if err != nil || opening != json.Delim('{') {
-		return jsonFieldSpan{}, errors.New("request body is not a JSON object")
-	}
-
-	var found jsonFieldSpan
-	count := 0
-	for dec.More() {
-		keyToken, tokenErr := dec.Token()
-		if tokenErr != nil {
-			return jsonFieldSpan{}, tokenErr
-		}
-		key, ok := keyToken.(string)
-		if !ok {
-			return jsonFieldSpan{}, errors.New("JSON object key is not a string")
-		}
-
-		before := int(dec.InputOffset())
-		var raw json.RawMessage
-		if decodeErr := dec.Decode(&raw); decodeErr != nil {
-			return jsonFieldSpan{}, decodeErr
-		}
-		after := int(dec.InputOffset())
-		if before < 0 || after < before || after > len(body) || len(raw) == 0 {
-			return jsonFieldSpan{}, errors.New("invalid JSON decoder offsets")
-		}
-		relativeStart := bytes.LastIndex(body[before:after], raw)
-		if relativeStart < 0 {
-			return jsonFieldSpan{}, errors.New("could not locate raw JSON value")
-		}
-		if key == name {
-			count++
-			start := before + relativeStart
-			found = jsonFieldSpan{start: start, end: start + len(raw)}
-		}
-	}
-	if _, err = dec.Token(); err != nil {
-		return jsonFieldSpan{}, err
-	}
-	if count == 0 {
-		return jsonFieldSpan{}, fmt.Errorf("JSON object has no %q field", name)
-	}
-	if count != 1 {
-		return jsonFieldSpan{}, fmt.Errorf("JSON object has duplicate %q fields", name)
-	}
-	return found, nil
-}
-
 // rewriteResponseModel substitutes the client-facing model name into the
 // response JSON so the client never sees the relay vendor's prefixed name
 // (e.g. "[0.16]稳定喵/claude-opus-4-6"). Handles both the non-streaming

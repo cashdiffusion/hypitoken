@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -48,14 +49,14 @@ func (s *Service) capTripped(ctx context.Context, capUSD float64) bool {
 //     working untouched.
 //
 // Errors are returned for the caller to log but must never block registration.
-func (s *Service) GrantSignupBonus(ctx context.Context, userID int64, ref, vid, fp, ip string) (bonusUSD float64, channel string, matched, fraud bool, err error) {
+func (s *Service) GrantSignupBonus(ctx context.Context, userID int64, ref, vid, fp, ip, email string) (bonusUSD float64, channel string, matched, fraud bool, err error) {
 	if s == nil {
 		return 0, "", false, false, nil
 	}
 	code := normalizeInviteCode(ref)
 	if code != "" {
 		if card, cerr := s.cardByCode(ctx, code); cerr == nil {
-			return s.grantInvite(ctx, userID, card, fp, ip)
+			return s.grantInvite(ctx, userID, card, fp, ip, email)
 		} else if !errors.Is(cerr, ErrNotFound) {
 			return 0, "", false, false, cerr
 		}
@@ -63,17 +64,18 @@ func (s *Service) GrantSignupBonus(ctx context.Context, userID int64, ref, vid, 
 	// Not a personal invite code — hand off to the growth channel path (which
 	// also records the signup device exactly once and owns the trial fallback).
 	if s.Channel != nil {
-		return s.Channel.GrantSignupBonus(ctx, userID, ref, vid, fp, ip)
+		return s.Channel.GrantSignupBonus(ctx, userID, ref, vid, fp, ip, email)
 	}
 	return 0, "", false, false, nil
 }
 
 // grantInvite handles a registration that arrived via a personal invite card.
-func (s *Service) grantInvite(ctx context.Context, inviteeID int64, card *Card, fp, ip string) (bonusUSD float64, channel string, matched, fraud bool, err error) {
+func (s *Service) grantInvite(ctx context.Context, inviteeID int64, card *Card, fp, ip, email string) (bonusUSD float64, channel string, matched, fraud bool, err error) {
 	// Self-invite is impossible (the invitee is a brand-new account), but the
-	// shared anti-abuse still catches same-device / same-subnet farming.
+	// shared anti-abuse still catches same-device / same-subnet / throwaway-domain
+	// farming.
 	if s.Channel != nil {
-		fraud, _, err = s.Channel.RecordSignupDevice(ctx, inviteeID, fp, ip)
+		fraud, _, err = s.Channel.RecordSignupDevice(ctx, inviteeID, fp, ip, email)
 	}
 
 	camp, cerr := s.campaignFor(ctx, card.CampaignID)
@@ -100,6 +102,17 @@ func (s *Service) grantInvite(ctx context.Context, inviteeID int64, card *Card, 
 	} else {
 		if camp.MaxRewardedInvites > 0 && s.countConfirmedInvites(ctx, inviterID) >= camp.MaxRewardedInvites {
 			inviterBonus = 0 // inviter hit their rewarded-invite cap; invitee still gets theirs
+		}
+		// Velocity: bound one identity's yield per day. On 2026-08-08 a single
+		// account converted 20 invitees that no per-signup rule flagged (every
+		// one behind its own Cloudflare WARP /24, none carrying a fingerprint),
+		// so the only thing that would have stopped it is a limit on the rate
+		// itself. The invitee keeps their own bonus — they may be a real person
+		// the farm recruited — but the inviter earns nothing past the cap.
+		if camp.DailyInviteCap > 0 && s.countRecentInvites(ctx, inviterID, 24*time.Hour) >= camp.DailyInviteCap {
+			log.Warnf("referral: inviter %d hit the %d/24h invite cap — conversion recorded, inviter bonus withheld",
+				inviterID, camp.DailyInviteCap)
+			inviterBonus = 0
 		}
 		if camp.InviterRewardOn == "first_spend" && inviterBonus > 0 {
 			inviterPaid = 0 // owed, released when the invitee first spends
@@ -181,10 +194,55 @@ func (s *Service) countConfirmedInvites(ctx context.Context, inviterID int64) in
 	return n
 }
 
+// countQualifiedInvites counts a user's non-fraud conversions that actually PAID
+// the inviter — the milestone-tier basis.
+//
+// The inviter_bonus_usd > 0 term is load-bearing. inviter_paid means "nothing
+// further is owed", which is also true of a conversion we deliberately zeroed:
+// one past the daily velocity cap, or one that arrived after the daily budget
+// tripped. Counting those would hand the tier ladder back to exactly the farm
+// the cap just stopped — 20 capped invites would still climb to RESERVE and pay
+// $5, which is how a regression test caught this.
+func (s *Service) countQualifiedInvites(ctx context.Context, inviterID int64) int {
+	var n int
+	_ = s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM referral_conversions
+		  WHERE inviter_user_id = ? AND fraud = 0 AND inviter_paid = 1 AND inviter_bonus_usd > 0`,
+		inviterID).Scan(&n)
+	return n
+}
+
+// countRecentInvites counts a user's non-fraud conversions inside a rolling
+// window — the velocity-cap basis.
+func (s *Service) countRecentInvites(ctx context.Context, inviterID int64, window time.Duration) int {
+	var n int
+	_ = s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM referral_conversions WHERE inviter_user_id = ? AND fraud = 0 AND created_at >= ?`,
+		inviterID, time.Now().Add(-window).Unix()).Scan(&n)
+	return n
+}
+
+// inviteeSpend returns how much the invitee has actually burned, as the absolute
+// value of their charge rows. Charges are stored negative; the inviter reward
+// gate compares this against the campaign's min_invitee_spend_usd.
+func (s *Service) inviteeSpend(ctx context.Context, inviteeID int64) float64 {
+	var v float64
+	_ = s.DB.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(-amount_usd),0) FROM wallet_tx WHERE user_id = ? AND kind = ?`,
+		inviteeID, db.TxKindCharge).Scan(&v)
+	return v
+}
+
 // checkMilestones grants any newly-reached tier bonuses. INSERT OR IGNORE on the
 // (user_id, threshold) primary key guarantees each tier pays out at most once.
+//
+// Tiers count QUALIFIED invites (reward already released, i.e. the invitee spent
+// past the campaign's threshold), not merely attributed ones. Otherwise the
+// milestone ladder would remain the one payout a farm could still collect
+// instantly: on 2026-08-08 it paid $16 in PLATINUM/RESERVE bonuses off invitees
+// who never spent a cent.
 func (s *Service) checkMilestones(ctx context.Context, inviterID int64, camp *Campaign) {
-	count := s.countConfirmedInvites(ctx, inviterID)
+	count := s.countQualifiedInvites(ctx, inviterID)
 	tiers, err := s.ListTiers(ctx, camp.ID)
 	if err != nil {
 		return
@@ -220,9 +278,16 @@ func (s *Service) checkMilestones(ctx context.Context, inviterID int64, camp *Ca
 }
 
 // ReleaseInviterReward pays out a deferred (reward_on=first_spend) inviter bonus
-// when the invitee first spends. Fire-and-forget from the billing adapter; a
-// single indexed lookup on the invitee, a no-op for the common signup-reward
-// case. Idempotent via the guarded UPDATE.
+// once the invitee has spent at least the campaign's min_invitee_spend_usd. Fire-
+// and-forget from the billing adapter; a single indexed lookup on the invitee, a
+// no-op for the common signup-reward case. Idempotent via the guarded UPDATE.
+//
+// The spend threshold is what makes 'first_spend' mean anything. Charges here go
+// down to fractions of a cent, so "the invitee spent something" was previously
+// satisfied by a single trivial request — which is exactly how the 2026-08-08
+// farm would have cleared the bar had the campaign been on first_spend at all.
+// Requiring real consumption means a fake invitee costs the farm more upstream
+// money than the bonus returns.
 func (s *Service) ReleaseInviterReward(ctx context.Context, inviteeID int64) {
 	if s == nil {
 		return
@@ -236,17 +301,22 @@ func (s *Service) ReleaseInviterReward(ctx context.Context, inviteeID int64) {
 	if err != nil {
 		return // no pending reward (or no row) — nothing to do
 	}
-	// Honour the daily budget cap: leave the reward pending (inviter_paid=0) so a
-	// later charge retries it once the budget frees, instead of marking it paid
-	// for $0.
+	// Honour the daily budget cap and the minimum-spend gate: leave the reward
+	// pending (inviter_paid=0) so a later charge retries it once the budget frees
+	// or the invitee's spend crosses the bar, instead of marking it paid for $0.
 	if bonus > 0 {
-		var budgetCap float64
+		var budgetCap, minSpend float64
 		if camp, cerr := s.ActiveCampaign(ctx); cerr == nil {
-			budgetCap = camp.DailyBudgetUSD
+			budgetCap, minSpend = camp.DailyBudgetUSD, camp.MinInviteeSpendUSD
 		}
 		if s.capTripped(ctx, budgetCap) {
 			log.Warnf("referral: daily bonus budget cap reached — deferring inviter reward for invitee=%d", inviteeID)
 			return
+		}
+		if minSpend > 0 {
+			if spent := s.inviteeSpend(ctx, inviteeID); spent < minSpend {
+				return // not yet earned; a later charge retries
+			}
 		}
 	}
 	res, uerr := s.DB.ExecContext(ctx, `UPDATE referral_conversions SET inviter_paid = 1 WHERE invitee_user_id = ? AND inviter_paid = 0`, inviteeID)
@@ -262,5 +332,11 @@ func (s *Service) ReleaseInviterReward(ctx context.Context, inviteeID int64) {
 			return
 		}
 		log.Infof("referral: released deferred inviter reward user=%d (+$%.2f) after invitee=%d spent", inviterID, bonus, inviteeID)
+	}
+	// Tiers count released rewards, so a milestone can only be reached here —
+	// grantInvite's own call sees this conversion still pending. Without this the
+	// ladder would never pay out at all under reward_on=first_spend.
+	if camp, cerr := s.ActiveCampaign(ctx); cerr == nil && camp.activeNow() {
+		s.checkMilestones(ctx, inviterID, camp)
 	}
 }

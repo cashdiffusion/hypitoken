@@ -28,6 +28,12 @@ import { FeatureShowcase } from "@/components/landing/feature-showcase";
 import { HlsVideo } from "@/components/landing/hls-video";
 import { Magnetic, Marquee, SpotlightCard } from "@/components/landing/interactions";
 import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
+import {
+  HeadlineProgress,
+  type HeadlineSlide,
+  RotatingHeadline,
+  useHeadlineRotation,
+} from "@/components/landing/rotating-headline";
 import { RoutingDiagram } from "@/components/landing/routing-diagram";
 import { StatusBoard } from "@/components/landing/status-board";
 import { useIsMobile, usePrefersReducedMotion } from "@/components/landing/use-media";
@@ -78,10 +84,10 @@ export default function HomePage() {
             </p>
             <Marquee durationSec={28}>
               {[
-                "Claude Code",
                 "Codex CLI",
-                "Anthropic SDK",
+                "Claude Code",
                 "OpenAI SDK",
+                "Anthropic SDK",
                 "LiteLLM",
                 "Claude Agent SDK",
               ].map((l) => (
@@ -293,11 +299,34 @@ function FloatingNav() {
 
 /* ── Hero ──────────────────────────────────────────────────────────────── */
 
+// Codex first: it is now ~85% of billed spend, so it is what the headline
+// opens on. The percentages are the prod default access-group multipliers
+// (codex 0.05, claude 0.3) and must move together with /pricing.
+const HEADLINE_SLIDES: HeadlineSlide[] = [
+  {
+    name: "Codex",
+    pct: "5%",
+    gradient: "linear-gradient(120deg, #7dd3fc, #38bdf8 55%, #34d399)",
+    accent: "#38bdf8",
+  },
+  {
+    name: "Claude",
+    pct: "30%",
+    gradient: "linear-gradient(120deg, #6ee7b7, #34d399 55%, #22d3ee)",
+    accent: "#34d399",
+  },
+];
+
 function Hero({ t }: { t: (k: string) => string }) {
   const reduce = useReducedMotion();
   const prefersReduced = usePrefersReducedMotion();
   const isMobile = useIsMobile();
   const showParticles = !prefersReduced && !isMobile;
+  const [hovered, setHovered] = useState(false);
+  const { index: slide, select: selectSlide } = useHeadlineRotation(
+    HEADLINE_SLIDES.length,
+    hovered,
+  );
 
   const heroAnim = (delay: number) =>
     reduce
@@ -312,7 +341,11 @@ function Hero({ t }: { t: (k: string) => string }) {
     // `dark` scope: every themed child (toggles, buttons) renders in the dark
     // palette — phosphor-green primary — regardless of the global theme, so the
     // cinematic band stays legible in both light and dark mode.
-    <section className="dark relative isolate flex min-h-[100svh] flex-col overflow-hidden bg-[#04110c] text-white">
+    <section
+      className="dark relative isolate flex min-h-[100svh] flex-col overflow-hidden bg-[#04110c] text-white"
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+    >
       <HlsVideo
         src={HERO_VIDEO}
         className="z-0"
@@ -329,14 +362,23 @@ function Hero({ t }: { t: (k: string) => string }) {
             "linear-gradient(to bottom, rgba(4,17,12,0.78) 0%, rgba(4,17,12,0.30) 30%, rgba(4,17,12,0.55) 70%, #04110c 100%)",
         }}
       />
-      <div
-        aria-hidden
-        className="absolute inset-0 z-[1]"
-        style={{
-          background:
-            "radial-gradient(ellipse 70% 55% at 50% 42%, color-mix(in oklch, var(--primary) 18%, transparent), transparent 70%)",
-        }}
-      />
+      {/* Ambient layer: the hero glow takes the active provider's accent. It
+          cross-fades over 1.2s with a sine curve — deliberately slower and
+          softer than the headline swap, so it reads as the room changing colour
+          rather than as a second thing competing for the eye. */}
+      {HEADLINE_SLIDES.map((s, i) => (
+        <motion.div
+          key={s.name}
+          aria-hidden
+          className="absolute inset-0 z-[1]"
+          style={{
+            background: `radial-gradient(ellipse 70% 55% at 50% 42%, ${s.accent}2e, transparent 70%)`,
+          }}
+          initial={false}
+          animate={{ opacity: i === slide ? 1 : 0 }}
+          transition={{ duration: reduce ? 0 : 1.2, ease: [0.37, 0, 0.63, 1] }}
+        />
+      ))}
 
       {showParticles && (
         <Suspense fallback={null}>
@@ -367,14 +409,12 @@ function Hero({ t }: { t: (k: string) => string }) {
           className="mx-auto mt-6 max-w-4xl text-balance font-display text-[2.5rem] font-semibold leading-[1.05] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl"
           style={{ overflowWrap: "break-word" }}
         >
-          {t("home.titleA")}
-          <span
-            className="bg-clip-text text-transparent"
-            style={{ backgroundImage: "linear-gradient(120deg, #6ee7b7, #34d399 55%, #22d3ee)" }}
-          >
-            {t("home.titleB")}
-          </span>
+          <RotatingHeadline slides={HEADLINE_SLIDES} index={slide} />
         </motion.h1>
+
+        <motion.div {...heroAnim(0.28)} className="mt-7">
+          <HeadlineProgress slides={HEADLINE_SLIDES} index={slide} onSelect={selectSlide} />
+        </motion.div>
 
         <motion.p
           {...heroAnim(0.34)}
@@ -405,10 +445,10 @@ function Hero({ t }: { t: (k: string) => string }) {
           className="mt-9 flex flex-wrap items-center justify-center gap-2.5"
         >
           {[
-            "home.bullets.claudePrice",
             "home.bullets.openaiPrice",
+            "home.bullets.claudePrice",
             "home.bullets.noLimits",
-            "home.bullets.ccCompat",
+            "home.bullets.cliCompat",
             "home.bullets.fastStart",
           ].map((k) => (
             <span
@@ -796,20 +836,22 @@ function SavingsGauge({
 // /pricing. Kept to a light compare — full per-model rates live there.
 function Savings() {
   const { t } = useTranslation();
+  // Codex leads here for the same reason it leads the headline: it carries the
+  // majority of real traffic, and its 95% saving is the stronger opening number.
   const cards = [
-    {
-      name: t("home.savings.claudeName"),
-      pay: 30,
-      save: 70,
-      saveLabel: t("home.savings.claudeSave"),
-      gradId: "gauge-claude",
-    },
     {
       name: t("home.savings.openaiName"),
       pay: 5,
       save: 95,
       saveLabel: t("home.savings.openaiSave"),
       gradId: "gauge-openai",
+    },
+    {
+      name: t("home.savings.claudeName"),
+      pay: 30,
+      save: 70,
+      saveLabel: t("home.savings.claudeSave"),
+      gradId: "gauge-claude",
     },
   ];
   const chips = [

@@ -19,6 +19,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/saas/growth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/profile"
 	"github.com/wjsoj/CPA-Claude/internal/saas/referral"
+	"github.com/wjsoj/CPA-Claude/internal/saas/support"
 	"github.com/wjsoj/CPA-Claude/internal/saas/tokens"
 	"github.com/wjsoj/CPA-Claude/internal/saas/usage"
 	"github.com/wjsoj/CPA-Claude/internal/saas/workspace"
@@ -32,7 +33,7 @@ import (
 // /api/v2/admin/credentials/* is exposed. legacyH may be nil — when set, the
 // /api/v2/admin/* group also exposes request-log queries + Anthropic OAuth
 // quota probe (handlers reused from the legacy operator API).
-func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service, arenaH *arena.Service, profileH *profile.Handler, referralH *referral.Service, workspaceH *workspace.Handler) {
+func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service, arenaH *arena.Service, profileH *profile.Handler, referralH *referral.Service, workspaceH *workspace.Handler, supportH *support.Service) {
 	v2 := engine.Group("/api/v2")
 
 	// Public.
@@ -53,6 +54,13 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	// pageview/action/dwell beacons. nil when the module is disabled.
 	if analyticsH != nil {
 		analyticsH.PublicRoutes(v2)
+	}
+
+	// Support appeals — public by necessity. A disabled account cannot pass
+	// RequireUser, so the one channel it has left has to live out here and
+	// authenticate per-request with an emailed OTP.
+	if supportH != nil {
+		supportH.PublicRoutes(v2)
 	}
 
 	// Arena SSE office stream — registered on the public group because it does
@@ -293,9 +301,11 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 		today := nowUTC.Format("2006-01-02")
 		// Actual spend comes from the wallet ledger (charge rows = official ×
 		// pricing-group multiplier), NOT requestlog.CostUSD, which records the
-		// *official* price before the discount. spent_total/spent_today are the
-		// figures the user truly paid, so the dashboard "累计消费" and this tab
-		// agree.
+		// *official* price before the discount — requestlog.BilledUSD is the
+		// post-discount figure, and Record.BilledOrCost() reads it with a
+		// fallback for rows written before the two were separate columns.
+		// spent_total/spent_today are the figures the user truly paid, so the
+		// dashboard "累计消费" and this tab agree.
 		spentTotal, _ := store.SumChargeSince(c.Request.Context(), u.ID, time.Time{})
 		// spent_today opens on the same billing day PreCheck enforces the daily
 		// cap over (adapter.go). These two have to agree: if the cap counts a
@@ -314,6 +324,29 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 			"balance_usd": u.BalanceUSD,
 			"spent_total": spentTotal,
 			"spent_today": spentToday,
+		})
+	})
+
+	// Public price catalogue (read-only, used by the landing /pricing page).
+	//
+	// The page used to carry its own hardcoded copy of this table. That is a
+	// second source of truth for the one number customers check before paying,
+	// and it drifted: claude-opus-5 and claude-fable-5 were being billed at
+	// $5/$25 and $10/$50 while appearing nowhere on the published price list,
+	// and the gpt-5.6 tiers advertised no cache-write rate although the
+	// catalogue charges one. Serving the catalogue itself means a model can be
+	// priced but unlisted only if it is also absent from the billing path.
+	//
+	// Shape mirrors the operator panel's `pricing` block so both consume one
+	// serialization. Unauthenticated by design — these are list prices, already
+	// public on the vendors' own sites, and the page is reachable logged-out.
+	// Nothing here is per-account: the multiplier that turns a list price into
+	// what a given user pays comes from /groups.
+	v2.GET("/pricing", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"default":           catalog.Default(),
+			"provider_defaults": catalog.ProviderDefaults(),
+			"models":            catalog.Models(),
 		})
 	})
 
@@ -682,6 +715,12 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	// is open to all users (per the SSO design). No PII, just sums.
 	authed.GET("/admin/wallet-totals", adminH.WalletTotalsHandler())
 
+	// Support desk for signed-in users.
+	if supportH != nil {
+		supportH.UserRoutes(authed)
+		supportH.InvoiceRoutes(authed)
+	}
+
 	// Workspace (enterprise space) team management. Invite accept is open to any
 	// signed-in user; the team-management subtree is gated per-workspace to that
 	// space's own admins (a customer-facing role — NO fleet/credential access).
@@ -708,6 +747,9 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	}
 	if referralH != nil {
 		referralH.AdminRoutes(adminG)
+	}
+	if supportH != nil {
+		supportH.AdminRoutes(adminG)
 	}
 	if analyticsH != nil {
 		analyticsH.AdminRoutes(adminG)

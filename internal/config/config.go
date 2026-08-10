@@ -131,12 +131,54 @@ type Config struct {
 	// session already holding one keeps working.
 	ClientMaxSessions int `yaml:"client_max_sessions"`
 
+	// TrustedRelayTokens are client tokens belonging to a proxy we also run —
+	// today CPA-Claude, which can route here through a single API key. Traffic
+	// on such a token carries cc-core/relay headers naming the DOWNSTREAM
+	// caller; for a token listed here (and ONLY for one listed here) those
+	// headers are believed and become the scheduler slot, so the relay's users
+	// spread across credentials instead of all pinning to one.
+	//
+	// This is routing only: RPM, concurrency, quota and billing stay keyed on
+	// the relay's own token, because the relay is one paying customer however
+	// many users sit behind it — and because a limit keyed on a self-asserted
+	// header is a limit anyone can evade by inventing a new value. The one
+	// exception is client_max_sessions, which counts slots and would otherwise
+	// refuse the very fan-out this enables; a trusted relay is exempt from it.
+	//
+	// Entries may be a raw token or "sha256:<hex>" so a config file need not
+	// hold the secret in the clear. Empty (the default) trusts nobody, and the
+	// headers are stripped from every request.
+	TrustedRelayTokens []string `yaml:"trusted_relay_tokens,omitempty"`
+
 	// Default sliding-window requests-per-minute cap per client token.
 	// 0 = unlimited. Per-token overrides take precedence.
 	ClientRPM int `yaml:"client_rpm"`
 
 	// Days to retain rotated request logs. 0 = disable GC (keep forever).
 	LogRetentionDays int `yaml:"log_retention_days,omitempty"`
+
+	// Opt out of the SQLite index over the request log (requests.db inside
+	// log_dir). The index is derived state that makes every admin and
+	// per-user aggregate cheap; disabling it falls back to re-scanning the
+	// JSONL on each query, which at ~1M records costs tens of seconds.
+	// Here as an escape hatch, not a tuning knob.
+	LogIndexDisabled bool `yaml:"log_index_disabled,omitempty"`
+
+	// Stop writing the daily-rotated requests-*.jsonl files and keep request
+	// history only in the index. Halves the disk the log costs and turns a
+	// client-token rename from a rewrite of every archived file into one
+	// UPDATE.
+	//
+	// The trade is real: while the archive exists the index can be deleted and
+	// rebuilt from it, and a failed insert is retried from the file on the next
+	// pass. With the archive off neither is true — a failed insert is a lost
+	// record, and requests.db is the only copy on the box. The daily off-host
+	// backup does carry it (buildManifest snapshots it, and refuses to ship an
+	// archive without it while this is on), so the exposure is bounded by the
+	// backup interval rather than open-ended. Requires the index (mutually
+	// exclusive with log_index_disabled), and `hypitoken export-requests` is
+	// the way back out to a .jsonl file.
+	LogJSONLDisabled bool `yaml:"log_jsonl_disabled,omitempty"`
 
 	// Pricing overrides (optional). Built-in defaults cover claude-haiku-4-5,
 	// claude-opus-4-6, and claude-sonnet-4-6.
@@ -150,11 +192,6 @@ type Config struct {
 	// Models is an optional whitelist (empty = accept everything that the
 	// upstream supports).
 	TokenGroups []TokenGroup `yaml:"token_groups,omitempty"`
-
-	// KiroAuthDir holds Kiro PKCE credential JSON files added via the
-	// admin panel. Defaults to <dir>/kiro_auths. Each file is one
-	// credentials.json (kiroauth.File format).
-	KiroAuthDir string `yaml:"kiro_auth_dir,omitempty"`
 
 	// SaaS multi-tenant layer (commercial mode). Disabled by default; the
 	// proxy behaves exactly like the OSS build when SaaS.Enabled is false.
@@ -198,10 +235,9 @@ type TokenGroup struct {
 	// Required; canonicalized via auth.NormalizeGroup at load time.
 	Name string `yaml:"name"`
 
-	// Upstream selects the channel: "anthropic" (existing OAuth/API-key
-	// path to api.anthropic.com) or "kiro" (kirobridge + kiroapi against
-	// q.us-east-1.amazonaws.com via Kiro credentials).
-	// Defaults to "anthropic".
+	// Upstream selects the channel. Only "anthropic" (the OAuth/API-key path
+	// to api.anthropic.com) exists today; the field is retained so future
+	// channels can be added without a config migration. Defaults to "anthropic".
 	Upstream string `yaml:"upstream,omitempty"`
 
 	// Discount is a multiplier applied to the official Anthropic price
@@ -210,16 +246,13 @@ type TokenGroup struct {
 	Discount float64 `yaml:"discount,omitempty"`
 
 	// Models is an optional whitelist (Anthropic-side model names). Empty
-	// = accept any model the upstream supports. For Kiro this typically
-	// lists the Claude family only since DeepSeek / Minimax / GLM / Qwen
-	// are not exposed to end users (per business decision).
+	// = accept any model the upstream supports.
 	Models []string `yaml:"models,omitempty"`
 }
 
 // Upstream constants for TokenGroup.Upstream.
 const (
 	UpstreamAnthropic = "anthropic"
-	UpstreamKiro      = "kiro"
 )
 
 // AcceptsModel reports whether g's whitelist allows model (empty list = wildcard).
@@ -254,6 +287,12 @@ func Load(path string) (*Config, error) {
 		if err := auth.ValidateProxyURL(cfg.APIKeys[i].ProxyURL); err != nil {
 			return nil, fmt.Errorf("api_keys[%d].proxy_url: %w", i, err)
 		}
+	}
+	// Turning off both the archive and the index would leave the request-log
+	// writer with nowhere to put a record. Refuse the combination rather than
+	// start up and silently discard request history.
+	if cfg.LogJSONLDisabled && cfg.LogIndexDisabled {
+		return nil, fmt.Errorf("config: log_jsonl_disabled requires the index; unset log_index_disabled")
 	}
 	return cfg, nil
 }
@@ -334,19 +373,12 @@ func applyDefaults(c *Config, path string) {
 		c.Shop.DBPath = filepath.Join(filepath.Dir(path), c.Shop.DBPath)
 	}
 
-	if c.KiroAuthDir == "" {
-		c.KiroAuthDir = filepath.Join(dir, "kiro_auths")
-	} else if !filepath.IsAbs(c.KiroAuthDir) {
-		c.KiroAuthDir = filepath.Join(dir, c.KiroAuthDir)
-	}
 	c.Backup.applyDefaults()
 	c.applyTokenGroupDefaults()
 }
 
-// applyTokenGroupDefaults seeds the two built-in groups if the config
-// omits them entirely: claude-official (no discount, anthropic upstream)
-// and kiro-anthropic (5% of official price, kiro upstream, Claude-family
-// whitelist).
+// applyTokenGroupDefaults seeds the built-in claude-official group (no
+// discount, anthropic upstream) if the config omits it entirely.
 func (c *Config) applyTokenGroupDefaults() {
 	have := make(map[string]bool, len(c.TokenGroups))
 	for i := range c.TokenGroups {
@@ -367,22 +399,6 @@ func (c *Config) applyTokenGroupDefaults() {
 			Name:     "claude-official",
 			Upstream: UpstreamAnthropic,
 			Discount: 1.0,
-		})
-	}
-	if !have["kiro-anthropic"] {
-		c.TokenGroups = append(c.TokenGroups, TokenGroup{
-			Name:     "kiro-anthropic",
-			Upstream: UpstreamKiro,
-			Discount: 0.05,
-			Models: []string{
-				"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5",
-				"claude-sonnet-4-6", "claude-sonnet-4-5", "claude-sonnet-4",
-				"claude-haiku-4-5",
-				// Dated variants common in client SDKs.
-				"claude-sonnet-4-5-20250929",
-				"claude-haiku-4-5-20251001",
-				"claude-opus-4-1-20250805",
-			},
 		})
 	}
 }

@@ -196,7 +196,7 @@ export interface SpendRow {
 // Powers the per-token "渠道" dropdown so users only see options that
 // actually have credentials behind them.
 export interface Channel {
-  name: string; // group filter name ("default", "kiro-anthropic", ...)
+  name: string; // group filter name ("default", "claude-official", ...)
   providers: string[]; // distinct providers backing this channel
   count: number; // usable credential count
 }
@@ -263,7 +263,10 @@ export interface CredentialUsage {
   sum_24h: UsageCounts;
   sum_5h: UsageCounts;
   last_used?: string;
-  daily: UsageDay[];
+  /** 14-day series, oldest first. Omitted by the list endpoints — only the
+   * detail dialog needs it, and it was ~70% of the list payload. Fetch it via
+   * GET /admin/credentials/:id/usage. */
+  daily?: UsageDay[];
   total_cost_usd: number;
 }
 
@@ -305,9 +308,90 @@ export interface Credential {
   usage?: CredentialUsage;
   codex_rate_limits?: Record<string, string>;
   codex_rate_limits_at?: string;
-  // Kiro-specific extras surfaced on the same row.
-  active?: number;
+  /** Last actively-probed chatgpt.com/backend-api/wham/usage snapshot. Shape
+   * mirrors cc-core auth.CodexUsageInfo; only read by the upstream-quota panel,
+   * which narrows it itself. */
+  codex_usage?: unknown;
+  codex_usage_at?: string;
+  /** Billing view from the last codex-subscription probe. Present on the row
+   * (not only in the probe response) so an account about to lapse for billing
+   * reasons shows up on page load rather than only after someone clicks. */
+  codex_subscription?: CodexSubscriptionView;
+}
+
+/**
+ * CodexSubscriptionView mirrors the server's codexSubscriptionView. The
+ * derived fields (plan/free/at_risk/…) are computed in Go by cc-core's helpers
+ * and must NOT be re-derived here: "is it free" has two independent upstream
+ * sources (a gratis flag and a 100%-off promo) and "is it at risk" has to pick
+ * between grace-period end and term end. Recomputing either in TypeScript is
+ * how the panel and the server start disagreeing about whether an account is
+ * paid. Read `info` only for detail the derived fields don't cover.
+ */
+export interface CodexSubscriptionView {
+  info?: CodexSubscriptionInfo;
   plan?: string;
+  purchased_at?: string;
+  expires_at?: string;
+  free: boolean;
+  free_reason?: string;
+  at_risk: boolean;
+  risk_reason?: string;
+  risk_deadline?: string;
+  fetched_at?: string;
+}
+
+export interface CodexDiscount {
+  discount_type?: string;
+  /** Percent when discount_type is "percentage" — 100 means fully free. */
+  amount?: number;
+  discount_expires_at?: string | null;
+  promo_campaign_id?: string;
+}
+
+export interface CodexSubscriptionInfo {
+  portal?: {
+    id?: string;
+    plan_type?: string;
+    seats_in_use?: number;
+    seats_entitled?: number;
+    active_start?: string;
+    active_until?: string;
+    billing_period?: string;
+    billing_currency?: string;
+    will_renew?: boolean;
+    is_delinquent?: boolean;
+    grace_period_end_timestamp?: number | null;
+  };
+  entitlement?: {
+    subscription_id?: string;
+    has_active_subscription?: boolean;
+    is_active_subscription_gratis?: boolean;
+    subscription_plan?: string;
+    expires_at?: string | null;
+    renews_at?: string | null;
+    cancels_at?: string | null;
+    billing_period?: string;
+    discount?: CodexDiscount | null;
+    applied_discounts?: CodexDiscount[];
+    is_delinquent?: boolean;
+  };
+  account?: {
+    account_id?: string;
+    plan_type?: string;
+    structure?: string;
+    created_time?: string | null;
+    has_previously_paid_subscription?: boolean;
+    is_deactivated?: boolean;
+  };
+  last_active_subscription?: {
+    subscription_id?: string;
+    /** "chatgpt_web" | "ios" | "android" — an app-store purchase can't be
+     * fixed from the web portal, which changes what an operator should do. */
+    purchase_origin_platform?: string;
+    will_renew?: boolean;
+  };
+  updated?: string;
 }
 
 // AdminOrder mirrors the Go db.AlipayOrder struct (no json tags → PascalCase)
@@ -399,6 +483,9 @@ export interface ReferralMe {
   invite_url: string;
   invite_code: string;
   campaign: ReferralCampaign;
+  /** False until the account has topped up at least once — bonus credit alone
+   *  cannot be forwarded to another account. */
+  can_send_gift: boolean;
 }
 
 export interface GiftCard {
@@ -448,4 +535,62 @@ export interface ReferralOpsStats {
   today_bonus_usd: number;
   daily_budget_usd: number;
   budget_tripped: boolean;
+}
+
+// ---- support desk ----
+
+export type TicketKind = "support" | "appeal" | "invoice";
+export type TicketStatus = "open" | "pending" | "resolved" | "rejected";
+
+export interface TicketMessage {
+  id: number;
+  author: "user" | "admin";
+  body: string;
+  created_at: string;
+}
+
+export interface Ticket {
+  id: number;
+  user_id: number;
+  email: string;
+  kind: TicketKind;
+  subject: string;
+  status: TicketStatus;
+  last_actor: "user" | "admin";
+  created_at: string;
+  updated_at: string;
+  /** Returned exactly once, when an appeal is filed without a session. */
+  access_key?: string;
+  /** Opaque JSON owned by whatever created the ticket; the invoice flow puts
+   *  the 抬头 here so the operator panel can render copyable fields. */
+  meta?: string;
+  messages?: TicketMessage[];
+}
+
+export interface TicketList {
+  tickets: Ticket[];
+  total: number;
+  limit: number;
+  offset: number;
+  /** Operator queue only: how many tickets are awaiting a first reply. */
+  open?: number;
+}
+
+// ---- invoicing ----
+
+export interface InvoiceTitle {
+  name: string;
+  tax_no: string;
+  address?: string;
+  phone?: string;
+  bank?: string;
+  bank_account?: string;
+}
+
+/** The 对公转账 destination, served from config so it can change without a rebuild. */
+export interface InvoicePaymentInfo {
+  account_no: string;
+  account_name: string;
+  bank_branch: string;
+  bank_code: string;
 }

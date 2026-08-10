@@ -2,13 +2,13 @@ package adapter
 
 import (
 	"embed"
-	"io"
 	"io/fs"
 	"net/http"
-	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/wjsoj/CPA-Claude/internal/webasset"
 )
 
 // MountSPA serves the embedded SaaS SPA at the root path. The Go process
@@ -28,6 +28,8 @@ func MountSPA(engine *gin.Engine, dist fs.FS) {
 		return
 	}
 
+	assets := webasset.New(dist)
+
 	// Specific route for /assets/* (hashed Vite chunks). gin's radix tree is
 	// stricter than net/http: register this BEFORE NoRoute kicks in.
 	engine.GET("/assets/*filepath", func(c *gin.Context) {
@@ -36,10 +38,10 @@ func MountSPA(engine *gin.Engine, dist fs.FS) {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
-		serveAsset(c, dist, "assets/"+p)
+		assets.Serve(c, "assets/"+p)
 	})
 
-	engine.GET("/", func(c *gin.Context) { serveAsset(c, dist, "index.html") })
+	engine.GET("/", func(c *gin.Context) { assets.Serve(c, "index.html") })
 
 	// SPA fallback. Reaching NoRoute means no API or admin route matched, so
 	// it's safe to assume the request is a browser navigation that should be
@@ -60,54 +62,12 @@ func MountSPA(engine *gin.Engine, dist fs.FS) {
 		}
 		// Try a literal asset (favicon.ico, robots.txt, …) first.
 		clean := strings.TrimPrefix(path, "/")
-		if clean != "" && !strings.Contains(clean, "..") {
-			if _, err := fs.Stat(dist, clean); err == nil {
-				serveAsset(c, dist, clean)
-				return
-			}
+		if assets.Exists(clean) {
+			assets.Serve(c, clean)
+			return
 		}
-		serveAsset(c, dist, "index.html")
+		assets.Serve(c, "index.html")
 	})
-}
-
-func serveAsset(c *gin.Context, root fs.FS, name string) {
-	f, err := root.Open(name)
-	if err != nil {
-		c.AbortWithStatus(http.StatusNotFound)
-		return
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
-	c.Data(http.StatusOK, mimeFor(name), data)
-}
-
-func mimeFor(name string) string {
-	switch filepath.Ext(name) {
-	case ".html":
-		return "text/html; charset=utf-8"
-	case ".css":
-		return "text/css; charset=utf-8"
-	case ".js":
-		return "application/javascript; charset=utf-8"
-	case ".json":
-		return "application/json"
-	case ".svg":
-		return "image/svg+xml"
-	case ".woff2":
-		return "font/woff2"
-	case ".woff":
-		return "font/woff"
-	case ".png":
-		return "image/png"
-	case ".ico":
-		return "image/x-icon"
-	default:
-		return "application/octet-stream"
-	}
 }
 
 // SPAFromEmbed is a tiny helper for callers who have an embed.FS rooted at
