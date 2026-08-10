@@ -454,15 +454,12 @@ func main() {
 		defer cancel()
 		_ = s.Shutdown(ctx)
 		store.Close()
-		// Stop the index before the writer: it tails the file the writer
-		// owns, so shutting it down first means no catch-up races the final
-		// flush.
-		if logIndex != nil {
-			logIndex.Close()
-		}
-		if reqLog != nil {
-			reqLog.Close()
-		}
+		// Writer first, then the index — requestlog.Shutdown enforces the only
+		// order that cannot lose the final batch. This used to be the other way
+		// round, which is unrecoverable under log_jsonl_disabled: the store
+		// deregisters on Close, so the writer's last flush resolves no
+		// destination and there is no file behind it.
+		requestlog.Shutdown(reqLog, logIndex)
 		for _, fn := range saasShutdown {
 			fn()
 		}
