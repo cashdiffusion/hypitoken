@@ -306,7 +306,7 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		// requested stream rather than the response header.
 		br := bufio.NewReaderSize(resp.Body, 64*1024)
 		if stream && responseIsSSE(resp.Header, br) {
-			writeResponseHeaders(c, resp)
+			writeSSEResponseHeaders(c, resp)
 			clientGone := streamSSEOpenAI(c, br, &counts, rewriteClientModel)
 			outcome = usage.ClassifyStreamOutcome(counts, clientGone)
 			switch outcome {

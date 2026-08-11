@@ -921,7 +921,7 @@ recoveredFromSignature:
 		// Headers commit lazily on the first byte, so a stream that breaks
 		// before any output reaches the client can transparently fail over to
 		// another credential (the common "RST right after 200" case).
-		res := streamSSE(c, resp, &counts, &sub, rewriteClientModel, func() { writeResponseHeaders(c, resp) })
+		res := streamSSE(c, resp, &counts, &sub, rewriteClientModel, func() { writeSSEResponseHeaders(c, resp) })
 		if !res.sawTerminal && !res.wroteAny {
 			_ = resp.Body.Close()
 			if isClientDisconnect(c.Request.Context(), res.err) {
@@ -1329,6 +1329,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		// the whole-body JSON parse and silently lost all usage (billing =
 		// $0). Same fix the Codex path already carries. Peek is non-consuming.
 		if stream && responseIsSSE(resp.Header, bodyBuf) {
+			declareSSE(c)
 			// Headers are already committed above (the 4xx branch needs them),
 			// so commit=nil — no cross-credential retry on this verbatim
 			// passthrough path. The relay still adds keepalive + truncation
@@ -1491,6 +1492,41 @@ func copyForwardableHeaders(src, dst http.Header) {
 func writeResponseHeaders(c *gin.Context, resp *http.Response) {
 	downstream.CopyResponseHeaders(c.Writer.Header(), resp.Header, time.Now())
 	c.Writer.WriteHeader(resp.StatusCode)
+}
+
+// writeSSEResponseHeaders commits the headers for a stream we are about to
+// relay as Server-Sent Events, declaring the media type ourselves.
+//
+// The allowlist forwards the upstream's Content-Type when there is one, but a
+// relayed SSE must not depend on that. When no Content-Type reaches the client,
+// net/http sniffs the first bytes and labels the stream `text/plain`, which
+// leaves every downstream consumer guessing from the body. CPA-Claude guesses
+// by peeking the first line: a stream that opens with an SSE comment (`: …`,
+// which the ChatGPT backend emits while a request is queued) was read as a JSON
+// body, found to carry no usage, and failed closed with a 502 — 44 of them on
+// 2026-08-11, on requests this proxy had itself billed and logged as clean 200s.
+//
+// Declaring it is also just correct: SSE is text/event-stream, and no-cache is
+// what keeps intermediaries from buffering the stream.
+func writeSSEResponseHeaders(c *gin.Context, resp *http.Response) {
+	downstream.CopyResponseHeaders(c.Writer.Header(), resp.Header, time.Now())
+	declareSSE(c)
+	c.Writer.WriteHeader(resp.StatusCode)
+}
+
+// declareSSE labels the pending response as Server-Sent Events. Safe to call
+// after WriteHeader — gin only records the status there, so the header map
+// stays mutable until the first body byte — which is what the API-key path
+// needs: it commits headers before it has peeked enough bytes to know whether
+// the upstream is streaming.
+func declareSSE(c *gin.Context) {
+	h := c.Writer.Header()
+	if !strings.Contains(strings.ToLower(h.Get("Content-Type")), "text/event-stream") {
+		h.Set("Content-Type", "text/event-stream; charset=utf-8")
+	}
+	if h.Get("Cache-Control") == "" {
+		h.Set("Cache-Control", "no-cache")
+	}
 }
 
 // applyAnthropicHeaders is a thin adapter from this fork's *auth.Auth to

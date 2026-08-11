@@ -109,3 +109,37 @@ func TestWithheldErrorStillCarriesBackoff(t *testing.T) {
 		t.Error("upstream Content-Type was copied onto our own error body")
 	}
 }
+
+// A relayed SSE has to declare itself. When no Content-Type reaches the client
+// net/http sniffs the body and labels the stream text/plain, which forces every
+// downstream consumer to guess what it is holding — and CPA-Claude, guessing
+// from the first line, read a stream that opened with an SSE comment as a JSON
+// body, found no usage in it, and failed the request closed with a 502.
+func TestSSEResponseHeadersDeclareEventStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for name, upstreamType := range map[string]string{
+		"upstream omits it":  "",
+		"upstream sniffable": "text/plain; charset=utf-8",
+		"upstream declares":  "text/event-stream",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}}
+			if upstreamType != "" {
+				resp.Header.Set("Content-Type", upstreamType)
+			}
+
+			writeSSEResponseHeaders(c, resp)
+			_, _ = c.Writer.Write([]byte(": queued\n\n"))
+
+			if got := rec.Header().Get("Content-Type"); got != "text/event-stream" &&
+				got != "text/event-stream; charset=utf-8" {
+				t.Errorf("Content-Type = %q, want an event-stream type", got)
+			}
+			if got := rec.Header().Get("Cache-Control"); got == "" {
+				t.Error("Cache-Control must be set so intermediaries do not buffer the stream")
+			}
+		})
+	}
+}

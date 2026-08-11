@@ -253,7 +253,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		// into chat.completion.chunk. A truncated upstream (no terminal event)
 		// is surfaced in the request log instead of looking like a clean stream
 		// end, on both paths.
-		writeResponseHeaders(c, resp)
+		writeSSEResponseHeaders(c, resp)
 		// Branching here rather than through a relay closure is deliberate:
 		// capturing resp in a closure makes bodyclose lose track of the
 		// unconditional Close after this switch and report a false leak.
