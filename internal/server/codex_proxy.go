@@ -472,8 +472,14 @@ func responseIsSSE(h http.Header, br *bufio.Reader) bool {
 }
 
 // looksLikeSSE peeks the first chunk of a buffered reader and reports whether
-// it begins with an SSE field line (`data:` / `event:`), tolerating leading
-// blank lines. Non-consuming.
+// it begins with an SSE line, tolerating leading blank lines. Non-consuming.
+//
+// Every SSE line counts, not just `data:` / `event:`. A comment (`: …`) is the
+// one that actually shows up first: an upstream emits comment keepalives while
+// a turn is queued, and when it declares no Content-Type this peek is the whole
+// decision. Accepting only field lines sent those turns through the whole-body
+// JSON parse, which found no usage and failed them closed with a 502 —
+// reproduced against a stub upstream that opens with `: queued`.
 func looksLikeSSE(br *bufio.Reader) bool {
 	peek, _ := br.Peek(512)
 	for len(peek) > 0 {
@@ -490,7 +496,11 @@ func looksLikeSSE(br *bufio.Reader) bool {
 		if len(line) == 0 {
 			continue // skip leading blank lines
 		}
-		return bytes.HasPrefix(line, []byte("data:")) || bytes.HasPrefix(line, []byte("event:"))
+		return bytes.HasPrefix(line, []byte("data:")) ||
+			bytes.HasPrefix(line, []byte("event:")) ||
+			bytes.HasPrefix(line, []byte("id:")) ||
+			bytes.HasPrefix(line, []byte("retry:")) ||
+			bytes.HasPrefix(line, []byte(":"))
 	}
 	return false
 }

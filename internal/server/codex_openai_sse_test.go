@@ -26,6 +26,11 @@ func TestResponseIsSSE(t *testing.T) {
 		{"event-stream header", "text/event-stream", sse, true},
 		{"text/plain SSE (relay)", "text/plain; charset=utf-8", sse, true},
 		{"text/plain SSE leading blank lines", "text/plain", "\n\n" + sse, true},
+		// An upstream opens a queued turn with comment keepalives ahead of the
+		// first event. Read as "not a stream", the turn was parsed as one JSON
+		// body, found to carry no usage, and failed closed with a 502.
+		{"SSE behind a comment keepalive", "text/plain", ": queued\n\n" + sse, true},
+		{"SSE behind id/retry lines", "text/plain", "retry: 3000\nid: 1\n" + sse, true},
 		{"plain json", "application/json", `{"id":"x","usage":{"input_tokens":1}}`, false},
 		{"empty", "text/plain", "", false},
 	}
