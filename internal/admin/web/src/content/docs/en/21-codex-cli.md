@@ -106,7 +106,7 @@ Add:
 
 ```toml
 model_provider = "hypitoken"
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"     # high / medium / low / minimal
 disable_response_storage = true     # third-party gateways cannot store responses
 
@@ -142,7 +142,7 @@ notepad "$env:USERPROFILE\.codex\config.toml"
 
 ```toml
 model_provider = "hypitoken"
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"     # high / medium / low / minimal
 disable_response_storage = true     # third-party gateways cannot store responses
 
@@ -175,7 +175,7 @@ Add:
 
 ```toml
 model_provider = "hypitoken"
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"     # high / medium / low / minimal
 disable_response_storage = true     # third-party gateways cannot store responses
 

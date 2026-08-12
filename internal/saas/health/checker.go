@@ -39,12 +39,18 @@ func newUUID() string {
 // One successful probe means the credential works for all Claude models.
 const anthropicProbeModel = "claude-haiku-4-5-20251001"
 
-// codexProbeModel is the Codex model we probe. Empirically gpt-5.5 is the
-// only model in the GPT-5 family that's reliably accessible across the
-// upstream gateways we use, so we probe it instead of gpt-5.3-codex.
-// Switching here also clears stale model_health rows on next cycle via
+// codexProbeModel is the Codex model we probe.
+//
+// It was gpt-5.5, chosen when that was the only GPT-5-family model reliably
+// accessible across the upstream gateways. That stopped being true: over the
+// three days to 2026-08-12 the production log has gpt-5.6-sol at 96,427
+// requests / 98.6% success against gpt-5.5's 1,923 / 97.9% — fifty times the
+// volume at a better success rate. A probe is only worth what it predicts
+// about real traffic, and gpt-5.5 now carries about 2% of it.
+//
+// Switching here also clears stale model_health rows on the next cycle via
 // PruneModelHealthOtherModels.
-const codexProbeModel = "gpt-5.5"
+const codexProbeModel = "gpt-5.6-sol"
 
 type Checker struct {
 	DB       *db.DB
@@ -255,10 +261,11 @@ func (c *Checker) checkOne(ctx context.Context, a *auth.Auth, provider, model st
 // probe sends a Claude Code–style request to the upstream and returns
 // ("ok", "") on success or ("fail", reason) on any error.
 //
-// Codex / GPT-5 streams take longer than the typical 20s budget — empirically
-// gpt-5.5 first-byte latency on third-party gateways is 10-30s and full
-// stream completion is up to 90s. Apply per-provider timeouts so a slow
-// reasoning model doesn't get flagged as down.
+// Codex / GPT-5 streams take longer than the typical 20s budget — measured on
+// gpt-5.5, first-byte latency on third-party gateways is 10-30s and full
+// stream completion is up to 90s. The reasoning models the probe has since
+// moved to are no faster. Apply per-provider timeouts so a slow reasoning
+// model doesn't get flagged as down.
 func (c *Checker) probe(ctx context.Context, a *auth.Auth, provider, model string) (status, errMsg string) {
 	cli := auth.ClientFor(a.ProxyURL, false)
 	timeout := 20 * time.Second

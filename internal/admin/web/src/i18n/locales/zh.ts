@@ -1674,7 +1674,7 @@ export default {
     claudeName: "Claude API",
     claudeSub: "Anthropic — 使用 claude-haiku 探针，覆盖所有 Claude 模型",
     codexName: "Codex API",
-    codexSub: "OpenAI — 使用 gpt-5.5 探针（流式 /responses）",
+    codexSub: "OpenAI — 使用 gpt-5.6-sol 探针（流式 /responses）",
     refreshHint: "健康检查每 10 分钟运行一次，约 {{n}} 秒后自动刷新",
     uptimeBlurb: "最近 {{n}} 次健康检查的可用率，每 10 分钟刷新",
     older: "较旧",

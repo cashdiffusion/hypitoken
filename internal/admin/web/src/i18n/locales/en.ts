@@ -1716,7 +1716,7 @@ export default {
     claudeName: "Claude API",
     claudeSub: "Anthropic — claude-haiku probe covering all Claude models",
     codexName: "Codex API",
-    codexSub: "OpenAI — gpt-5.5 probe using streaming /responses",
+    codexSub: "OpenAI — gpt-5.6-sol probe using streaming /responses",
     refreshHint: "Health probes run every 10 minutes · auto-refresh in ~{{n}}s",
     uptimeBlurb: "Uptime over the past {{n}} health checks · refreshed every 10 min",
     older: "older",
