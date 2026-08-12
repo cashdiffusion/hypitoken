@@ -21,7 +21,7 @@ Codex CLI is OpenAI's official terminal coding assistant — drive code, run com
 | Maker | OpenAI | Anthropic |
 | Protocol | OpenAI | Anthropic |
 | Node version | **v22+** | v18+ |
-| Env vars | `OPENAI_API_KEY` + `OPENAI_BASE_URL` | `ANTHROPIC_API_KEY` + `ANTHROPIC_BASE_URL` |
+| Env vars | `OPENAI_API_KEY` + `OPENAI_BASE_URL` | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` |
 
 > The gateway speaks both protocols — **one account, one key** runs both Codex and Claude Code.
 
@@ -106,11 +106,15 @@ Add:
 
 ```toml
 model_provider = "hypitoken"
+model = "gpt-5.5"
+model_reasoning_effort = "high"     # high / medium / low / minimal
+disable_response_storage = true     # third-party gateways cannot store responses
 
 [model_providers.hypitoken]
 name = "HypiToken"
 base_url = "https://api.novadiffusion.com/v1"
 wire_api = "responses"
+requires_openai_auth = true
 ```
 
 Then write `auth.json`:
@@ -138,11 +142,15 @@ notepad "$env:USERPROFILE\.codex\config.toml"
 
 ```toml
 model_provider = "hypitoken"
+model = "gpt-5.5"
+model_reasoning_effort = "high"     # high / medium / low / minimal
+disable_response_storage = true     # third-party gateways cannot store responses
 
 [model_providers.hypitoken]
 name = "HypiToken"
 base_url = "https://api.novadiffusion.com/v1"
 wire_api = "responses"
+requires_openai_auth = true
 ```
 
 Then `auth.json`:
@@ -167,11 +175,15 @@ Add:
 
 ```toml
 model_provider = "hypitoken"
+model = "gpt-5.5"
+model_reasoning_effort = "high"     # high / medium / low / minimal
+disable_response_storage = true     # third-party gateways cannot store responses
 
 [model_providers.hypitoken]
 name = "HypiToken"
 base_url = "https://api.novadiffusion.com/v1"
 wire_api = "responses"
+requires_openai_auth = true
 ```
 
 Then write `auth.json`:
@@ -187,6 +199,26 @@ chmod 600 ~/.codex/auth.json
 
 </div>
 </div>
+
+### What the four required keys do
+
+| Key | Why it matters |
+| --- | --- |
+| `model` | Default model. Without it Codex uses its own built-in default, which may not be in the gateway's available set. |
+| `model_reasoning_effort` | Reasoning depth — see the table below. |
+| `disable_response_storage` | Must be `true`. Third-party gateways don't offer OpenAI's response storage, and leaving it on makes requests fail. |
+| `requires_openai_auth` | Must be `true`, otherwise Codex never sends the key from `auth.json` and you get a 401. |
+
+`model_reasoning_effort` values:
+
+| Value | When to use it |
+| --- | --- |
+| `high` | Architecture work, cross-file refactors, hard bugs. Slowest and priciest, highest success rate. |
+| `medium` | The default for everyday coding and bug fixing. |
+| `low` | Small edits, formatting, comments — when you want the answer fast. |
+| `minimal` | Barely reasons at all; cheapest for mechanical transforms (translating, renaming, filling templates). |
+
+> Higher effort means more thinking tokens, which cost more. When in doubt start at `medium`.
 
 ### Temporary debugging (env vars)
 
@@ -244,17 +276,40 @@ In the interactive UI, test with:
 write a Python script that lists every filename in the current directory
 ```
 
-Or run non-interactively:
+## 6. Available models
 
-```bash
-# pass a task directly
-codex "explain what files are in this directory"
+OpenAI-side model IDs that currently have pricing:
 
-# pick a model
-codex --model gpt-5.5 "optimise this code"
+```
+gpt-5.2  gpt-5.3-codex  gpt-5.3-codex-spark
+gpt-5.4  gpt-5.4-mini  gpt-5.5
+gpt-5.6-sol  gpt-5.6-terra  gpt-5.6-luna
+gpt-5  gpt-5-mini  gpt-5-nano  gpt-4o  gpt-4o-mini
 ```
 
-## 6. Troubleshooting
+`GET /v1/models` returns the **live set** actually available (it moves with the upstream plan); the console's model list is authoritative.
+
+```bash
+codex --model gpt-5.3-codex "optimise this code"
+```
+
+> Model names may carry a suffix and still bill correctly, e.g. `gpt-5.3-codex(high)`.
+
+## 7. Using it headlessly
+
+`codex exec` is the non-interactive mode: it takes one task description, does the work, and exits without opening the TUI. That is what you want in scripts, CI, cron jobs, or a higher-level agent.
+
+```bash
+# one-shot task, exits when done
+codex exec "update the install steps in README to Node 22"
+
+# pick a model
+codex exec --model gpt-5.3-codex "add JSDoc to every exported function"
+```
+
+Config still comes from `~/.codex/config.toml` + `~/.codex/auth.json`; in a CI box that has neither, just set `OPENAI_BASE_URL` and `OPENAI_API_KEY` as environment variables.
+
+## 8. Troubleshooting
 
 **❌ 401 Unauthorized / Invalid API Key** — check the key is complete (with `sk-cpa-` prefix), has no spaces/newlines, and that you have balance.
 
@@ -269,6 +324,21 @@ source ~/.zshrc
 
 **❌ Node.js version too low** — Codex needs v22+. Upgrade with `nvm install 22 && nvm use 22`.
 
-## 7. Direct API
+**❌ 503 Service Unavailable** — the upstream pool temporarily has no usable credential. The body names the actual reason and the `Retry-After` header gives a suggested wait (capped at 300 seconds). Wait and retry, or check the [status page](/status).
+
+**❌ 402 Payment Required** — out of balance. [Top up](/docs/top-up) in the console.
+
+Quick reference:
+
+| Code | What it actually means |
+| --- | --- |
+| `401` | Key missing / mistyped / has stray whitespace; or `requires_openai_auth` isn't `true` |
+| `402` | Out of balance |
+| `404` | `base_url` is missing `/v1`, or the model name doesn't exist |
+| `503` | Upstream pool temporarily has no credential; `Retry-After` is at most 300 seconds |
+
+## 9. Direct API
 
 The endpoint supports both `/v1/chat/completions` and OpenAI's `/v1/responses`. Send the OpenAI request shape and get the OpenAI response shape — existing tooling works unchanged.
+
+> The Codex side has **no User-Agent restriction** — curl, the official openai SDK, LiteLLM and friends can all call it directly. Use these two endpoints for scripting and automation rather than the Claude-side `/v1/messages`, which does filter clients (see [Claude Code setup](/docs/claude-code)).

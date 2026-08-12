@@ -21,7 +21,7 @@ Codex CLI 是 OpenAI 官方出品的终端 AI 编程助手，可以在命令行�
 | 出品方 | OpenAI | Anthropic |
 | 接口协议 | OpenAI 格式 | Anthropic 格式 |
 | Node 版本要求 | **v22+** | v18+ |
-| 环境变量 | `OPENAI_API_KEY` + `OPENAI_BASE_URL` | `ANTHROPIC_API_KEY` + `ANTHROPIC_BASE_URL` |
+| 环境变量 | `OPENAI_API_KEY` + `OPENAI_BASE_URL` | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` |
 
 > 网关同时支持两种协议，**一个账号、一个 Key** 可以同时用 Codex 和 Claude Code。
 
@@ -106,11 +106,15 @@ nano ~/.codex/config.toml
 
 ```toml
 model_provider = "hypitoken"
+model = "gpt-5.5"
+model_reasoning_effort = "high"     # high / medium / low / minimal
+disable_response_storage = true     # 第三方网关必须关掉 response 存储
 
 [model_providers.hypitoken]
 name = "HypiToken"
 base_url = "https://api.novadiffusion.com/v1"
 wire_api = "responses"
+requires_openai_auth = true
 ```
 
 再写 `auth.json`：
@@ -138,11 +142,15 @@ notepad "$env:USERPROFILE\.codex\config.toml"
 
 ```toml
 model_provider = "hypitoken"
+model = "gpt-5.5"
+model_reasoning_effort = "high"     # high / medium / low / minimal
+disable_response_storage = true     # 第三方网关必须关掉 response 存储
 
 [model_providers.hypitoken]
 name = "HypiToken"
 base_url = "https://api.novadiffusion.com/v1"
 wire_api = "responses"
+requires_openai_auth = true
 ```
 
 再写 `auth.json`：
@@ -167,11 +175,15 @@ nano ~/.codex/config.toml
 
 ```toml
 model_provider = "hypitoken"
+model = "gpt-5.5"
+model_reasoning_effort = "high"     # high / medium / low / minimal
+disable_response_storage = true     # 第三方网关必须关掉 response 存储
 
 [model_providers.hypitoken]
 name = "HypiToken"
 base_url = "https://api.novadiffusion.com/v1"
 wire_api = "responses"
+requires_openai_auth = true
 ```
 
 再写 `auth.json`：
@@ -187,6 +199,26 @@ chmod 600 ~/.codex/auth.json
 
 </div>
 </div>
+
+### 四个必填项的作用
+
+| 配置项 | 为什么需要 |
+| --- | --- |
+| `model` | 默认模型。不写就用 Codex 自带的默认值，可能不在网关的可用集合里。 |
+| `model_reasoning_effort` | 推理强度，见下表。 |
+| `disable_response_storage` | 必须为 `true`。第三方网关不提供 OpenAI 的 response 存储，留着会让请求失败。 |
+| `requires_openai_auth` | 必须为 `true`，否则 Codex 不会把 `auth.json` 里的 Key 发出去，直接 401。 |
+
+`model_reasoning_effort` 取值：
+
+| 值 | 适合的场景 |
+| --- | --- |
+| `high` | 架构设计、跨文件重构、疑难 bug。最慢也最贵，但成功率最高。 |
+| `medium` | 日常写代码、改 bug 的默认选择。 |
+| `low` | 简单改动、格式化、写注释，追求响应速度。 |
+| `minimal` | 几乎不推理，只做机械转换（翻译、改名、套模板）时最省。 |
+
+> 推理强度越高，思考 token 越多，计费也越高。拿不准就先用 `medium`。
 
 ### 临时调试（环境变量）
 
@@ -244,17 +276,40 @@ codex
 帮我写一个读取当前目录所有文件名的 Python 脚本
 ```
 
-也可以非交互式直接运行：
+## 六、可用模型
 
-```bash
-# 直接传入任务描述
-codex "解释一下这个目录里有哪些文件"
+OpenAI 侧当前已定价的模型 ID：
 
-# 指定模型
-codex --model gpt-5.5 "帮我优化这段代码"
+```
+gpt-5.2  gpt-5.3-codex  gpt-5.3-codex-spark
+gpt-5.4  gpt-5.4-mini  gpt-5.5
+gpt-5.6-sol  gpt-5.6-terra  gpt-5.6-luna
+gpt-5  gpt-5-mini  gpt-5-nano  gpt-4o  gpt-4o-mini
 ```
 
-## 六、常见报错排查
+`GET /v1/models` 返回的是**实际可用集合**（随上游套餐变化），控制台的模型列表为准：
+
+```bash
+codex --model gpt-5.3-codex "帮我优化这段代码"
+```
+
+> 模型名可以带后缀并被正确识别计费，例如 `gpt-5.3-codex(high)`。
+
+## 七、在自动化 / Agent 中使用
+
+`codex exec` 是非交互模式：读入一条任务描述，自动干完后退出，不进 TUI。适合放进脚本、CI、cron 或上层 Agent。
+
+```bash
+# 一次性任务，做完即退出
+codex exec "把 README 里的安装步骤更新成 Node 22"
+
+# 指定模型
+codex exec --model gpt-5.3-codex "给所有导出函数补 JSDoc"
+```
+
+配置照常从 `~/.codex/config.toml` + `~/.codex/auth.json` 读取；在 CI 里没有这两个文件时，直接给环境变量 `OPENAI_BASE_URL` 和 `OPENAI_API_KEY` 即可。
+
+## 八、常见报错排查
 
 **❌ 401 Unauthorized / Invalid API Key** — 检查 Key 是否完整（含 `sk-cpa-` 前缀）、有无空格或换行、余额是否充足。
 
@@ -269,6 +324,21 @@ source ~/.zshrc
 
 **❌ Node.js version too low** — Codex 要求 Node v22+，请升级：`nvm install 22 && nvm use 22`。
 
-## 七、直接调用 API
+**❌ 503 Service Unavailable** — 上游号池暂时没有可用凭证。响应体里写了具体原因，`Retry-After` 头给出建议等待秒数（最长 300 秒）。等一会儿重试即可，或查看[状态页](/status)。
+
+**❌ 402 Payment Required** — 余额不足，去控制台[充值](/docs/top-up)。
+
+对照表：
+
+| 返回码 | 真实原因 |
+| --- | --- |
+| `401` | Key 缺失/ 写错 / 带了空格换行；或 `requires_openai_auth` 没设成 `true` |
+| `402` | 余额不足 |
+| `404` | `base_url` 漏了 `/v1`，或模型名不存在 |
+| `503` | 上游号池暂时无可用凭证，`Retry-After` 最长 300 秒 |
+
+## 九、直接调用 API
 
 端点同时支持 `/v1/chat/completions` 和 OpenAI 的 `/v1/responses`。发送 OpenAI 请求结构、得到 OpenAI 响应结构，现有工具链无需改动即可工作。
+
+> Codex 端**没有 User-Agent 限制**，curl、官方 openai SDK、LiteLLM 等都能直连。若你要写脚本或跑自动化，请用这两个端点，而不是 Claude 端的 `/v1/messages`（那边有客户端过滤，见 [Claude Code 接入](/docs/claude-code)）。

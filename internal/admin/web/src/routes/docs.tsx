@@ -6,7 +6,7 @@ import { Link, NavLink, useLocation, useNavigate, useParams } from "react-router
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
-import { type DocSection, docsFor, slugify } from "@/lib/docs";
+import { type DocSection, docsAsMarkdown, docsFor, slugify } from "@/lib/docs";
 import { isOSGroup, type OS, OS_VALUES, OSProvider, useOS } from "@/lib/use-os";
 import { cn, copyToClipboard } from "@/lib/utils";
 import "highlight.js/styles/github-dark.css";
@@ -14,9 +14,41 @@ import "highlight.js/styles/github-dark.css";
 // Icons for the global OS switcher.
 const OS_ICONS: Record<OS, string> = { macOS: "", Windows: "⊞", Linux: "🐧" };
 
+// DocCopyButton copies a raw-markdown payload (a page, or the whole set).
+// Separate from the per-code-block button above: that one is a chrome control
+// inside a rendered block, this one is a primary action in the page header.
+function DocCopyButton({ text, label }: { text: string; label: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(id);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await copyToClipboard(text);
+          setCopied(true);
+        } catch {
+          // Clipboard access is origin- and gesture-gated; failing silently
+          // would read as a dead button.
+          alert(t("docsPage.copyFailed"));
+        }
+      }}
+      className="inline-flex items-center gap-1.5 rounded-md border border-border-strong px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? t("docsPage.copied") : label}
+    </button>
+  );
+}
+
 export default function DocsLayout() {
   const params = useParams();
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const lang = i18n.resolvedLanguage || i18n.language;
   const docs = useMemo(() => docsFor(lang), [lang]);
   const groups = useMemo(() => Array.from(new Set(docs.map((d) => d.group))), [docs]);
@@ -136,6 +168,15 @@ export default function DocsLayout() {
               {section.title}
             </h1>
             {section.intro && <p className="mt-4 text-lg text-muted-foreground">{section.intro}</p>}
+
+            {/* Whole-page / whole-set copy. The payload is the raw markdown,
+                not the rendered DOM, because the destination is an agent's
+                prompt window — it wants the source it can act on. */}
+            <div className="mt-6 flex flex-wrap items-center gap-2">
+              <DocCopyButton text={section.body} label={t("docsPage.copyPage")} />
+              <DocCopyButton text={docsAsMarkdown(lang)} label={t("docsPage.copyAll")} />
+              <span className="text-xs text-muted-foreground">{t("docsPage.copyHint")}</span>
+            </div>
 
             <article className="hypi-prose mt-8">
               <ReactMarkdown

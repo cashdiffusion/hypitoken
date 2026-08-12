@@ -140,7 +140,7 @@ Add:
 </div>
 </div>
 
-> `ANTHROPIC_AUTH_TOKEN` makes Claude Code send `Authorization: Bearer <token>` — exactly what the gateway expects.
+> Prefer `ANTHROPIC_AUTH_TOKEN` over `ANTHROPIC_API_KEY`: it sends the same `Authorization: Bearer <token>` the gateway expects, but skips Claude Code's validation path for official `sk-ant-` key formats — our keys start with `sk-cpa-`.
 
 ### Temporary debugging (env vars)
 
@@ -210,6 +210,20 @@ claude "summarise this diff"
 claude --advisor "review my architecture"
 ```
 
+### Using it headlessly
+
+`claude -p` (`--print`) is the non-interactive mode: it prints the result to stdout and exits without opening the TUI — what you want in scripts, CI, cron jobs, or a higher-level agent.
+
+```bash
+# one-shot task, result written to a file
+claude -p "summarise the changes in git diff HEAD~1 as markdown" > summary.md
+
+# read from a pipe, pick a model, emit JSON for programmatic parsing
+git diff | claude -p --model claude-sonnet-4-6 --output-format json "review this diff"
+```
+
+`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` are read from `settings.json` or the environment as usual — in CI just set the env vars. Note that `-p` is still Claude Code itself making the request, so it is not affected by the client filter described in section 7.
+
 ## 6. Supported features
 
 | Feature | Status |
@@ -221,13 +235,44 @@ claude --advisor "review my architecture"
 | Prompt caching | ✓ |
 | Streaming responses | ✓ |
 
-Available models (per console): `claude-haiku-4-5` (fastest), `claude-sonnet-4-6` (balanced, recommended), `claude-opus-4-7` (most capable).
+### Available models
+
+Anthropic model IDs that currently have pricing (the console is authoritative):
+
+```
+claude-haiku-4-5-20251001   claude-haiku-4-5
+claude-sonnet-4-6   claude-sonnet-5
+claude-opus-4-6   claude-opus-4-7   claude-opus-4-8   claude-opus-5
+claude-fable-5
+```
+
+Rule of thumb: `claude-haiku-4-5` is fastest and cheapest, `claude-sonnet-4-6` / `claude-sonnet-5` are the balanced recommendation, `claude-opus-*` are the most capable.
+
+> The Claude side has no model allowlist — any model name is forwarded upstream, and names outside the list above bill at the default rate. Suffixed names are recognised too, e.g. `claude-opus-5[1m]`.
+> There is **no** `/v1/models` route on the Claude side (requesting it 404s); check the console for what's available.
 
 ## 7. Troubleshooting
 
 **❌ 401 Unauthorized** — bad key. Check it's copied in full (with the `sk-cpa-` prefix), has no stray spaces, and is still active in the console.
 
-**❌ 404 Not Found** — wrong Base URL. The correct form is `https://api.novadiffusion.com` (no trailing `/` and no `/v1`).
+**❌ 403 `client_not_allowed`** — the message reads "This API endpoint only accepts supported interactive clients." `/v1/messages` inspects the User-Agent **before** authentication, so a match returns 403 regardless of your key or balance. It is a **blocklist, not an allowlist** — only these UA fragments are refused (case-insensitive substring match), plus an **empty User-Agent**:
+
+```
+python-requests/  python-httpx/  python-urllib  urllib3/  aiohttp/  scrapy/
+anthropic/python  anthropic/js  openai/python  openai/nodejs  openai-python/  litellm
+curl/  wget/  go-http-client/  okhttp/  java/  apache-httpclient/
+postmanruntime/  insomnia/  httpie/  apifox/  restsharp/
+```
+
+Real interactive clients — Claude Code CLI, Claude Code IDE / Web, Claude Desktop, Cursor — are not on the list and pass through fine.
+
+**For scripting or any programmatic access, use the Codex-side endpoints** `/v1/chat/completions` or `/v1/responses` (`https://api.novadiffusion.com/v1`). They have no such filter, so curl and the official openai SDK work directly — see [Codex CLI setup](/docs/codex-cli). By the same token, don't try to smoke-test `/v1/messages` with curl: it will always 403.
+
+**❌ 404 Not Found** — wrong Base URL. The correct form is `https://api.novadiffusion.com` (no trailing `/` and no `/v1`). The Claude side also has no `/v1/models` route, so requesting that 404s.
+
+**❌ 503 Service Unavailable** — the upstream pool temporarily has no usable credential. The body names the actual reason and the `Retry-After` header gives a suggested wait (capped at 300 seconds). Wait and retry, or check the [status page](/status).
+
+**❌ 402 Payment Required** — out of balance. [Top up](/docs/top-up) in the console.
 
 **❌ Requests time out / are slow** — wait and retry, or check the [status page](/status). Could also be your local network (VPN, firewall).
 

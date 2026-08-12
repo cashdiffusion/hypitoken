@@ -140,7 +140,7 @@ nano ~/.claude/settings.json
 </div>
 </div>
 
-> `ANTHROPIC_AUTH_TOKEN` 会让 Claude Code 发送 `Authorization: Bearer <token>`，正是网关需要的形式。
+> 请用 `ANTHROPIC_AUTH_TOKEN` 而不是 `ANTHROPIC_API_KEY`：它同样发送 `Authorization: Bearer <token>`（正是网关需要的形式），但不会触发 Claude Code 针对官方 `sk-ant-` key 格式的校验路径，而我们的 Key 是 `sk-cpa-` 开头。
 
 ### 临时调试（环境变量）
 
@@ -211,6 +211,20 @@ claude "总结一下这个 diff"
 claude --advisor "审查我的架构"
 ```
 
+### 在自动化 / Agent 中使用
+
+`claude -p`（`--print`）是非交互模式：跑完把结果打到 stdout 就退出，不进 TUI，适合脚本、CI、cron 和上层 Agent。
+
+```bash
+# 一次性任务，结果写进文件
+claude -p "总结 git diff HEAD~1 的改动，输出 markdown" > summary.md
+
+# 从管道读输入，指定模型，输出 JSON 便于程序解析
+git diff | claude -p --model claude-sonnet-4-6 --output-format json "审查这个 diff"
+```
+
+`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` 照常从 `settings.json` 或环境变量读取，CI 里直接给环境变量即可。注意 `-p` 模式依然是 Claude Code 本体在跑，所以不会被下面第七节的客户端过滤挡住。
+
 ## 六、支持的特性
 
 | 特性 | 状态 |
@@ -222,13 +236,44 @@ claude --advisor "审查我的架构"
 | 提示缓存 Prompt caching | ✓ |
 | 流式响应 | ✓ |
 
-可用模型（以控制台为准）：`claude-haiku-4-5`（最快）、`claude-sonnet-4-6`（均衡推荐）、`claude-opus-4-7`（最强）。
+### 可用模型
+
+已定价的 Anthropic 模型 ID（以控制台为准）：
+
+```
+claude-haiku-4-5-20251001   claude-haiku-4-5
+claude-sonnet-4-6   claude-sonnet-5
+claude-opus-4-6   claude-opus-4-7   claude-opus-4-8   claude-opus-5
+claude-fable-5
+```
+
+选型参考：`claude-haiku-4-5` 最快最省，`claude-sonnet-4-6` / `claude-sonnet-5` 均衡推荐，`claude-opus-*` 最强。
+
+> Claude 端不做模型白名单，任何模型名都会转发到上游；上面之外的名字按默认价计费。模型名可以带后缀并被正确识别，例如 `claude-opus-5[1m]`。
+> Claude 端**没有** `/v1/models` 路由（请求它会 404），可用模型请看控制台。
 
 ## 七、常见报错排查
 
 **❌ 401 Unauthorized / 认证失败** — Key 填写有误。检查是否完整复制（含 `sk-cpa-` 前缀）、有无多余空格、在控制台是否仍有效。
 
-**❌ 404 Not Found** — Base URL 配置错误。正确格式 `https://api.novadiffusion.com`（结尾不要加 `/` 也不要加 `/v1`）。
+**❌ 403 `client_not_allowed`** — 提示 "This API endpoint only accepts supported interactive clients."。`/v1/messages` 在**鉴权之前**先看 User-Agent，命中名单就直接 403，跟你的 Key 和余额无关。这是**黑名单**不是白名单，只拦下面这些 UA 片段（不区分大小写子串匹配），以及**空 User-Agent**：
+
+```
+python-requests/  python-httpx/  python-urllib  urllib3/  aiohttp/  scrapy/
+anthropic/python  anthropic/js  openai/python  openai/nodejs  openai-python/  litellm
+curl/  wget/  go-http-client/  okhttp/  java/  apache-httpclient/
+postmanruntime/  insomnia/  httpie/  apifox/  restsharp/
+```
+
+Claude Code CLI、Claude Code IDE / Web、Claude Desktop、Cursor 等真实交互式客户端都不在名单里，正常放行。
+
+**要写脚本或做程序化调用，请改用 Codex 端**的 `/v1/chat/completions` 或 `/v1/responses`（`https://api.novadiffusion.com/v1`），那边没有这个过滤，curl 和官方 openai SDK 都能直连 —— 见 [Codex CLI 接入](/docs/codex-cli)。同理，不要用 curl 去测 `/v1/messages`，那一定是 403。
+
+**❌ 404 Not Found** — Base URL 配置错误。正确格式 `https://api.novadiffusion.com`（结尾不要加 `/` 也不要加 `/v1`）。另外 Claude 端没有 `/v1/models` 路由，请求它也是 404。
+
+**❌ 503 Service Unavailable** — 上游号池暂时没有可用凭证。响应体里写了具体原因，`Retry-After` 头给出建议等待秒数（最长 300 秒）。等一会儿重试即可，或查看[状态页](/status)。
+
+**❌ 402 Payment Required** — 余额不足，去控制台[充值](/docs/top-up)。
 
 **❌ 请求一直超时 / 很慢** — 稍等片刻再试，或查看 [状态页](/status)。也可能是本地网络问题（VPN、防火墙）。
 

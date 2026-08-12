@@ -69,6 +69,14 @@ export default {
     dark: "Switch to dark",
   },
 
+  docsPage: {
+    copyPage: "Copy page",
+    copyAll: "Copy all docs",
+    copied: "Copied",
+    copyFailed: "Copy failed — select the text manually",
+    copyHint: "Paste into Claude Code or Codex and let it set things up for you.",
+  },
+
   nav: {
     home: "Home",
     pricing: "Pricing",
