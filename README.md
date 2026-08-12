@@ -2,8 +2,8 @@
 
 > A multi-tenant LLM API gateway for **Claude** and **Codex** — one binary, real USD wallet, Alipay top-up, status-page health.
 
-[![CI](https://github.com/cashdiffusion/hypitoken/actions/workflows/ci.yml/badge.svg)](https://github.com/cashdiffusion/hypitoken/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/cashdiffusion/hypitoken?display_name=tag)](https://github.com/cashdiffusion/hypitoken/releases)
+[![CI](https://github.com/hypit-ai/hypitoken/actions/workflows/ci.yml/badge.svg)](https://github.com/hypit-ai/hypitoken/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/hypit-ai/hypitoken?display_name=tag)](https://github.com/hypit-ai/hypitoken/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 HypiToken is a self-hostable LLM gateway that fans out client requests across many upstream credentials (Anthropic OAuth + API keys, OpenAI / ChatGPT OAuth + API keys), bills users in real USD via an Alipay-funded wallet, and ships a complete operator console at the same URL — all in a single static Go binary.
@@ -63,7 +63,7 @@ A `$0.10` Claude Sonnet call at the default tier (peg `¥2`, live rate `¥7.20`)
 ### Build
 
 ```bash
-git clone https://github.com/cashdiffusion/hypitoken.git
+git clone https://github.com/hypit-ai/hypitoken.git
 cd hypitoken
 make build
 # => bin/hypitoken
@@ -74,7 +74,7 @@ Requires Go ≥ 1.25 and [Bun](https://bun.sh) for the frontend.
 ### Install (binary)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hypit-ai/hypitoken/main/install.sh | bash
 ```
 
 The installer downloads the latest release for your platform, puts the binary in `/usr/local/bin`, and writes a systemd unit if available.

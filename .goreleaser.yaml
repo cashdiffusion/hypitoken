@@ -68,7 +68,7 @@ changelog:
 
 release:
   github:
-    owner: cashdiffusion
+    owner: hypit-ai
     name: hypitoken
   draft: false
   prerelease: auto
@@ -77,11 +77,11 @@ release:
     ## Install
 
     ```bash
-    curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash
+    curl -fsSL https://raw.githubusercontent.com/hypit-ai/hypitoken/main/install.sh | bash
     ```
 
     Or pin a version:
 
     ```bash
-    curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash -s -- --version {{ .Tag }}
+    curl -fsSL https://raw.githubusercontent.com/hypit-ai/hypitoken/main/install.sh | bash -s -- --version {{ .Tag }}
     ```

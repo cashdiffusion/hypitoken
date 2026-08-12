@@ -5,9 +5,9 @@
 # Installs or upgrades the hypitoken binary from GitHub Releases.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash -s -- --version v0.1.0
-#   curl -fsSL https://raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh | bash -s -- --prefix ~/.local
+#   curl -fsSL https://raw.githubusercontent.com/hypit-ai/hypitoken/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/hypit-ai/hypitoken/main/install.sh | bash -s -- --version v0.1.0
+#   curl -fsSL https://raw.githubusercontent.com/hypit-ai/hypitoken/main/install.sh | bash -s -- --prefix ~/.local
 #
 # Options:
 #   --version <tag>   Install this exact tag (default: latest release).
@@ -27,7 +27,7 @@ set -euo pipefail
 # ===========================================================================
 # Constants
 # ===========================================================================
-REPO="cashdiffusion/hypitoken"
+REPO="hypit-ai/hypitoken"
 BIN_NAME="hypitoken"
 
 # ===========================================================================

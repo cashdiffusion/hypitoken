@@ -29,7 +29,7 @@ Contents:
 
 ```sh
 # 1. Install the binary (don't start the service yet).
-curl -fsSL https://gh-proxy.com/raw.githubusercontent.com/cashdiffusion/hypitoken/main/install.sh \
+curl -fsSL https://gh-proxy.com/raw.githubusercontent.com/hypit-ai/hypitoken/main/install.sh \
   | bash -s -- --version vX.Y.Z --force
 #    (decline / ignore the service prompt for now)
 
