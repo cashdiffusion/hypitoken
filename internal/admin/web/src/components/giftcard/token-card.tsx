@@ -185,6 +185,16 @@ function sparkles(pts: [number, number, number][], color: string): string {
     .join("");
 }
 
+// siteOrigin is the QR fallback when no redeem URL is supplied: whatever host
+// this build is actually served from, so the card never advertises a domain
+// the deployment does not own.
+function siteOrigin(): string {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+  return "/";
+}
+
 // qrSVG renders an offline QR matrix as <rect>s. ALWAYS dark modules on a light
 // quiet-zone panel (regardless of card tone) so it stays scannable — on a dark
 // card the white panel makes the QR pop; matching the module colour to the card
@@ -193,7 +203,11 @@ function qrSVG(text: string, x: number, y: number, size: number): string {
   let qr: ReturnType<typeof qrcode>;
   try {
     qr = qrcode(0, "M");
-    qr.addData(text || "https://hypitoken.com");
+    // Fall back to the deployment's own origin, never a hard-coded brand
+    // domain — an empty invite_url used to print a QR for a host that does
+    // not exist. qrcode() throws on an empty string, so keep a literal last
+    // resort for SSR/non-browser renders.
+    qr.addData(text || siteOrigin());
     qr.make();
   } catch {
     return "";
