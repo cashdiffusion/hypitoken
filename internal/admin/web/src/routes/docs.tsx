@@ -6,6 +6,7 @@ import { Link, NavLink, useLocation, useNavigate, useParams } from "react-router
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
+import { toast } from "sonner";
 import { type DocSection, docsAsMarkdown, docsFor, slugify } from "@/lib/docs";
 import { isOSGroup, type OS, OS_VALUES, OSProvider, useOS } from "@/lib/use-os";
 import { cn, copyToClipboard } from "@/lib/utils";
@@ -35,7 +36,7 @@ function DocCopyButton({ text, label }: { text: string; label: string }) {
         } catch {
           // Clipboard access is origin- and gesture-gated; failing silently
           // would read as a dead button.
-          alert(t("docsPage.copyFailed"));
+          toast.error(t("docsPage.copyFailed"));
         }
       }}
       className="inline-flex items-center gap-1.5 rounded-md border border-border-strong px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
