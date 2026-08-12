@@ -70,8 +70,7 @@ export default {
   },
 
   docsPage: {
-    copyPage: "Copy page",
-    copyAll: "Copy all docs",
+    copyPage: "Copy full page",
     copied: "Copied",
     copyFailed: "Copy failed — select the text manually",
     copyHint: "Paste into Claude Code or Codex and let it set things up for you.",

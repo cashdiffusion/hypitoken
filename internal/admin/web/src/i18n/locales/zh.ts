@@ -69,8 +69,7 @@ export default {
   },
 
   docsPage: {
-    copyPage: "复制本页",
-    copyAll: "复制全部文档",
+    copyPage: "复制本页全文",
     copied: "已复制",
     copyFailed: "复制失败，请手动选中文本复制",
     copyHint: "粘贴给 Claude Code 或 Codex，让它照着帮你完成配置。",

@@ -73,34 +73,18 @@ export function docsFor(lang: string | undefined): DocSection[] {
   return DOCS_EN;
 }
 
-// docsAsMarkdown concatenates the localized doc set into one document.
+// docAsMarkdown renders one page as a standalone markdown document.
 //
-// The audience is an AI agent, not a reader: users copy this and paste it into
-// Claude Code or Codex so the agent performs the setup for them. Hence the
-// leading instruction block — without it a pasted wall of prose reads as a
-// question about documentation rather than a task to carry out.
-export function docsAsMarkdown(lang?: string): string {
-  const zh = (lang || "en").toLowerCase().startsWith("zh");
-  const body = docsFor(lang)
-    .map((d) => `## ${d.title}\n\n${d.body.trim()}`)
-    .join("\n\n---\n\n");
-  const preamble = zh
-    ? [
-        "# HypiToken 接入文档（全文）",
-        "",
-        "以下是 HypiToken API 网关的完整接入说明。请据此为我完成配置：",
-        "识别我的操作系统与已安装的客户端，写入对应的配置文件或环境变量，",
-        "然后运行文档中的验证命令确认接入成功。密钥需要我提供，不要凭空编造。",
-      ]
-    : [
-        "# HypiToken documentation (full text)",
-        "",
-        "Below is the complete setup guide for the HypiToken API gateway. Use it to",
-        "configure my machine: detect my OS and which clients I have installed, write",
-        "the matching config files or environment variables, then run the verification",
-        "commands from the docs. Ask me for the API key — never invent one.",
-      ];
-  return [...preamble, "", "---", "", body].join("\n");
+// This is the clipboard payload, and its usual destination is an agent's
+// prompt window rather than a text editor: users copy a page and ask Claude
+// Code or Codex to carry out the setup it describes. Hence the title heading —
+// the body's own headings start at h2, so without it the pasted text has no
+// statement of what it is about.
+//
+// Deliberately nothing more than that. An instruction preamble would make the
+// payload something other than what the button says it copies.
+export function docAsMarkdown(doc: DocSection): string {
+  return `# ${doc.title}\n\n${doc.body.trim()}\n`;
 }
 
 // Backwards-compat: `DOCS` retained as the default-language table for

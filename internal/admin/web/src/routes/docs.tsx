@@ -7,7 +7,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
-import { type DocSection, docsAsMarkdown, docsFor, slugify } from "@/lib/docs";
+import { type DocSection, docAsMarkdown, docsFor, slugify } from "@/lib/docs";
 import { isOSGroup, type OS, OS_VALUES, OSProvider, useOS } from "@/lib/use-os";
 import { cn, copyToClipboard } from "@/lib/utils";
 import "highlight.js/styles/github-dark.css";
@@ -170,12 +170,11 @@ export default function DocsLayout() {
             </h1>
             {section.intro && <p className="mt-4 text-lg text-muted-foreground">{section.intro}</p>}
 
-            {/* Whole-page / whole-set copy. The payload is the raw markdown,
-                not the rendered DOM, because the destination is an agent's
-                prompt window — it wants the source it can act on. */}
+            {/* Page copy. The payload is the raw markdown, not the rendered
+                DOM, because the destination is an agent's prompt window — it
+                wants the source it can act on. */}
             <div className="mt-6 flex flex-wrap items-center gap-2">
-              <DocCopyButton text={section.body} label={t("docsPage.copyPage")} />
-              <DocCopyButton text={docsAsMarkdown(lang)} label={t("docsPage.copyAll")} />
+              <DocCopyButton text={docAsMarkdown(section)} label={t("docsPage.copyPage")} />
               <span className="text-xs text-muted-foreground">{t("docsPage.copyHint")}</span>
             </div>
 
