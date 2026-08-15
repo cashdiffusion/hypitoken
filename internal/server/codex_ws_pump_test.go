@@ -46,6 +46,7 @@ func codexWSTestServer(backendBase string, oauths ...*auth.Auth) *Server {
 }
 
 func codexWSTestOAuth(id string) *auth.Auth {
+	//nolint:gosec // G101: a fixed string in a test fixture, not a credential.
 	return &auth.Auth{
 		ID: id, Kind: auth.KindOAuth, Provider: auth.ProviderOpenAI,
 		Label: id, AccessToken: "oauth-token", ExpiresAt: time.Now().Add(time.Hour),
@@ -73,6 +74,12 @@ func codexWSDialFront(t *testing.T, front *httptest.Server) *gorillaws.Conn {
 	client, resp, err := gorillaws.DefaultDialer.Dial(
 		"ws"+strings.TrimPrefix(front.URL, "http")+"/v1/responses",
 		http.Header{"Session-Id": []string{"win-42"}})
+	if resp != nil {
+		// On a failed upgrade gorilla hands back the HTTP response; on success
+		// it is a NopCloser over leftover bytes (the live conn lives on
+		// `client`). Closing is correct either way, and bodyclose requires it.
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		status := 0
 		if resp != nil {
@@ -139,7 +146,7 @@ func TestCodexWSPumpRebindsClientFrameToHandshakeIdentity(t *testing.T) {
 		t.Fatalf("write second frame: %v", err)
 	}
 
-	var sessionIDs []string
+	sessionIDs := make([]string, 0, 2)
 	for i, label := range []string{"first frame (handler)", "second frame (pump)"} {
 		var got peerSaw
 		select {
