@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 
+	"github.com/gin-gonic/gin"
 	"github.com/wjsoj/cc-core/usage"
 )
 
@@ -81,4 +82,30 @@ type PreCheckError struct {
 	Code    string
 	Message string
 	Details map[string]any
+}
+
+// chargeCtx returns the context a wallet DEBIT must run under.
+//
+// The debit is the last step of a turn we have already paid the upstream for,
+// so it must not be tied to the caller still being connected. Passing
+// c.Request.Context() meant every client disconnect aborted the DB write and
+// silently dropped the charge: production logged 14865 "charge failed: context
+// canceled" over five days, spread across many distinct paying users, with no
+// other error class present. Those turns cost us money upstream and billed
+// nobody.
+//
+// WithoutCancel keeps the request's values (trace ids, deadlines set by
+// middleware are dropped along with cancellation, which is what we want here)
+// while detaching from its lifetime. The sibling fork already settles this way
+// — see CPA-Claude's SettleCharge call sites — and this package already uses
+// the same pattern for the referral reward in
+// internal/saas/adapter/adapter.go.
+//
+// PreCheck deliberately does NOT use this: it is a read on the way in, it fails
+// open, and if the caller is gone there is nothing left to authorize.
+func chargeCtx(c *gin.Context) context.Context {
+	if c == nil || c.Request == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(c.Request.Context())
 }

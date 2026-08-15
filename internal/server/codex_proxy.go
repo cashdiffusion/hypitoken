@@ -381,7 +381,7 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 			// so wallets weren't deducted for Codex traffic. Route it through
 			// the same path Anthropic uses now.
 			if info, ok := saasInfoFrom(c); ok && s.saas != nil {
-				billed, err := s.saas.Charge(c.Request.Context(), info, auth.ProviderOpenAI, model, counts, costUSD)
+				billed, err := s.saas.Charge(chargeCtx(c), info, auth.ProviderOpenAI, model, counts, costUSD)
 				if err != nil {
 					log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 				} else {

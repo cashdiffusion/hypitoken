@@ -521,7 +521,7 @@ func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToke
 		costUSD = official
 		billedUSD = official
 		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
-			billed, err := s.saas.Charge(c.Request.Context(), info, auth.ProviderOpenAI, model, turn, official)
+			billed, err := s.saas.Charge(chargeCtx(c), info, auth.ProviderOpenAI, model, turn, official)
 			if err != nil {
 				log.Warnf("saas: ws charge failed for token user=%d: %v", info.UserID, err)
 			} else {

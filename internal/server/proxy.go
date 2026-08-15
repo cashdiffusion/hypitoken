@@ -1016,7 +1016,7 @@ recoveredFromSignature:
 		costUSD = s.pricing.Cost(auth.NormalizeProvider(a.Provider), billingModelFor(a, model), counts)
 		billedUSD = costUSD
 		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
-			billed, err := s.saas.Charge(c.Request.Context(), info, auth.NormalizeProvider(a.Provider), model, counts, costUSD)
+			billed, err := s.saas.Charge(chargeCtx(c), info, auth.NormalizeProvider(a.Provider), model, counts, costUSD)
 			if err != nil {
 				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 			} else {
@@ -1380,7 +1380,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 			costUSD = s.pricing.Cost(auth.NormalizeProvider(a.Provider), model, counts)
 			billedUSD = costUSD
 			if info, ok := saasInfoFrom(c); ok && s.saas != nil {
-				billed, err := s.saas.Charge(c.Request.Context(), info, auth.NormalizeProvider(a.Provider), model, counts, costUSD)
+				billed, err := s.saas.Charge(chargeCtx(c), info, auth.NormalizeProvider(a.Provider), model, counts, costUSD)
 				if err != nil {
 					log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
 				} else {
@@ -1814,7 +1814,7 @@ func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientTo
 		// the user actually paid for the sub-call.
 		billed := official
 		if hasSaaS && s.saas != nil {
-			if b, err := s.saas.Charge(c.Request.Context(), info, provider, subModel, sc, official); err == nil {
+			if b, err := s.saas.Charge(chargeCtx(c), info, provider, subModel, sc, official); err == nil {
 				billed = b
 			}
 		}
