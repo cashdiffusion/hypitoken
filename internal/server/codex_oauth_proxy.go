@@ -17,6 +17,7 @@ import (
 	"github.com/wjsoj/cc-core/apicompat"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/codexerr"
+	"github.com/wjsoj/cc-core/downstream"
 	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/requestlog"
 	ccstream "github.com/wjsoj/cc-core/stream"
@@ -234,16 +235,14 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			return false, true
 		}
 		counts.Add(extractCodexBackendUsageFromJSON(payload))
-		// Drop hop-by-hop / encoding headers; we've already consumed and may
-		// be sending different bytes than the upstream advertised.
-		for k, v := range resp.Header {
-			if strings.EqualFold(k, "Content-Length") || strings.EqualFold(k, "Transfer-Encoding") || strings.EqualFold(k, "Content-Encoding") {
-				continue
-			}
-			for _, val := range v {
-				c.Writer.Header().Add(k, val)
-			}
-		}
+		// Allowlist, not a hop-by-hop denylist. Forwarding everything else
+		// handed the caller our pool's operational state: the x-codex-*
+		// rate-limit headers (the serving account's window utilisation and
+		// reset times), openai-organization, x-oai-request-id, set-cookie and
+		// cf-ray — whose suffix is the Cloudflare datacentre our egress sits
+		// in. The Claude path has used this allowlist since it was written;
+		// only Codex was still copying verbatim.
+		downstream.CopyResponseHeaders(c.Writer.Header(), resp.Header, time.Now())
 		c.Writer.Header().Set("Content-Type", "application/json")
 		c.Writer.WriteHeader(resp.StatusCode)
 		_, _ = c.Writer.Write(payload)
@@ -326,15 +325,10 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			}
 			payload = converted
 		}
-		// Drop the upstream's Content-Type: we're returning JSON, not SSE.
-		for k, v := range resp.Header {
-			if strings.EqualFold(k, "Content-Type") || strings.EqualFold(k, "Content-Length") || strings.EqualFold(k, "Transfer-Encoding") {
-				continue
-			}
-			for _, val := range v {
-				c.Writer.Header().Add(k, val)
-			}
-		}
+		// Same allowlist as the non-streaming branch above. Content-Type is
+		// overwritten right after: this branch aggregates an SSE stream into a
+		// single JSON body, so the upstream's text/event-stream would be a lie.
+		downstream.CopyResponseHeaders(c.Writer.Header(), resp.Header, time.Now())
 		c.Writer.Header().Set("Content-Type", "application/json")
 		c.Writer.WriteHeader(http.StatusOK)
 		_, _ = c.Writer.Write(payload)
@@ -562,6 +556,16 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 
 					if codexTerminalEvent(payload) {
 						terminal = true
+					}
+
+					// Withhold the pool's state, LAST — usage extraction, error
+					// classification and terminal detection above all read
+					// `payload` (what upstream said). This is the SSE twin of
+					// the WS frame scrub in codex_ws.go.
+					if scrubbed, keep := downstream.ScrubCodexSSELine(line); !keep {
+						line = nil
+					} else {
+						line = scrubbed
 					}
 				}
 			}

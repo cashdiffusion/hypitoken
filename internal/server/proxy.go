@@ -377,6 +377,19 @@ func clientSlotID(c *gin.Context) string {
 	if v := strings.TrimSpace(c.GetHeader("X-Claude-Code-Session-Id")); v != "" {
 		return v
 	}
+	// "session-id", with a hyphen, is what a real Codex client sends — see
+	// mimicry.CodexSessionIDHeader and crack/codexapp0.147.0/SPEC.md §2.1.
+	// It must be checked BEFORE the underscore spelling below, which no genuine
+	// client emits: Go canonicalizes "Session_id" to itself (an underscore is
+	// not a header-name separator), so that branch could never match an inbound
+	// "session-id" and every Codex session was landing on the empty slot. One
+	// slot for all of a token's concurrent sessions means they share an upstream
+	// credential AND, since the slot feeds the session anchor, a single
+	// prompt_cache_key — upstream then sees one session carrying several
+	// unrelated threads at once, which is a shape no real client produces.
+	if v := strings.TrimSpace(c.GetHeader("session-id")); v != "" {
+		return v
+	}
 	if v := strings.TrimSpace(c.GetHeader("Session_id")); v != "" {
 		return v
 	}

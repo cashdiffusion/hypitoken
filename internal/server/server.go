@@ -16,6 +16,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/config"
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/clienttoken"
+	"github.com/wjsoj/cc-core/codexws"
 	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/cc-core/ratelimit"
 	"github.com/wjsoj/cc-core/requestlog"
@@ -80,6 +81,14 @@ type Server struct {
 	// it, namespaced by credential group. Backs the cross-group previous_response_id
 	// safety boundary on the WS path. Always initialized (cheap; janitor goroutine).
 	codexRespAccount *codexRespAccountStore
+
+	// codexSessions maps a logical downstream conversation to the stable
+	// upstream session id we present for it. That id is the handshake's
+	// session-id AND the frame's prompt_cache_key, so minting a fresh one per
+	// connection would drop every reconnect out of the upstream prompt cache.
+	// Never keyed on anything a downstream client controls alone — see the
+	// anchor built in handleCodexResponsesWS.
+	codexSessions *codexws.SessionRegistry
 }
 
 // LegacyAdmin returns the legacy admin handler so main.go can wire its
@@ -101,6 +110,7 @@ func New(cfg *config.Config, pool *auth.Pool, store *usage.Store, reqLog *reques
 		log.Infof("relay: trusting %d client token(s) to declare their downstream callers", len(s.trustedRelays))
 	}
 	s.codexRespAccount = newCodexRespAccountStore(codexRespAccountTTL)
+	s.codexSessions = codexws.NewSessionRegistry(0)
 	s.sidecar = ccsidecar.New(ccsidecar.Config{
 		Enabled: true,
 		UseUTLS: cfg.UseUTLS,

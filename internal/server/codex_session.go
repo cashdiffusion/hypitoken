@@ -1,9 +1,10 @@
 package server
 
 import (
-	"encoding/json"
 	"sync"
 	"time"
+
+	"github.com/wjsoj/cc-core/mimicry"
 )
 
 // codexRespAccountTTL bounds how long a response->account binding survives. A
@@ -96,34 +97,24 @@ func (s *codexRespAccountStore) janitor() {
 func (s *codexRespAccountStore) Close() { close(s.stop) }
 
 // codexPreviousResponseID extracts previous_response_id from a /v1/responses
-// body, or "" if absent or unparseable.
+// body, or "" if absent.
+//
+// Delegates to cc-core, which reads the key off a top-level scan rather than a
+// full unmarshal — a Codex frame embeds arbitrary user prose, and a client
+// quoting `"previous_response_id"` in a prompt must not be able to steer this.
 func codexPreviousResponseID(body []byte) string {
-	var probe struct {
-		PreviousResponseID string `json:"previous_response_id"`
-	}
-	if json.Unmarshal(body, &probe) != nil {
-		return ""
-	}
-	return probe.PreviousResponseID
+	return mimicry.CodexPreviousResponseID(body)
 }
 
-// removeCodexPreviousResponseID strips previous_response_id from a /v1/responses
-// body so the upstream rebuilds context from the full input. Used on cross-group
-// session mismatch (the previous response chain doesn't belong to this group's
-// sticky account). No-op when the field is absent; returns the original body
-// unchanged on parse error.
+// removeCodexPreviousResponseID strips previous_response_id so the upstream
+// rebuilds context from the full input. Used on cross-group session mismatch
+// (the chain doesn't belong to this group's sticky account).
+//
+// This used to unmarshal → delete → marshal, which made Go re-emit the frame's
+// top-level keys in SORTED order. Codex's own key order is stable across every
+// captured frame and is part of the shape we imitate, so the round-trip quietly
+// undid the byte fidelity the rest of the WS path maintains. cc-core's version
+// cuts the member out of the bytes.
 func removeCodexPreviousResponseID(body []byte) []byte {
-	var obj map[string]json.RawMessage
-	if json.Unmarshal(body, &obj) != nil {
-		return body
-	}
-	if _, ok := obj["previous_response_id"]; !ok {
-		return body
-	}
-	delete(obj, "previous_response_id")
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return body
-	}
-	return out
+	return mimicry.RemoveCodexPreviousResponseID(body)
 }

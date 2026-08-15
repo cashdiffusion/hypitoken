@@ -16,6 +16,8 @@ import (
 	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/codexerr"
 	"github.com/wjsoj/cc-core/codexws"
+	"github.com/wjsoj/cc-core/downstream"
+	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/usage"
 )
@@ -173,15 +175,12 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	}
 	_ = clientConn.SetReadDeadline(time.Time{})
 
-	// routingModel/routingTier feed the upstream x-codex-routing-hint and must
-	// stay the values the client actually asked for — in particular they must
-	// NOT inherit the "unknown" placeholder below, which exists only so billing
-	// and log rows have something to group on. A hint naming a model that does
-	// not exist is worse than no hint at all.
-	routingModel := codexWSExtractModel(firstFrame)
-	routingTier := codexWSExtractServiceTier(firstFrame)
-
-	model := routingModel
+	// The WS handshake carries no x-codex-routing-hint (that header is an
+	// HTTP-path thing — both captures agree), so the model is read here only
+	// for credential acquisition and billing. It must not inherit the "unknown"
+	// placeholder below, which exists solely so billing and log rows have
+	// something to group on.
+	model := codexWSExtractModel(firstFrame)
 	if model == "" {
 		model = "unknown"
 	}
@@ -206,6 +205,7 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	tried := map[string]bool{}
 	var up codexws.Conn
 	var a *auth.Auth
+	var ident mimicry.CodexFrameIdentity
 	for i := 0; i < codexWSMaxAcquire; i++ {
 		exclude := make([]string, 0, len(tried))
 		for id := range tried {
@@ -224,7 +224,28 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 		snap := cand.Snapshot()
 		accessToken, _ := cand.Credentials()
 		accountID, _ := cand.CodexIdentity()
-		header := codexws.BuildUpstreamHeaders(accessToken, accountID, slotID, betaValue, routingModel, routingTier)
+		// Resolve the upstream identity for THIS credential. The anchor is
+		// server-side: the account key pins it to the credential (so a
+		// credential switch correctly starts a new upstream session), and the
+		// client token plus slot separate concurrent downstream conversations.
+		// slotID is deliberately not used as the session id itself — it comes
+		// from a downstream header (and from a trusted relay it is a
+		// "client/session" pair, not even a UUID), while the session id becomes
+		// our upstream prompt_cache_key, so a caller able to choose it could aim
+		// at another tenant's cached prefix.
+		candIdent := s.codexSessions.Identity(cand.AccountKey(), cand.AccountKey()+"|"+clientToken+"|"+slotID)
+		// Identity carries the session/thread/installation ids, and the same
+		// value goes to mimicry.RewriteCodexClientFrame for every frame on this
+		// socket. Handing the handshake and the frames one object is what stops
+		// them disagreeing — a genuine client always has them identical, so a
+		// mismatch is a one-comparison tell. routingModel/routingTier are not
+		// passed: the WS handshake carries no routing hint (both captures agree).
+		header := codexws.BuildUpstreamHeadersWithOptions(codexws.UpstreamHeaderOptions{
+			AccessToken: accessToken,
+			AccountID:   accountID,
+			Identity:    &candIdent,
+			BetaValue:   betaValue,
+		})
 		conn, resp, derr := codexws.Dial(c.Request.Context(), codexws.DialConfig{
 			URL:       wsURL,
 			Header:    header,
@@ -262,6 +283,7 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 		}
 		a = cand
 		up = conn
+		ident = candIdent
 		break
 	}
 	if up == nil || a == nil {
@@ -276,7 +298,10 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	defer up.Close()
 	defer s.pool.Release(provider, clientToken, slotID)
 
-	// Relay the first frame upstream, then run the bidirectional pump.
+	// Relay the first frame upstream, then run the bidirectional pump. The
+	// rebind runs AFTER the previous_response_id strip above, so the final bytes
+	// are the byte-splicing rewriter's, not a map round-trip's.
+	firstFrame = rebindCodexFrame(firstFrame, ident, a)
 	_ = up.SetWriteDeadline(time.Now().Add(codexWSWriteDeadline))
 	if err := up.WriteMessage(codexws.TextMessage, firstFrame); err != nil {
 		log.Warnf("codex ws: first upstream write via %s failed: %v", a.ID, err)
@@ -315,7 +340,7 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 			s.billCodexWSTurn(c, a, model, clientToken, clientName, tb.turn, tb.dur)
 		}
 	}
-	s.pumpCodexWS(c.Request.Context(), clientConn, up, a, clientGroup, &counts, billTurn)
+	s.pumpCodexWS(c.Request.Context(), clientConn, up, a, clientGroup, ident, &counts, billTurn)
 	close(billCh)
 	billWG.Wait() // drain every queued turn before the request returns
 
@@ -336,7 +361,7 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 // upstream->client direction; the cross-group previous_response_id rewrite is
 // applied on the client->upstream direction for follow-up turns. Both relay
 // goroutines are joined before returning so counts is safe for billing.
-func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up codexws.Conn, a *auth.Auth, group string, counts *usage.Counts, onTurn func(turn usage.Counts, dur time.Duration)) {
+func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up codexws.Conn, a *auth.Auth, group string, ident mimicry.CodexFrameIdentity, counts *usage.Counts, onTurn func(turn usage.Counts, dur time.Duration)) {
 	done := make(chan struct{})
 	var once sync.Once
 	stop := func() {
@@ -388,9 +413,23 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 						turnStart = time.Now()
 					}
 				}
+
+				// Withhold the pool's operational state, LAST — after usage
+				// extraction, response-id binding and per-turn billing, all of
+				// which read `data` (what upstream actually said) rather than
+				// `out` (what the client gets). Placing it earlier would make a
+				// dropped frame skip settlement; today none of the dropped types
+				// is terminal, but that is not a property worth depending on.
+				var keep bool
+				if out, keep = downstream.ScrubCodexEvent(out); !keep {
+					continue
+				}
 			}
 			_ = client.SetWriteDeadline(time.Now().Add(codexWSWriteDeadline))
-			if err := client.WriteMessage(gorillaws.TextMessage, out); err != nil {
+			// Echo the frame's own type. Only text frames go through the
+			// scrub above, so relabelling a binary frame as text would forward
+			// bytes the client cannot parse AND that were never inspected.
+			if err := client.WriteMessage(mt, out); err != nil {
 				return
 			}
 		}
@@ -411,9 +450,18 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 						data = removeCodexPreviousResponseID(data)
 					}
 				}
+				// Every turn after the first goes through here too. Skipping it
+				// would leak the downstream client's identity from turn two
+				// onward, which is the same disclosure as leaking it on turn one
+				// — and would make session_id disagree with itself inside one
+				// connection. Strip first, rewrite second, same as the first frame.
+				data = rebindCodexFrame(data, ident, a)
 			}
 			_ = up.SetWriteDeadline(time.Now().Add(codexWSWriteDeadline))
-			if err := up.WriteMessage(codexws.TextMessage, data); err != nil {
+			// Echo the frame's own type, for the mirror-image reason: only text
+			// frames are rebound, so a binary frame relabelled as text would
+			// reach upstream still carrying the downstream client's identity.
+			if err := up.WriteMessage(mt, data); err != nil {
 				return
 			}
 		}
@@ -544,23 +592,31 @@ func codexWSExtractModel(frame []byte) string {
 	return probe.Response.Model
 }
 
-// codexWSExtractServiceTier best-effort reads service_tier from the first
-// client frame, in the same two shapes as codexWSExtractModel. Feeds the
-// routing hint only; an absent tier simply omits the ";tier=" segment.
-func codexWSExtractServiceTier(frame []byte) string {
-	var probe struct {
-		ServiceTier string `json:"service_tier"`
-		Response    struct {
-			ServiceTier string `json:"service_tier"`
-		} `json:"response"`
+// rebindCodexFrame maps a downstream client's response.create frame into the
+// identity we advertised on this socket's handshake.
+//
+// Without it the frame keeps the DOWNSTREAM client's own client_metadata —
+// installation id, session/thread/turn/window ids — so N users of one pooled
+// credential present to OpenAI as N installations on a single ChatGPT account,
+// and the frame contradicts the handshake headers, which a genuine client
+// always matches.
+//
+// A rewrite failure is a LOCAL judgement, never a credential fault: it must not
+// MarkFailure, must not trigger failover, and must not drop the turn. Forwarding
+// the original frame is strictly better than killing a working session — the
+// worst case is that this one frame keeps the client's ids, which is exactly the
+// status quo this function improves on.
+func rebindCodexFrame(frame []byte, ident mimicry.CodexFrameIdentity, a *auth.Auth) []byte {
+	out, err := mimicry.RewriteCodexClientFrame(frame, ident)
+	if err != nil {
+		id := "?"
+		if a != nil {
+			id = a.ID
+		}
+		log.Warnf("codex ws: client frame rebind via %s failed, forwarding as-is: %v", id, err)
+		return frame
 	}
-	if json.Unmarshal(frame, &probe) != nil {
-		return ""
-	}
-	if probe.ServiceTier != "" {
-		return probe.ServiceTier
-	}
-	return probe.Response.ServiceTier
+	return out
 }
 
 // codexResponseID extracts response.id from a Codex backend event payload.
