@@ -14,6 +14,7 @@ import {
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { LogoMark } from "@/components/icons/logo-mark";
 import { LanguageToggle } from "@/components/language-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -138,9 +139,7 @@ export function MobileMenu({ variant }: Props) {
               onClick={() => setOpen(false)}
               className="flex items-center gap-2 font-display text-lg font-semibold tracking-tight"
             >
-              <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
-                <KeyRound className="h-3.5 w-3.5" />
-              </span>
+              <LogoMark />
               HypiToken
             </Link>
             <DialogPrimitive.Close asChild>

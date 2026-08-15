@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Eye,
   GitBranch,
-  KeyRound,
   Network,
   ShieldCheck,
 } from "lucide-react";
@@ -23,6 +22,7 @@ import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "rea
 import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { DiscordIcon } from "@/components/icons/discord";
+import { LogoMark } from "@/components/icons/logo-mark";
 import { Community } from "@/components/landing/community";
 import { FeatureShowcase } from "@/components/landing/feature-showcase";
 import { HlsVideo } from "@/components/landing/hls-video";
@@ -491,9 +491,7 @@ function HeroNav({ t }: { t: (k: string) => string }) {
           viewTransition
           className="flex items-center gap-2 pl-1 font-display text-lg font-semibold tracking-tight text-white"
         >
-          <span className="grid h-7 w-7 place-items-center rounded-md bg-emerald-400 text-emerald-950">
-            <KeyRound className="h-3.5 w-3.5" />
-          </span>
+          <LogoMark />
           HypiToken
         </Link>
         <div className="hidden items-center gap-1 lg:flex">
@@ -1029,9 +1027,7 @@ function SiteFooter({ t }: { t: (k: string) => string }) {
                 to="/"
                 className="flex items-center gap-2 font-display text-xl font-semibold text-white"
               >
-                <span className="grid h-7 w-7 place-items-center rounded-md bg-emerald-400 text-emerald-950 shadow-[0_4px_20px_-4px_rgba(52,211,153,0.7)]">
-                  <KeyRound className="h-3.5 w-3.5" />
-                </span>
+                <LogoMark className="h-7 w-7 drop-shadow-[0_4px_20px_-4px_rgba(52,211,153,0.7)]" />
                 HypiToken
               </Link>
               <p className="mt-3 max-w-xs text-sm text-white/70">{t("home.footerBlurb")}</p>

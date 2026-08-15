@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="t a">
+  <title id="t">HypiToken</title>
+  <desc id="a">Hexagonal token coin with a keyhole cut in negative space</desc>
+  <defs>
+    <linearGradient id="mint" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6ee7b7"/>
+      <stop offset="0.55" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#10b981"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#04110c"/>
+  <polygon points="32,11 50.19,21.5 50.19,42.5 32,53 13.81,42.5 13.81,21.5" fill="url(#mint)"/>
+  <polygon points="32,15 46.7,23.5 46.7,40.5 32,49 17.3,40.5 17.3,23.5" fill="none" stroke="#04110c" stroke-opacity="0.32" stroke-width="1.5"/>
+  <circle cx="32" cy="28" r="6.5" fill="#04110c"/>
+  <path d="M29.4 33.5 L26.8 43 Q26.4 44.5 28 44.5 L36 44.5 Q37.6 44.5 37.2 43 L34.6 33.5 Z" fill="#04110c"/>
+</svg>

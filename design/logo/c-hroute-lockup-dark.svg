@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 252 64" role="img" aria-labelledby="t">
+  <title id="t">HypiToken</title>
+  <defs>
+    <linearGradient id="stemB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7dd3fc"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="stemG" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6ee7b7"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(0 10) scale(0.6875)">
+    <rect width="64" height="64" rx="14" fill="#04110c"/>
+    <g fill="none" stroke-linecap="round">
+      <path d="M21 15 V49" stroke="url(#stemB)" stroke-width="6"/>
+      <path d="M41 15 V49" stroke="url(#stemG)" stroke-width="6"/>
+      <path d="M21 32 H46" stroke="url(#bar)" stroke-width="5"/>
+    </g>
+    <circle cx="51" cy="32" r="3.6" fill="#6ee7b7"/>
+  </g>
+  <text x="58" y="41" font-family="Bricolage Grotesque, Bricolage Grotesque Variable, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="650" letter-spacing="-0.6" fill="#f4fbf7">HypiToken</text>
+</svg>

@@ -17,6 +17,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { DiscordIcon } from "@/components/icons/discord";
+import { LogoMark } from "@/components/icons/logo-mark";
 import { LanguageToggle } from "@/components/language-toggle";
 import { MobileMenu } from "@/components/layout/mobile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -172,9 +173,7 @@ function Header() {
             viewTransition
             className="flex items-center gap-2 pl-1 font-display text-lg font-semibold tracking-tight"
           >
-            <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
-              <KeyRound className="h-3.5 w-3.5" />
-            </span>
+            <LogoMark />
             HypiToken
           </Link>
           <nav className="hidden items-center gap-1 md:flex">
@@ -276,9 +275,7 @@ export function SiteNav() {
         viewTransition
         className="flex items-center gap-2 pl-1 font-display text-lg font-semibold tracking-tight"
       >
-        <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
-          <KeyRound className="h-3.5 w-3.5" />
-        </span>
+        <LogoMark />
         HypiToken
       </Link>
       <nav className="hidden items-center gap-1 lg:flex">

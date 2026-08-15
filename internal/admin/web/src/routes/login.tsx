@@ -1,9 +1,10 @@
-import { KeyRound, Layers, Receipt, ShieldCheck } from "lucide-react";
+import { Layers, Receipt, ShieldCheck } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { type FormEvent, lazy, type ReactNode, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { LogoMark } from "@/components/icons/logo-mark";
 import { HlsVideo } from "@/components/landing/hls-video";
 import { useIsMobile, usePrefersReducedMotion } from "@/components/landing/use-media";
 import { LanguageToggle } from "@/components/language-toggle";
@@ -223,9 +224,7 @@ export function AuthLayout({
           to="/"
           className="inline-flex w-fit items-center gap-2 font-display text-xl font-semibold"
         >
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground shadow-lg">
-            <KeyRound className="h-4 w-4" />
-          </span>
+          <LogoMark className="h-8 w-8" />
           HypiToken
         </Link>
 
@@ -275,9 +274,7 @@ export function AuthLayout({
         to="/"
         className="absolute left-4 top-4 z-20 flex items-center gap-2 font-display text-lg font-semibold lg:hidden"
       >
-        <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
-          <KeyRound className="h-3.5 w-3.5" />
-        </span>
+        <LogoMark />
         HypiToken
       </Link>
 
