@@ -10,6 +10,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import qrcode from "qrcode-generator";
 import { useId, useMemo, useRef } from "react";
 import * as THREE from "three";
+import { WebGLGuard } from "@/components/landing/webgl-guard";
 
 export type CardStyle = "openai" | "claude";
 export type CardTone = "dark" | "light";
@@ -668,20 +669,22 @@ function CardAura({ style, tone }: { style: CardStyle; tone: CardTone }) {
       className="pointer-events-none absolute inset-0"
       style={{ mixBlendMode: light ? "overlay" : "screen", opacity: light ? 0.5 : 0.62 }}
     >
-      <Canvas
-        gl={{
-          alpha: true,
-          antialias: true,
-          premultipliedAlpha: false,
-          powerPreference: "low-power",
-        }}
-        dpr={[1, 2]}
-        camera={{ fov: 50, position: [0, 0, 4.2], near: 0.1, far: 100 }}
-        frameloop={animate ? "always" : "demand"}
-        style={{ width: "100%", height: "100%" }}
-      >
-        <CardScene style={style} tone={tone} animate={animate} />
-      </Canvas>
+      <WebGLGuard>
+        <Canvas
+          gl={{
+            alpha: true,
+            antialias: true,
+            premultipliedAlpha: false,
+            powerPreference: "low-power",
+          }}
+          dpr={[1, 2]}
+          camera={{ fov: 50, position: [0, 0, 4.2], near: 0.1, far: 100 }}
+          frameloop={animate ? "always" : "demand"}
+          style={{ width: "100%", height: "100%" }}
+        >
+          <CardScene style={style} tone={tone} animate={animate} />
+        </Canvas>
+      </WebGLGuard>
     </div>
   );
 }

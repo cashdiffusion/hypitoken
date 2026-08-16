@@ -2,6 +2,7 @@ import { Canvas, type RootState, useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useAmbientFrameloop } from "./use-ambient-frameloop";
+import { WebGLGuard } from "./webgl-guard";
 
 // A slow-drifting shell of green points — ambient depth behind the hero,
 // not a focal element. Reacts gently to the pointer for parallax. Kept cheap:
@@ -62,15 +63,17 @@ export default function ParticleField({
 
   return (
     <div ref={ref} style={{ position: "absolute", inset: 0 }}>
-      <Canvas
-        frameloop={frameloop}
-        camera={{ position: [0, 0, 9], fov: 60 }}
-        dpr={[1, 1.5]}
-        gl={{ antialias: false, alpha: true, powerPreference: "low-power" }}
-        style={{ position: "absolute", inset: 0 }}
-      >
-        <Points count={count} color={color} />
-      </Canvas>
+      <WebGLGuard>
+        <Canvas
+          frameloop={frameloop}
+          camera={{ position: [0, 0, 9], fov: 60 }}
+          dpr={[1, 1.5]}
+          gl={{ antialias: false, alpha: true, powerPreference: "low-power" }}
+          style={{ position: "absolute", inset: 0 }}
+        >
+          <Points count={count} color={color} />
+        </Canvas>
+      </WebGLGuard>
     </div>
   );
 }
