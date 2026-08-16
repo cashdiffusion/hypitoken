@@ -9,7 +9,11 @@
 // calmed, and the backdrop must not reintroduce busyness.
 export function AdminBackdrop() {
   return (
-    <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+    // z-0, not negative: an ancestor (body > div, z-index:1) establishes the
+    // stacking context, so a negative-z child would paint *below* the shell's
+    // opaque .bg-background wrapper and be fully covered. At z-0 the backdrop
+    // sits above that background; admin.tsx lifts the page content to z-10.
+    <div aria-hidden className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
       {/* Corner glows — complements the shell's two top glows with a low
           bottom-left anchor so the admin canvas reads framed, not floodlit. */}
       <div

@@ -3,12 +3,15 @@
 package admin
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/singleflight"
 
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
@@ -16,9 +19,74 @@ import (
 
 type Handler struct {
 	DB *db.DB
+
+	dashCache   swrCache[*db.AdminDashboardSnapshot]
+	totalsCache swrCache[*db.FleetWalletTotals]
 }
 
 func New(store *db.DB) *Handler { return &Handler{DB: store} }
+
+// swrCache memoizes one aggregate with a 30s TTL, stale-while-revalidate.
+// Same shape as admin.Handler.cachedByAuth: a fresh value is served as-is; a
+// stale value is served immediately while one background goroutine refreshes
+// (singleflight collapses concurrent triggers); only the cold first call
+// blocks. The dashboard polls every 30s, so without the stale path every
+// poll would ride the refresh's full latency.
+type swrCache[T any] struct {
+	mu  sync.Mutex
+	sf  singleflight.Group
+	val T
+	at  time.Time
+	has bool
+}
+
+const swrCacheTTL = 30 * time.Second
+
+func (c *swrCache[T]) get(fetch func(ctx context.Context) (T, error)) (T, error) {
+	c.mu.Lock()
+	if c.has {
+		v, age := c.val, time.Since(c.at)
+		c.mu.Unlock()
+		if age >= swrCacheTTL {
+			go func() { _, _, _ = c.sf.Do("", func() (any, error) { return c.refresh(fetch) }) }()
+		}
+		return v, nil
+	}
+	c.mu.Unlock()
+
+	v, err, _ := c.sf.Do("", func() (any, error) {
+		// Re-check: callers queued behind the winner take its result.
+		c.mu.Lock()
+		if c.has && time.Since(c.at) < swrCacheTTL {
+			v := c.val
+			c.mu.Unlock()
+			return v, nil
+		}
+		c.mu.Unlock()
+		return c.refresh(fetch)
+	})
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return v.(T), nil
+}
+
+func (c *swrCache[T]) refresh(fetch func(ctx context.Context) (T, error)) (T, error) {
+	// Not the request's context: a background refresh must outlive the poll
+	// that triggered it.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	v, err := fetch(ctx)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	c.mu.Lock()
+	c.val, c.at, c.has = v, time.Now(), true
+	c.mu.Unlock()
+	return v, nil
+}
 
 func (h *Handler) Routes(g *gin.RouterGroup) {
 	// users
@@ -47,7 +115,7 @@ func (h *Handler) Routes(g *gin.RouterGroup) {
 }
 
 func (h *Handler) dashboard(c *gin.Context) {
-	snap, err := h.DB.AdminDashboard(c.Request.Context())
+	snap, err := h.dashCache.get(h.DB.AdminDashboard)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -122,7 +190,7 @@ func (h *Handler) dashboard(c *gin.Context) {
 // rollup is an aggregate sum, no per-user identity exposed.
 func (h *Handler) WalletTotalsHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		t, err := h.DB.FleetTotals(c.Request.Context())
+		t, err := h.totalsCache.get(h.DB.FleetTotals)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

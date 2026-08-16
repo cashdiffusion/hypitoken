@@ -430,18 +430,23 @@ type UserRow struct {
 	CreatedAt time.Time
 }
 
-// FleetTotals aggregates wallet movement across every SaaS user. Cheap
-// table scan — wallet_tx has at most one row per request, indexed on
-// user_id but we scan unfiltered here.
+// FleetTotals aggregates wallet movement across every SaaS user. Split
+// per kind (rather than one SUM(CASE) pass over the whole table) so each
+// aggregate is an index-only scan of idx_wallet_tx_kind_time_amt — the
+// unfiltered scan cost ~1 s on prod and this is served to every signed-in
+// console user.
 func (db *DB) FleetTotals(ctx context.Context) (*FleetWalletTotals, error) {
-	row := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(SUM(CASE WHEN kind='charge' THEN -amount_usd ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN kind='topup'  THEN  amount_usd ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN kind='charge' THEN 1 ELSE 0 END), 0)
-		FROM wallet_tx`)
 	var t FleetWalletTotals
-	if err := row.Scan(&t.UserPaidUSD, &t.TopupsUSD, &t.ChargeCount); err != nil {
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(-amount_usd), 0), COUNT(*)
+		  FROM wallet_tx WHERE kind='charge'`).
+		Scan(&t.UserPaidUSD, &t.ChargeCount); err != nil {
+		return nil, err
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(amount_usd), 0)
+		  FROM wallet_tx WHERE kind='topup'`).
+		Scan(&t.TopupsUSD); err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -521,19 +526,27 @@ func (db *DB) AdminDashboard(ctx context.Context) (*AdminDashboardSnapshot, erro
 		return nil, err
 	}
 
-	// Wallet rollup (lifetime / 30d / 7d for both topups and charges).
+	// Wallet rollup (lifetime / 30d / 7d for both topups and charges). Per
+	// kind rather than one SUM(CASE) full scan, so each half is an index-only
+	// range scan of idx_wallet_tx_kind_time_amt.
 	if err := db.QueryRowContext(ctx, `
 		SELECT
-			COALESCE(SUM(CASE WHEN kind='topup'  THEN  amount_usd ELSE 0 END),0),
-			COALESCE(SUM(CASE WHEN kind='topup'  AND created_at >= ? THEN  amount_usd ELSE 0 END),0),
-			COALESCE(SUM(CASE WHEN kind='topup'  AND created_at >= ? THEN  amount_usd ELSE 0 END),0),
-			COALESCE(SUM(CASE WHEN kind='charge' THEN -amount_usd ELSE 0 END),0),
-			COALESCE(SUM(CASE WHEN kind='charge' AND created_at >= ? THEN -amount_usd ELSE 0 END),0),
-			COALESCE(SUM(CASE WHEN kind='charge' AND created_at >= ? THEN -amount_usd ELSE 0 END),0)
-		FROM wallet_tx`,
-		d30, d7, d30, d7).
-		Scan(&snap.TopupsLifetime, &snap.Topups30d, &snap.Topups7d,
-			&snap.ChargesLifetime, &snap.Charges30d, &snap.Charges7d); err != nil {
+			COALESCE(SUM(amount_usd),0),
+			COALESCE(SUM(CASE WHEN created_at >= ? THEN amount_usd ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN created_at >= ? THEN amount_usd ELSE 0 END),0)
+		FROM wallet_tx WHERE kind='topup'`,
+		d30, d7).
+		Scan(&snap.TopupsLifetime, &snap.Topups30d, &snap.Topups7d); err != nil {
+		return nil, err
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(SUM(-amount_usd),0),
+			COALESCE(SUM(CASE WHEN created_at >= ? THEN -amount_usd ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN created_at >= ? THEN -amount_usd ELSE 0 END),0)
+		FROM wallet_tx WHERE kind='charge'`,
+		d30, d7).
+		Scan(&snap.ChargesLifetime, &snap.Charges30d, &snap.Charges7d); err != nil {
 		return nil, err
 	}
 
@@ -551,7 +564,7 @@ func (db *DB) AdminDashboard(ctx context.Context) (*AdminDashboardSnapshot, erro
 	{
 		days := make([]DailyAmount, 14)
 		dayKey := func(t time.Time) string { return t.UTC().Format("2006-01-02") }
-		for i := 0; i < 14; i++ {
+		for i := range 14 {
 			t := now.Add(time.Duration(-(13 - i)) * 24 * time.Hour)
 			days[i] = DailyAmount{Day: dayKey(t)}
 		}
@@ -584,13 +597,23 @@ func (db *DB) AdminDashboard(ctx context.Context) (*AdminDashboardSnapshot, erro
 		snap.DailyRevenue14d = days
 	}
 
-	// Top spenders (lifetime charges)
+	// Top spenders (lifetime charges). Aggregate first, join the handful of
+	// distinct spenders against users after; joining before grouping forced a
+	// 1 s pass over every charge row. INDEXED BY because the planner otherwise
+	// prefers idx_wallet_tx_kind_time_amt, which lacks user_id — a rowid
+	// lookup per charge row plus a temp b-tree, 2.4x slower than streaming
+	// the partial covering v16 index (measured on the prod snapshot). The
+	// join stays INNER so a charge row whose user vanished can't displace a
+	// real entry.
 	{
 		rows, err := db.QueryContext(ctx, `
-			SELECT u.id, u.email, COALESCE(SUM(-w.amount_usd),0) AS spent
-			  FROM users u JOIN wallet_tx w ON w.user_id=u.id AND w.kind='charge'
-			 GROUP BY u.id
-			 ORDER BY spent DESC
+			SELECT s.user_id, u.email, s.spent
+			  FROM (SELECT user_id, SUM(-amount_usd) AS spent
+			          FROM wallet_tx INDEXED BY idx_wallet_tx_user_charge
+			         WHERE kind='charge'
+			         GROUP BY user_id) s
+			  JOIN users u ON u.id = s.user_id
+			 ORDER BY s.spent DESC
 			 LIMIT 5`)
 		if err != nil {
 			return nil, err

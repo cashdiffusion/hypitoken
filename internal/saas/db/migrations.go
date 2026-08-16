@@ -762,6 +762,24 @@ CREATE INDEX idx_ticket_messages_ticket ON ticket_messages(ticket_id, created_at
 	`
 ALTER TABLE support_tickets ADD COLUMN meta TEXT NOT NULL DEFAULT '';
 `,
+
+	// v20 — make the fleet-wide money rollups index-only.
+	//
+	// Same disease v16 cured for the per-user reports, now on the admin side:
+	// AdminDashboard's lifetime/30d/7d SUM(CASE) rollup, its 14-day topup
+	// series, and FleetTotals all full-scanned wallet_tx (860k rows on prod,
+	// ~5 s total under modernc, polled every 30 s by the dashboard and served
+	// to every console visitor via /wallet/totals).
+	//
+	// (kind, created_at, amount_usd) turns each of those into an index-only
+	// range scan per kind — the v16 charge indexes don't help because they
+	// lead with user_id/workspace_id, and idx_wallet_tx_kind_id carries no
+	// amount. ANALYZE for the same reason as v16: without sqlite_stat1 the
+	// planner keeps guessing its way onto non-covering paths.
+	`
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_kind_time_amt ON wallet_tx(kind, created_at, amount_usd);
+ANALYZE;
+`,
 }
 
 // backfillTokenAttributionSQL recovers token_id / model from the legacy free-text

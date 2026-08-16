@@ -78,9 +78,11 @@ export default function AdminPage() {
   }, []);
   return (
     <>
-      {/* Fixed ambient scenery; outside the space-y flow so it adds no margin. */}
+      {/* Fixed ambient scenery; outside the space-y flow so it adds no margin.
+          Backdrop paints at z-0 (above the shell's opaque bg-background),
+          content is lifted to z-10 so it stays on top of the scenery. */}
       <AdminBackdrop />
-      <div className="space-y-6">
+      <div className="relative z-10 space-y-6">
         <PageHeader
           eyebrow={t("nav.operator")}
           icon={Shield}
