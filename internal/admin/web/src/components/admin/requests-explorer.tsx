@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Reveal } from "@/components/landing/reveal";
+import { FadeIn } from "@/components/admin/fade-in";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -127,7 +127,7 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
   const maxDayCost = Math.max(1e-9, ...sortedByDay.map(([, a]) => a.cost_usd));
 
   return (
-    <Reveal>
+    <FadeIn>
       <section>
         <div className="mb-4 flex items-baseline justify-between">
           <div>
@@ -459,6 +459,6 @@ export function RequestsExplorer({ refreshTick }: { refreshTick: number }) {
           )}
         </div>
       </section>
-    </Reveal>
+    </FadeIn>
   );
 }

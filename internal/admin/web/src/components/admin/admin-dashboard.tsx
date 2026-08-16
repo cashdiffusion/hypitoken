@@ -19,8 +19,8 @@ import {
 import { lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { FadeIn } from "@/components/admin/fade-in";
 import { SpotlightCard } from "@/components/landing/interactions";
-import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { Button } from "@/components/ui/button";
 import { apiGet } from "@/lib/api";
 import { cn, errMsg, fmtUSD } from "@/lib/utils";
@@ -135,54 +135,52 @@ export function AdminDashboard() {
   const realized = data.revenue.topups_lifetime - data.balance.outstanding; // wallet drained = revenue earned
 
   return (
-    <div className="space-y-6">
+    <FadeIn className="space-y-6">
       {/* Hero — glass plane with an ambient particle shell + realized revenue */}
-      <Reveal y={16}>
-        <div className="glass relative overflow-hidden rounded-2xl p-6 lg:p-8">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 opacity-[0.45] [mask-image:radial-gradient(120%_120%_at_85%_-10%,black,transparent_70%)]"
-          >
-            <Suspense fallback={null}>
-              <ParticleField color="#34d399" count={1100} />
-            </Suspense>
+      <div className="glass relative overflow-hidden rounded-2xl p-6 lg:p-8">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-[0.45] [mask-image:radial-gradient(120%_120%_at_85%_-10%,black,transparent_70%)]"
+        >
+          <Suspense fallback={null}>
+            <ParticleField color="#34d399" count={1100} />
+          </Suspense>
+        </div>
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl"
+        />
+        <div className="relative flex flex-wrap items-end justify-between gap-6">
+          <div className="min-w-0">
+            <div className="eyebrow mb-2.5 flex items-center gap-2 text-primary">
+              <span className="relative inline-flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+              </span>
+              {t("admin.dashboard.eyebrow")}
+            </div>
+            <h1 className="font-display text-4xl font-semibold tracking-tight lg:text-5xl">
+              {t("admin.dashboard.titlePart1")}{" "}
+              <span className="text-muted-foreground/70">{t("admin.dashboard.titlePart2")}</span>
+            </h1>
+            <p className="mt-2 max-w-xl text-sm text-muted-foreground lg:text-base">
+              {t("admin.dashboard.sub")}
+            </p>
           </div>
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl"
-          />
-          <div className="relative flex flex-wrap items-end justify-between gap-6">
-            <div className="min-w-0">
-              <div className="eyebrow mb-2.5 flex items-center gap-2 text-primary">
-                <span className="relative inline-flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                </span>
-                {t("admin.dashboard.eyebrow")}
-              </div>
-              <h1 className="font-display text-4xl font-semibold tracking-tight lg:text-5xl">
-                {t("admin.dashboard.titlePart1")}{" "}
-                <span className="text-muted-foreground/70">{t("admin.dashboard.titlePart2")}</span>
-              </h1>
-              <p className="mt-2 max-w-xl text-sm text-muted-foreground lg:text-base">
-                {t("admin.dashboard.sub")}
-              </p>
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="font-mono text-5xl font-semibold tracking-tight tabular-nums text-primary lg:text-6xl">
-                {fmtUSD(realized)}
-              </span>
-              <span className="ml-1 whitespace-pre-line font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                {t("admin.dashboard.realizedRevenue")}
-              </span>
-            </div>
+          <div className="flex items-baseline gap-2">
+            <span className="font-mono text-5xl font-semibold tracking-tight tabular-nums text-primary lg:text-6xl">
+              {fmtUSD(realized)}
+            </span>
+            <span className="ml-1 whitespace-pre-line font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              {t("admin.dashboard.realizedRevenue")}
+            </span>
           </div>
         </div>
-      </Reveal>
+      </div>
 
-      {/* KPI bento — glass spotlight tiles, staggered entrance */}
-      <RevealStagger className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <RevealItem className="flex">
+      {/* KPI bento — glass spotlight tiles */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="flex">
           <KpiTile
             icon={<DollarSign className="h-4 w-4" />}
             label={t("admin.dashboard.kpi.topupsLifetime")}
@@ -193,8 +191,8 @@ export function AdminDashboard() {
             })}
             accent="primary"
           />
-        </RevealItem>
-        <RevealItem className="flex">
+        </div>
+        <div className="flex">
           <KpiTile
             icon={<TrendingUp className="h-4 w-4" />}
             label={t("admin.dashboard.kpi.chargesLifetime")}
@@ -204,8 +202,8 @@ export function AdminDashboard() {
               m7: fmtUSD(data.revenue.charges_7d),
             })}
           />
-        </RevealItem>
-        <RevealItem className="flex">
+        </div>
+        <div className="flex">
           <KpiTile
             icon={<Wallet className="h-4 w-4" />}
             label={t("admin.dashboard.kpi.outstanding")}
@@ -213,8 +211,8 @@ export function AdminDashboard() {
             sub={t("admin.dashboard.kpi.outstandingSub", { margin: margin.toFixed(1) })}
             accent="warning"
           />
-        </RevealItem>
-        <RevealItem className="flex">
+        </div>
+        <div className="flex">
           <KpiTile
             icon={<Users className="h-4 w-4" />}
             label={t("admin.dashboard.kpi.users")}
@@ -225,12 +223,12 @@ export function AdminDashboard() {
               disabled: data.users.disabled,
             })}
           />
-        </RevealItem>
-      </RevealStagger>
+        </div>
+      </div>
 
       {/* Revenue + leaderboard bento */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <Reveal className="lg:col-span-2">
+        <div className="lg:col-span-2">
           <Panel
             eyebrow={t("admin.dashboard.revenueChartEyebrow")}
             title={t("admin.dashboard.revenueChartTitle")}
@@ -249,9 +247,9 @@ export function AdminDashboard() {
           >
             <DailyRevenueChart data={data.daily_revenue} />
           </Panel>
-        </Reveal>
+        </div>
 
-        <Reveal delay={0.05}>
+        <div>
           <Panel
             icon={<Trophy className="h-3.5 w-3.5" />}
             eyebrow={t("admin.dashboard.topSpendersEyebrow")}
@@ -290,12 +288,12 @@ export function AdminDashboard() {
               </ul>
             )}
           </Panel>
-        </Reveal>
+        </div>
       </div>
 
       {/* Recent activity bento */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Reveal>
+        <div>
           <Panel
             icon={<ShoppingCart className="h-3.5 w-3.5" />}
             eyebrow={t("admin.dashboard.recentTopupsEyebrow")}
@@ -334,9 +332,9 @@ export function AdminDashboard() {
               </ul>
             )}
           </Panel>
-        </Reveal>
+        </div>
 
-        <Reveal delay={0.05}>
+        <div>
           <Panel
             icon={<UserPlus className="h-3.5 w-3.5" />}
             eyebrow={t("admin.dashboard.recentSignupsEyebrow")}
@@ -378,9 +376,9 @@ export function AdminDashboard() {
               </ul>
             )}
           </Panel>
-        </Reveal>
+        </div>
       </div>
-    </div>
+    </FadeIn>
   );
 }
 

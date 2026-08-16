@@ -12,9 +12,9 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { FadeIn } from "@/components/admin/fade-in";
 import { CountUp, GlassPanel } from "@/components/app/page-primitives";
 import { Pager } from "@/components/app/pager";
-import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -291,12 +291,12 @@ export function CredentialsTab() {
         </p>
       ) : (
         <>
-          <RevealStagger
+          <div
             key={`${providerTab}-${key}-${offset}`}
             className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
           >
             {items.slice(offset, offset + PAGE).map((c) => (
-              <RevealItem key={c.id} className="h-full">
+              <div key={c.id} className="h-full">
                 <CredentialCard
                   cred={c}
                   busy={busyId === c.id}
@@ -305,9 +305,9 @@ export function CredentialsTab() {
                   onDelete={remove}
                   onAction={runAction}
                 />
-              </RevealItem>
+              </div>
             ))}
-          </RevealStagger>
+          </div>
           <Pager
             offset={offset}
             limit={PAGE}
@@ -321,10 +321,10 @@ export function CredentialsTab() {
   );
 
   return (
-    <div className="space-y-5">
+    <FadeIn className="space-y-5">
       {/* Fleet summary — the ambient particle layer is the one 3D element on
           this page; it sits behind the numbers and never enters the grid. */}
-      <Reveal>
+      <div>
         <div className="glass relative overflow-hidden rounded-2xl p-5 md:p-6">
           <div
             aria-hidden
@@ -376,7 +376,7 @@ export function CredentialsTab() {
             </div>
           </div>
         </div>
-      </Reveal>
+      </div>
 
       {/* Provider tabs — glass segmented control */}
       <div className="glass no-scrollbar flex w-fit gap-1 overflow-x-auto rounded-xl p-1">
@@ -417,7 +417,7 @@ export function CredentialsTab() {
         })}
       </div>
 
-      <Reveal>
+      <div>
         <GlassPanel
           title={
             providerTab === "anthropic" ? t("admin.creds.claudeTitle") : t("admin.creds.codexTitle")
@@ -524,7 +524,7 @@ export function CredentialsTab() {
             {renderSection("apikey", apikeys, keyOffset, setKeyOffset)}
           </div>
         </GlassPanel>
-      </Reveal>
+      </div>
 
       <AddAPIKeyDialog
         open={openKey}
@@ -541,7 +541,7 @@ export function CredentialsTab() {
       />
       <CredentialDetailDialog cred={detail} onClose={() => setDetail(null)} />
       <EditCredentialDialog cred={editing} onClose={() => setEditing(null)} onSaved={reload} />
-    </div>
+    </FadeIn>
   );
 }
 

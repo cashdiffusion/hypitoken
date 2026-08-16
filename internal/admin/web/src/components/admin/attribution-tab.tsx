@@ -8,9 +8,9 @@ import { Copy, Megaphone, Pencil, Plus, Trash2, TrendingUp, UserPlus, Wallet } f
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { FadeIn } from "@/components/admin/fade-in";
 import { VisitorBehaviorSection } from "@/components/admin/visitor-behavior-section";
 import { GlassPanel } from "@/components/app/page-primitives";
-import { Reveal } from "@/components/landing/reveal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -128,7 +128,7 @@ export function AttributionTab() {
   const totals = analytics?.totals;
 
   return (
-    <Reveal>
+    <FadeIn>
       <div className="space-y-6">
         {/* headline totals */}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -310,7 +310,7 @@ export function AttributionTab() {
           }}
         />
       )}
-    </Reveal>
+    </FadeIn>
   );
 }
 

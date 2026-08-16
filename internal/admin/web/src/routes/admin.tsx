@@ -16,9 +16,11 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { toast } from "sonner";
+import { AdminBackdrop } from "@/components/admin/admin-backdrop";
 import { AdminDashboard } from "@/components/admin/admin-dashboard";
 import { AttributionTab } from "@/components/admin/attribution-tab";
 import { CredentialsTab } from "@/components/admin/credentials/credentials-tab";
+import { FadeIn } from "@/components/admin/fade-in";
 import { OverviewPanel } from "@/components/admin/overview-panel";
 import { ReferralTab } from "@/components/admin/referral-tab";
 import { RequestsExplorer } from "@/components/admin/requests-explorer";
@@ -26,7 +28,6 @@ import { TicketsTab } from "@/components/admin/tickets-tab";
 import { WorkspacesTab } from "@/components/admin/workspaces-tab";
 import { GlassPanel, PageHeader } from "@/components/app/page-primitives";
 import { Pager } from "@/components/app/pager";
-import { Reveal } from "@/components/landing/reveal";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -76,32 +77,37 @@ export default function AdminPage() {
     return () => clearInterval(id);
   }, []);
   return (
-    <div className="space-y-6">
-      <PageHeader
-        eyebrow={t("nav.operator")}
-        icon={Shield}
-        title={t("admin.panelTitle")}
-        sub={t("admin.panelSub")}
-      />
+    <>
+      {/* Fixed ambient scenery; outside the space-y flow so it adds no margin. */}
+      <AdminBackdrop />
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow={t("nav.operator")}
+          icon={Shield}
+          title={t("admin.panelTitle")}
+          sub={t("admin.panelSub")}
+          animate={false}
+        />
 
-      <AdminTabBar />
+        <AdminTabBar />
 
-      <Routes>
-        <Route index element={<AdminDashboard />} />
-        <Route path="dashboard" element={<AdminDashboard />} />
-        <Route path="fleet" element={<OverviewPanel refreshTick={tick} />} />
-        {/* legacy alias — earlier deeplinks pointed at /overview */}
-        <Route path="overview" element={<OverviewPanel refreshTick={tick} />} />
-        <Route path="users" element={<UsersTab />} />
-        <Route path="workspaces" element={<WorkspacesTab />} />
-        <Route path="credentials" element={<CredentialsTab />} />
-        <Route path="requests" element={<RequestsExplorer refreshTick={0} />} />
-        <Route path="payments" element={<PaymentsTab />} />
-        <Route path="growth" element={<AttributionTab />} />
-        <Route path="referral" element={<ReferralTab />} />
-        <Route path="tickets" element={<TicketsTab />} />
-      </Routes>
-    </div>
+        <Routes>
+          <Route index element={<AdminDashboard />} />
+          <Route path="dashboard" element={<AdminDashboard />} />
+          <Route path="fleet" element={<OverviewPanel refreshTick={tick} />} />
+          {/* legacy alias — earlier deeplinks pointed at /overview */}
+          <Route path="overview" element={<OverviewPanel refreshTick={tick} />} />
+          <Route path="users" element={<UsersTab />} />
+          <Route path="workspaces" element={<WorkspacesTab />} />
+          <Route path="credentials" element={<CredentialsTab />} />
+          <Route path="requests" element={<RequestsExplorer refreshTick={0} />} />
+          <Route path="payments" element={<PaymentsTab />} />
+          <Route path="growth" element={<AttributionTab />} />
+          <Route path="referral" element={<ReferralTab />} />
+          <Route path="tickets" element={<TicketsTab />} />
+        </Routes>
+      </div>
+    </>
   );
 }
 
@@ -203,7 +209,7 @@ function UsersTab() {
   };
 
   return (
-    <Reveal>
+    <FadeIn>
       <GlassPanel
         title={t("admin.users.headingCount", { n: total ?? users.length })}
         action={
@@ -297,7 +303,7 @@ function UsersTab() {
           className="border-t border-border px-4 py-3"
         />
       </GlassPanel>
-    </Reveal>
+    </FadeIn>
   );
 }
 
@@ -394,71 +400,69 @@ function PaymentsTab() {
     };
   }, [offset]);
   return (
-    <div className="space-y-6">
-      <Reveal>
-        <GlassPanel
-          title={t("admin.payments.heading", { n: total ?? orders.length })}
-          description={t("admin.payments.sub")}
-          bodyClassName="p-0"
-        >
-          <Table>
-            <TableHeader>
+    <FadeIn className="space-y-6">
+      <GlassPanel
+        title={t("admin.payments.heading", { n: total ?? orders.length })}
+        description={t("admin.payments.sub")}
+        bodyClassName="p-0"
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("admin.payments.cols.order")}</TableHead>
+              <TableHead>{t("admin.payments.cols.user")}</TableHead>
+              <TableHead className="text-right">{t("admin.payments.cols.usd")}</TableHead>
+              <TableHead>{t("admin.payments.cols.status")}</TableHead>
+              <TableHead>{t("admin.payments.cols.created")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {orders.length === 0 && (
               <TableRow>
-                <TableHead>{t("admin.payments.cols.order")}</TableHead>
-                <TableHead>{t("admin.payments.cols.user")}</TableHead>
-                <TableHead className="text-right">{t("admin.payments.cols.usd")}</TableHead>
-                <TableHead>{t("admin.payments.cols.status")}</TableHead>
-                <TableHead>{t("admin.payments.cols.created")}</TableHead>
+                <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
+                  {busy ? t("common.loading") : t("admin.payments.empty")}
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {orders.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
-                    {busy ? t("common.loading") : t("admin.payments.empty")}
-                  </TableCell>
-                </TableRow>
-              )}
-              {orders.map((o) => (
-                <TableRow key={o.OutTradeNo}>
-                  <TableCell className="font-mono text-xs">{o.OutTradeNo}</TableCell>
-                  <TableCell>#{o.UserID}</TableCell>
-                  <TableCell className="font-mono tabular-nums text-right">
-                    {fmtUSD(o.USDCredit)}
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className={`rounded border px-2 py-0.5 text-xs font-mono uppercase ${o.Status === "paid" ? "border-success/30 bg-success/15 text-success" : "border-warning/30 bg-warning/15 text-warning"}`}
-                    >
-                      {o.Status === "paid"
-                        ? t("common.paid")
-                        : o.Status === "pending"
-                          ? t("common.pending")
-                          : o.Status === "expired"
-                            ? t("common.expired")
-                            : o.Status}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {o.CreatedAt && new Date(o.CreatedAt).toLocaleString()}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <Pager
-            offset={offset}
-            limit={ORDERS_PAGE}
-            total={total}
-            count={orders.length}
-            busy={busy}
-            onChange={setOffset}
-            className="border-t border-border px-4 py-3"
-          />
-        </GlassPanel>
-      </Reveal>
+            )}
+            {orders.map((o) => (
+              <TableRow key={o.OutTradeNo}>
+                <TableCell className="font-mono text-xs">{o.OutTradeNo}</TableCell>
+                <TableCell>#{o.UserID}</TableCell>
+                <TableCell className="font-mono tabular-nums text-right">
+                  {fmtUSD(o.USDCredit)}
+                </TableCell>
+                <TableCell>
+                  <span
+                    className={`rounded border px-2 py-0.5 text-xs font-mono uppercase ${o.Status === "paid" ? "border-success/30 bg-success/15 text-success" : "border-warning/30 bg-warning/15 text-warning"}`}
+                  >
+                    {o.Status === "paid"
+                      ? t("common.paid")
+                      : o.Status === "pending"
+                        ? t("common.pending")
+                        : o.Status === "expired"
+                          ? t("common.expired")
+                          : o.Status}
+                  </span>
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {o.CreatedAt && new Date(o.CreatedAt).toLocaleString()}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        <Pager
+          offset={offset}
+          limit={ORDERS_PAGE}
+          total={total}
+          count={orders.length}
+          busy={busy}
+          onChange={setOffset}
+          className="border-t border-border px-4 py-3"
+        />
+      </GlassPanel>
       <AdjustmentsPanel />
-    </div>
+    </FadeIn>
   );
 }
 
@@ -496,67 +500,65 @@ function AdjustmentsPanel() {
     };
   }, [offset]);
   return (
-    <Reveal>
-      <GlassPanel
-        title={t("admin.adjustments.heading", { n: total ?? rows.length })}
-        description={t("admin.adjustments.sub")}
-        bodyClassName="p-0"
-      >
-        <Table>
-          <TableHeader>
+    <GlassPanel
+      title={t("admin.adjustments.heading", { n: total ?? rows.length })}
+      description={t("admin.adjustments.sub")}
+      bodyClassName="p-0"
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("admin.adjustments.cols.user")}</TableHead>
+            <TableHead className="text-right">{t("admin.adjustments.cols.amount")}</TableHead>
+            <TableHead>{t("admin.adjustments.cols.source")}</TableHead>
+            <TableHead>{t("admin.adjustments.cols.note")}</TableHead>
+            <TableHead>{t("admin.adjustments.cols.created")}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 && (
             <TableRow>
-              <TableHead>{t("admin.adjustments.cols.user")}</TableHead>
-              <TableHead className="text-right">{t("admin.adjustments.cols.amount")}</TableHead>
-              <TableHead>{t("admin.adjustments.cols.source")}</TableHead>
-              <TableHead>{t("admin.adjustments.cols.note")}</TableHead>
-              <TableHead>{t("admin.adjustments.cols.created")}</TableHead>
+              <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
+                {busy ? t("common.loading") : t("admin.adjustments.empty")}
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
-                  {busy ? t("common.loading") : t("admin.adjustments.empty")}
+          )}
+          {rows.map((a) => {
+            const isBonus = a.ref.startsWith("signup_bonus:");
+            return (
+              <TableRow key={a.id}>
+                <TableCell className="text-xs">{a.email || `#${a.user_id}`}</TableCell>
+                <TableCell
+                  className={`font-mono tabular-nums text-right ${a.amount_usd >= 0 ? "text-success" : ""}`}
+                >
+                  {a.amount_usd >= 0 ? "+" : ""}
+                  {fmtUSD(a.amount_usd)}
+                </TableCell>
+                <TableCell>
+                  <span
+                    className={`rounded border px-2 py-0.5 text-xs font-medium ${isBonus ? "border-primary/30 bg-primary/15 text-primary" : "border-border bg-muted/40 text-muted-foreground"}`}
+                  >
+                    {isBonus ? t("admin.adjustments.bonus") : t("admin.adjustments.manual")}
+                  </span>
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">{a.note || "—"}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {new Date(a.created_at * 1000).toLocaleString()}
                 </TableCell>
               </TableRow>
-            )}
-            {rows.map((a) => {
-              const isBonus = a.ref.startsWith("signup_bonus:");
-              return (
-                <TableRow key={a.id}>
-                  <TableCell className="text-xs">{a.email || `#${a.user_id}`}</TableCell>
-                  <TableCell
-                    className={`font-mono tabular-nums text-right ${a.amount_usd >= 0 ? "text-success" : ""}`}
-                  >
-                    {a.amount_usd >= 0 ? "+" : ""}
-                    {fmtUSD(a.amount_usd)}
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className={`rounded border px-2 py-0.5 text-xs font-medium ${isBonus ? "border-primary/30 bg-primary/15 text-primary" : "border-border bg-muted/40 text-muted-foreground"}`}
-                    >
-                      {isBonus ? t("admin.adjustments.bonus") : t("admin.adjustments.manual")}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{a.note || "—"}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {new Date(a.created_at * 1000).toLocaleString()}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-        <Pager
-          offset={offset}
-          limit={ADJUSTMENTS_PAGE}
-          total={total}
-          count={rows.length}
-          busy={busy}
-          onChange={setOffset}
-          className="border-t border-border px-4 py-3"
-        />
-      </GlassPanel>
-    </Reveal>
+            );
+          })}
+        </TableBody>
+      </Table>
+      <Pager
+        offset={offset}
+        limit={ADJUSTMENTS_PAGE}
+        total={total}
+        count={rows.length}
+        busy={busy}
+        onChange={setOffset}
+        className="border-t border-border px-4 py-3"
+      />
+    </GlassPanel>
   );
 }

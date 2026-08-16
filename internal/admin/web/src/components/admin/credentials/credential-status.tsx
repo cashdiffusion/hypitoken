@@ -80,8 +80,8 @@ export function credStatus(c: Credential): CredStatus {
 }
 
 /* StatusDot — a 2px dot that only pulses while the credential is actually
- * eligible for traffic. The animation is the fleet's ambient heartbeat; a
- * static dot reads as "parked" at a glance. */
+ * eligible for traffic. A gentle pulse (not ping) — the grid shows dozens of
+ * these at once, and expanding rings en masse read as alarm, not heartbeat. */
 export function StatusDot({ status, className }: { status: CredStatus; className?: string }) {
   return (
     <span className={cn("relative inline-flex h-2 w-2 shrink-0", className)}>
@@ -89,7 +89,7 @@ export function StatusDot({ status, className }: { status: CredStatus; className
         <span
           aria-hidden
           className={cn(
-            "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60",
+            "absolute inline-flex h-full w-full animate-pulse rounded-full opacity-60",
             status.dot,
           )}
         />

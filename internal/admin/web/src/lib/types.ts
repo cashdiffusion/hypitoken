@@ -249,11 +249,17 @@ export interface UsageCounts {
   errors: number;
 }
 
-// UsageDay is one entry in the 14-day per-credential daily series.
+// UsageDay is one entry in the 14-day per-credential daily series (Go
+// credDay). Sourced from the request log, so each day carries real USD cost.
 export interface UsageDay {
-  day: string;
+  day: string; // "YYYY-MM-DD"
   input_tokens: number;
   output_tokens: number;
+  cache_read_tokens: number;
+  cache_create_tokens: number;
+  requests: number;
+  errors: number;
+  cost_usd: number;
 }
 
 // CredentialUsage mirrors the Go usageSummary struct attached to each

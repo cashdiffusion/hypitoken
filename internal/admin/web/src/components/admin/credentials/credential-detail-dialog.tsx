@@ -2,7 +2,6 @@ import { motion } from "motion/react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Sparkline } from "@/components/admin/sparkline";
 import { UpstreamUsagePanel } from "@/components/admin/upstream-usage-dialog";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -17,6 +16,7 @@ import type { Credential, CredentialUsage, UsageDay } from "@/lib/types";
 import { cn, fmtInt, fmtUSD } from "@/lib/utils";
 import { CodexBillingPanel } from "./codex-billing-panel";
 import { credStatus, StatusDot } from "./credential-status";
+import { DailyCostChart } from "./daily-cost-chart";
 
 function Row({ k, v }: { k: string; v: ReactNode }) {
   return (
@@ -77,10 +77,6 @@ export function CredentialDetailDialog({
   const c = cred;
   const u = c.usage;
   const status = credStatus(c);
-  const spark = daily.map((d) => ({
-    label: d.day,
-    value: (d.input_tokens || 0) + (d.output_tokens || 0),
-  }));
   // The upstream probe only exists for OAuth subscription accounts — API keys
   // have no per-account quota endpoint to ask.
   const canProbe = c.kind === "oauth" && (c.provider === "anthropic" || c.provider === "openai");
@@ -183,11 +179,7 @@ export function CredentialDetailDialog({
             </Block>
 
             <Block title={t("admin.creds.detail.spark14")}>
-              {spark.length > 0 ? (
-                <Sparkline data={spark} />
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("admin.creds.detail.noHistory")}</p>
-              )}
+              <DailyCostChart days={daily} />
             </Block>
 
             <Block title={t("admin.creds.detail.config")}>

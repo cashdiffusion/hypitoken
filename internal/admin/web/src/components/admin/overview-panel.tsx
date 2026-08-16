@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { FadeIn } from "@/components/admin/fade-in";
 import { GlassPanel } from "@/components/app/page-primitives";
 import { SpotlightCard } from "@/components/landing/interactions";
-import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { apiGet } from "@/lib/api";
 import type { Credential } from "@/lib/types";
 import { cn, fmtInt, fmtUSD } from "@/lib/utils";
@@ -119,9 +119,9 @@ export function OverviewPanel({ refreshTick }: { refreshTick: number }) {
     : [];
 
   return (
-    <div className="space-y-4">
-      <RevealStagger className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <RevealItem className="flex">
+    <FadeIn className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="flex">
           <MetricTile
             label="Pool"
             value={pool ? `${pool.healthy}/${pool.total}` : "—"}
@@ -135,24 +135,24 @@ export function OverviewPanel({ refreshTick }: { refreshTick: number }) {
                   : "no data"
             }
           />
-        </RevealItem>
-        <RevealItem className="flex">
+        </div>
+        <div className="flex">
           <MetricTile
             label={`Cost ${DAYS}d`}
             value={fmtUSD(reqData?.summary.cost_usd)}
             unit="usd"
             hint={reqData ? `${fmtInt(reqData.summary.count)} req` : ""}
           />
-        </RevealItem>
-        <RevealItem className="flex">
+        </div>
+        <div className="flex">
           <MetricTile
             label="Cost lifetime"
             value={fmtUSD(lifetime?.summary.cost_usd)}
             unit="usd"
             hint={lifetime ? `${fmtInt(lifetime.summary.count)} req` : ""}
           />
-        </RevealItem>
-        <RevealItem className="flex">
+        </div>
+        <div className="flex">
           <MetricTile
             label="Errors 14d"
             value={fmtInt(reqData?.summary.errors)}
@@ -162,36 +162,30 @@ export function OverviewPanel({ refreshTick }: { refreshTick: number }) {
                 : ""
             }
           />
-        </RevealItem>
-      </RevealStagger>
+        </div>
+      </div>
 
-      <Reveal>
-        <GlassPanel
-          title="24h activity"
-          description="Hourly cost (USD) — sparkline below"
-          action={
-            <span className="font-mono text-sm text-muted-foreground tabular-nums">
-              {hourly.length > 0 ? fmtUSD(hourly.reduce((s, h) => s + (h.cost_usd || 0), 0)) : "—"}
-            </span>
-          }
-        >
-          <Sparkline data={sparkData} />
-        </GlassPanel>
-      </Reveal>
+      <GlassPanel
+        title="24h activity"
+        description="Hourly cost (USD) — sparkline below"
+        action={
+          <span className="font-mono text-sm text-muted-foreground tabular-nums">
+            {hourly.length > 0 ? fmtUSD(hourly.reduce((s, h) => s + (h.cost_usd || 0), 0)) : "—"}
+          </span>
+        }
+      >
+        <Sparkline data={sparkData} />
+      </GlassPanel>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <Reveal>
-          <GlassPanel title="Top clients · 14d">
-            <TopTable rows={topClients} mono={false} />
-          </GlassPanel>
-        </Reveal>
-        <Reveal delay={0.05}>
-          <GlassPanel title="Top models · 14d">
-            <TopTable rows={topModels} mono />
-          </GlassPanel>
-        </Reveal>
+        <GlassPanel title="Top clients · 14d">
+          <TopTable rows={topClients} mono={false} />
+        </GlassPanel>
+        <GlassPanel title="Top models · 14d">
+          <TopTable rows={topModels} mono />
+        </GlassPanel>
       </div>
-    </div>
+    </FadeIn>
   );
 }
 

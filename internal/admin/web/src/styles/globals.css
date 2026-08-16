@@ -427,3 +427,20 @@ html:not(.dark) .page-canvas {
     animation: none !important;
   }
 }
+
+/* ── Admin backdrop orbs ──────────────────────────────────────────────────
+   Very slow translate-only drift for AdminBackdrop's ambient orbs. Translate
+   only (no filter/opacity animation) keeps them compositor-cheap while the
+   panel polls every 15s; frozen under reduced motion. */
+@keyframes admin-orbit {
+  0%   { transform: translate(0, 0); }
+  33%  { transform: translate(4rem, -3rem); }
+  66%  { transform: translate(-3rem, 2.5rem); }
+  100% { transform: translate(0, 0); }
+}
+.admin-orb {
+  animation: admin-orbit 60s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-orb { animation: none; }
+}

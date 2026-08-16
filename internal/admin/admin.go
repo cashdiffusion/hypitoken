@@ -439,13 +439,27 @@ type usageSummary struct {
 	// "recent burn" for Codex OAuth creds (ChatGPT backend doesn't expose
 	// a proactive remaining-quota API, so this is the best signal we have
 	// before a 429 actually fires).
-	Sum5h    usage.Counts     `json:"sum_5h"`
-	LastUsed *time.Time       `json:"last_used,omitempty"`
-	Daily    []usage.DayEntry `json:"daily"` // last 14 days, oldest first
+	Sum5h    usage.Counts `json:"sum_5h"`
+	LastUsed *time.Time   `json:"last_used,omitempty"`
+	Daily    []credDay    `json:"daily"` // last 14 days, oldest first; filled only by handleBridgeCredUsage
 	// TotalCostUSD is the lifetime USD spend routed through this credential,
 	// summed from the request log. Includes advisor sub-call rows (priced
 	// under their own model), so a credential's bar reflects true cost.
 	TotalCostUSD float64 `json:"total_cost_usd"`
+}
+
+// credDay is one day of the per-credential 14-day series served by
+// handleBridgeCredUsage. Sourced from the request log rather than the
+// in-memory usage store so each day carries a real USD cost.
+type credDay struct {
+	Day               string  `json:"day"` // "YYYY-MM-DD" in requestlog.BucketLocation()
+	InputTokens       int64   `json:"input_tokens"`
+	OutputTokens      int64   `json:"output_tokens"`
+	CacheReadTokens   int64   `json:"cache_read_tokens"`
+	CacheCreateTokens int64   `json:"cache_create_tokens"`
+	Requests          int64   `json:"requests"`
+	Errors            int64   `json:"errors"`
+	CostUSD           float64 `json:"cost_usd"`
 }
 
 // buildAuthRows produces the rich credential rows used by both the legacy
@@ -453,12 +467,11 @@ type usageSummary struct {
 // out so the SaaS panel can render the same data (usage / quota / model_map
 // / client_tokens / codex rate-limits) without re-shipping all of /summary.
 //
-// withDaily controls the 14-day per-credential series. It is off for the list
-// endpoints: nothing on either panel's list view reads it, yet it was ~70% of
-// the response body (77 KB for 35 credentials, re-sent on every 15s poll).
-// The credential detail dialog fetches it per-credential instead — see
-// handleBridgeCredUsage.
-func (h *Handler) buildAuthRows(withDaily bool) []authRow {
+// The 14-day daily series is never filled here: nothing on either panel's
+// list view reads it, yet it was ~70% of the response body (77 KB for 35
+// credentials, re-sent on every 15s poll). The credential detail dialog
+// fetches it per-credential instead — see handleBridgeCredUsage.
+func (h *Handler) buildAuthRows() []authRow {
 	usageMap := h.usage.Snapshot()
 	lifetime := h.lifetimeByAuth()
 	// Truncated to the minute so the cache key is stable across a polling
@@ -483,16 +496,11 @@ func (h *Handler) buildAuthRows(withDaily bool) []authRow {
 				lu := v.LastUsed
 				lastPtr = &lu
 			}
-			var daily []usage.DayEntry
-			if withDaily && hasMem {
-				daily = v.DailyOrdered(14)
-			}
 			u = &usageSummary{
 				Total:        aggToCounts(lifeAgg),
 				Sum24h:       aggToCounts(last24Agg),
 				Sum5h:        h.usage.Sum5h(st.Auth.ID),
 				LastUsed:     lastPtr,
-				Daily:        daily,
 				TotalCostUSD: lifeAgg.CostUSD,
 			}
 		}
@@ -578,7 +586,7 @@ func (h *Handler) buildAuthRows(withDaily bool) []authRow {
 }
 
 func (h *Handler) handleSummary(c *gin.Context) {
-	rows := h.buildAuthRows(false)
+	rows := h.buildAuthRows()
 	// Clients (per-access-token spending).
 	clientSnap := h.usage.SnapshotClients()
 	currentWeek := h.usage.CurrentWeekKey()
@@ -1942,7 +1950,48 @@ func (h *Handler) RegisterSaaSBridge(g *gin.RouterGroup) {
 // (/api/v2/admin/credentials). Same shape as /summary's "auths" but without
 // the clients/pricing fan-out — those have their own endpoints elsewhere.
 func (h *Handler) handleBridgeListCreds(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"credentials": h.buildAuthRows(false)})
+	c.JSON(http.StatusOK, gin.H{"credentials": h.buildAuthRows()})
+}
+
+// credDailySeries builds the last-14-days spend series for one credential
+// from the request log. Always exactly 14 consecutive days (missing days
+// zero-filled) so the chart's bars align. Day labels live in
+// requestlog.BucketLocation()'s zone — the same zone ByDay keys use — and
+// the FromDay/ToDay form keeps the query cube-eligible on the SQLite index.
+func (h *Handler) credDailySeries(id string) []credDay {
+	today := time.Now().In(requestlog.BucketLocation())
+	first := today.AddDate(0, 0, -13)
+	res, err := requestlog.Query(requestlog.Filter{
+		Dir:     h.cfg.LogDir,
+		AuthID:  id,
+		FromDay: first.Format("2006-01-02"),
+		ToDay:   today.Format("2006-01-02"),
+		Limit:   1, // aggregates only; Entries are unread
+	})
+	byDay := map[string]requestlog.Aggregate{}
+	if err != nil {
+		// A broken log query should degrade to an empty chart, not a 500 —
+		// the rest of the usage block renders from the in-memory store.
+		log.WithError(err).WithField("auth_id", id).Warn("admin: daily spend query failed")
+	} else {
+		byDay = res.ByDay
+	}
+	days := make([]credDay, 0, 14)
+	for i := 0; i < 14; i++ {
+		label := first.AddDate(0, 0, i).Format("2006-01-02")
+		agg := byDay[label]
+		days = append(days, credDay{
+			Day:               label,
+			InputTokens:       agg.InputTokens,
+			OutputTokens:      agg.OutputTokens,
+			CacheReadTokens:   agg.CacheReadTokens,
+			CacheCreateTokens: agg.CacheCreateTokens,
+			Requests:          agg.Count,
+			Errors:            agg.Errors,
+			CostUSD:           agg.CostUSD,
+		})
+	}
+	return days
 }
 
 // handleBridgeCredUsage serves one credential's usage block including the
@@ -1951,12 +2000,13 @@ func (h *Handler) handleBridgeListCreds(c *gin.Context) {
 // every poll tripled the list payload.
 func (h *Handler) handleBridgeCredUsage(c *gin.Context) {
 	id := c.Param("id")
-	for _, row := range h.buildAuthRows(true) {
+	for _, row := range h.buildAuthRows() {
 		if row.ID == id {
 			if row.Usage == nil {
 				c.JSON(http.StatusOK, gin.H{"usage": nil})
 				return
 			}
+			row.Usage.Daily = h.credDailySeries(id)
 			c.JSON(http.StatusOK, gin.H{"usage": row.Usage})
 			return
 		}

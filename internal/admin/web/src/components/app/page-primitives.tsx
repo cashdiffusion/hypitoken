@@ -10,35 +10,38 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 
 /* PageHeader — the consistent top-of-page block for every signed-in route:
  * a green eyebrow, a display-weight title (optionally icon-led), an optional
- * subtitle, and a right-aligned action slot. Reveal-wrapped so it eases in. */
+ * subtitle, and a right-aligned action slot. Reveal-wrapped so it eases in;
+ * `animate={false}` renders it static for hosts (admin) that manage their own
+ * entrance and must not replay a blur-rise on every tab switch. */
 export function PageHeader({
   eyebrow,
   title,
   sub,
   action,
   icon: Icon,
+  animate = true,
 }: {
   eyebrow?: string;
   title: ReactNode;
   sub?: ReactNode;
   action?: ReactNode;
   icon?: ElementType;
+  animate?: boolean;
 }) {
-  return (
-    <Reveal>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          {eyebrow && <span className="eyebrow text-primary">{eyebrow}</span>}
-          <h1 className="mt-2 flex items-center gap-2.5 font-display text-3xl font-semibold tracking-tight md:text-4xl">
-            {Icon && <Icon className="h-7 w-7 text-primary" />}
-            {title}
-          </h1>
-          {sub && <p className="mt-1.5 text-muted-foreground">{sub}</p>}
-        </div>
-        {action && <div className="shrink-0">{action}</div>}
+  const body = (
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0">
+        {eyebrow && <span className="eyebrow text-primary">{eyebrow}</span>}
+        <h1 className="mt-2 flex items-center gap-2.5 font-display text-3xl font-semibold tracking-tight md:text-4xl">
+          {Icon && <Icon className="h-7 w-7 text-primary" />}
+          {title}
+        </h1>
+        {sub && <p className="mt-1.5 text-muted-foreground">{sub}</p>}
       </div>
-    </Reveal>
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
   );
+  return animate ? <Reveal>{body}</Reveal> : body;
 }
 
 /* CountUp — eases a number from 0 to its value on mount/change. Honours
