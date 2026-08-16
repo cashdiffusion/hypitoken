@@ -2,6 +2,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   KeyRound,
   LayoutDashboard,
+  LifeBuoy,
   LogOut,
   Menu,
   Receipt,
@@ -19,6 +20,7 @@ import { LanguageToggle } from "@/components/language-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
+import { useTicketUnread } from "@/hooks/use-ticket-unread";
 import { cn, fmtUSD } from "@/lib/utils";
 
 // MobileMenu is the single off-canvas drawer used by every header in the
@@ -36,6 +38,7 @@ interface NavItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   end?: boolean;
+  badge?: number;
 }
 
 interface Props {
@@ -50,6 +53,8 @@ export function MobileMenu({ variant }: Props) {
   const { t } = useTranslation();
   const nav = useNavigate();
   const loc = useLocation();
+  // Badge only — the entry toast is owned by the AppShell instance.
+  const { unread } = useTicketUnread();
 
   const marketing: NavItem[] = [
     { to: "/", label: t("nav.home"), icon: LayoutDashboard, end: true },
@@ -64,6 +69,7 @@ export function MobileMenu({ variant }: Props) {
     { to: "/app/billing", label: t("nav.billing"), icon: Wallet },
     { to: "/app/logs", label: t("nav.logs"), icon: Receipt },
     { to: "/app/console", label: t("nav.console"), icon: Terminal },
+    { to: "/app/support", label: t("nav.support"), icon: LifeBuoy, badge: unread },
   ];
 
   const isActive = (item: NavItem) =>
@@ -216,6 +222,11 @@ export function MobileMenu({ variant }: Props) {
                             )}
                           />
                           <span className="flex-1 truncate">{item.label}</span>
+                          {item.badge ? (
+                            <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums text-primary-foreground">
+                              {item.badge > 99 ? "99+" : item.badge}
+                            </span>
+                          ) : null}
                           {active && (
                             <span className="font-mono text-[10px] uppercase tracking-wider text-primary/70">
                               ·

@@ -172,3 +172,72 @@ func TestRateLimiterWindows(t *testing.T) {
 		t.Fatal("address rotation must still hit the per-IP daily cap")
 	}
 }
+
+// TestUnreadTracking covers the in-app notification contract: an admin reply
+// makes the ticket unread with the right "latest" payload, opening the thread
+// consumes it, and a user's own reply never notifies the user about themselves.
+// Unix-second timestamps make same-second reply-then-read ambiguous, so the
+// test nudges updated_at forward via SQL where strict ordering matters.
+func TestUnreadTracking(t *testing.T) {
+	ctx := context.Background()
+	svc := newSvc(t)
+
+	tk, err := svc.Create(ctx, 7, "user@example.com", KindSupport, "标题", "第一条")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// A fresh ticket has only the user's own message — nothing unread.
+	if n, latest, err := svc.UnreadForUser(ctx, 7); err != nil || n != 0 || latest != nil {
+		t.Fatalf("fresh ticket: want 0/nil, got %d/%v (err=%v)", n, latest, err)
+	}
+
+	if err := svc.Reply(ctx, tk.ID, AuthorAdmin, "已收到"); err != nil {
+		t.Fatalf("admin reply: %v", err)
+	}
+	n, latest, err := svc.UnreadForUser(ctx, 7)
+	if err != nil {
+		t.Fatalf("unread: %v", err)
+	}
+	if n != 1 || latest == nil {
+		t.Fatalf("after admin reply: want 1 unread with latest, got %d/%v", n, latest)
+	}
+	if latest.ID != tk.ID || latest.Subject != "标题" || latest.UpdatedAt <= 0 {
+		t.Fatalf("latest payload wrong: %+v", latest)
+	}
+	// Another user sees nothing.
+	if n, _, _ := svc.UnreadForUser(ctx, 8); n != 0 {
+		t.Fatalf("stranger unread: want 0, got %d", n)
+	}
+
+	// Opening the thread marks it seen.
+	if err := svc.MarkSeen(ctx, tk.ID); err != nil {
+		t.Fatalf("mark seen: %v", err)
+	}
+	if n, latest, _ := svc.UnreadForUser(ctx, 7); n != 0 || latest != nil {
+		t.Fatalf("after open: want 0/nil, got %d/%v", n, latest)
+	}
+
+	// The user replying to their own ticket must not notify the user.
+	if err := svc.Reply(ctx, tk.ID, AuthorUser, "补充信息"); err != nil {
+		t.Fatalf("user reply: %v", err)
+	}
+	if _, err := svc.DB.ExecContext(ctx,
+		`UPDATE support_tickets SET updated_at = updated_at + 5 WHERE id = ?`, tk.ID); err != nil {
+		t.Fatalf("advance clock: %v", err)
+	}
+	if n, latest, _ := svc.UnreadForUser(ctx, 7); n != 0 || latest != nil {
+		t.Fatalf("own reply must not be unread: got %d/%v", n, latest)
+	}
+
+	// A second admin reply after the read is unread again.
+	if err := svc.Reply(ctx, tk.ID, AuthorAdmin, "已解决"); err != nil {
+		t.Fatalf("admin reply 2: %v", err)
+	}
+	if _, err := svc.DB.ExecContext(ctx,
+		`UPDATE support_tickets SET updated_at = updated_at + 5 WHERE id = ?`, tk.ID); err != nil {
+		t.Fatalf("advance clock: %v", err)
+	}
+	if n, latest, _ := svc.UnreadForUser(ctx, 7); n != 1 || latest == nil || latest.ID != tk.ID {
+		t.Fatalf("second admin reply: want 1 unread, got %d/%v", n, latest)
+	}
+}

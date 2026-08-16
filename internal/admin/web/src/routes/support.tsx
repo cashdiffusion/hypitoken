@@ -1,6 +1,7 @@
 import { ChevronLeft, LifeBuoy, MessageSquarePlus, Plus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { GlassPanel, PageHeader } from "@/components/app/page-primitives";
 import { Pager } from "@/components/app/pager";
@@ -9,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { TICKETS_SEEN_EVENT } from "@/hooks/use-ticket-unread";
 import { apiGet, apiPost } from "@/lib/api";
 import type { Ticket, TicketList } from "@/lib/types";
 import { errMsg } from "@/lib/utils";
@@ -40,14 +42,30 @@ export default function SupportPage() {
     void load();
   }, [load]);
 
-  const open = async (id: number) => {
-    try {
-      const r = await apiGet<{ ticket: Ticket }>(`/me/tickets/${id}`);
-      setActive(r.ticket);
-    } catch (e) {
-      toast.error(errMsg(e, t("support.errors.load")));
-    }
-  };
+  const open = useCallback(
+    async (id: number) => {
+      try {
+        const r = await apiGet<{ ticket: Ticket }>(`/me/tickets/${id}`);
+        setActive(r.ticket);
+        // The server marks the ticket seen on this GET — tell the unread
+        // badge (shell + mobile menu) to re-pull its count.
+        window.dispatchEvent(new Event(TICKETS_SEEN_EVENT));
+      } catch (e) {
+        toast.error(errMsg(e, t("support.errors.load")));
+      }
+    },
+    [t],
+  );
+
+  // Deep link from the unread toast: /app/support?open=<id> lands straight in
+  // the thread. Consume the param so back/refresh return to the list.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const id = Number(searchParams.get("open"));
+    if (!id) return;
+    setSearchParams({}, { replace: true });
+    void open(id);
+  }, [searchParams, setSearchParams, open]);
 
   const create = async () => {
     if (!body.trim() || busy) return;

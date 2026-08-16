@@ -368,6 +368,53 @@ func (s *Service) Reply(ctx context.Context, ticketID int64, author, body string
 	return tx.Commit()
 }
 
+// MarkSeen records that the ticket's owner has read the thread up to now.
+// Called from the user-facing read paths only (userGet, appealGet) — an
+// operator opening a ticket must not consume the user's unread marker.
+func (s *Service) MarkSeen(ctx context.Context, ticketID int64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE support_tickets SET user_seen_at = ? WHERE id = ?`, time.Now().Unix(), ticketID)
+	return err
+}
+
+// UnreadLatest is the newest unread ticket in an unread summary — enough for a
+// notification badge to deep-link, no thread content.
+type UnreadLatest struct {
+	ID        int64  `json:"id"`
+	Subject   string `json:"subject"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+// UnreadForUser counts tickets where the operator spoke after the user last
+// opened the thread, and returns the most recently updated one (nil when none).
+// One query: idx_support_tickets_user narrows to the user's own tickets, and a
+// user's ticket count is small enough that the residual filter is free.
+func (s *Service) UnreadForUser(ctx context.Context, userID int64) (int, *UnreadLatest, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, subject, updated_at FROM support_tickets
+		  WHERE user_id = ? AND last_actor = ? AND updated_at > user_seen_at
+		  ORDER BY updated_at DESC`, userID, AuthorAdmin)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+	var (
+		unread int
+		latest *UnreadLatest
+	)
+	for rows.Next() {
+		var u UnreadLatest
+		if err := rows.Scan(&u.ID, &u.Subject, &u.UpdatedAt); err != nil {
+			return 0, nil, err
+		}
+		if latest == nil {
+			latest = &u
+		}
+		unread++
+	}
+	return unread, latest, rows.Err()
+}
+
 // SetStatus is the operator's explicit close/reopen.
 func (s *Service) SetStatus(ctx context.Context, ticketID int64, status string) error {
 	switch status {

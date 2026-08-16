@@ -743,6 +743,11 @@ export default {
     newTicket: "新建工单",
     created: "工单已提交，我们会尽快回复。",
     empty: "还没有工单。遇到问题随时来找我们。",
+    unreadPrompt: {
+      title: "客服回复了你的工单",
+      body: "「{{subject}}」有新回复。",
+      action: "查看回复",
+    },
     backToList: "返回列表",
     status: {
       open: "待处理",

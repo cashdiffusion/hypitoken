@@ -764,6 +764,11 @@ export default {
     newTicket: "New ticket",
     created: "Ticket submitted. We'll get back to you shortly.",
     empty: "No tickets yet. Reach out any time something looks wrong.",
+    unreadPrompt: {
+      title: "Support replied to your ticket",
+      body: "New reply on “{{subject}}”.",
+      action: "View reply",
+    },
     backToList: "Back to list",
     status: {
       open: "Open",

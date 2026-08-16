@@ -48,6 +48,7 @@ func (s *Service) UserRoutes(g *gin.RouterGroup) {
 	t := g.Group("/me/tickets")
 	t.GET("", s.userList)
 	t.POST("", s.userCreate)
+	t.GET("/unread", s.userUnread)
 	t.GET("/:id", s.userGet)
 	t.POST("/:id/reply", s.userReply)
 }
@@ -120,6 +121,11 @@ func (s *Service) appealGet(c *gin.Context) {
 	if err != nil {
 		respondErr(c, err)
 		return
+	}
+	// The key holder IS the ticket's owner reading the thread, so this read
+	// consumes the unread marker just like the signed-in path.
+	if err := s.MarkSeen(c.Request.Context(), t.ID); err != nil {
+		log.Warnf("support: mark ticket %d seen: %v", t.ID, err)
 	}
 	c.JSON(http.StatusOK, gin.H{"ticket": t})
 }
@@ -221,7 +227,28 @@ func (s *Service) userGet(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// User path only — adminGet must not consume the user's unread marker.
+	if err := s.MarkSeen(c.Request.Context(), t.ID); err != nil {
+		log.Warnf("support: mark ticket %d seen: %v", t.ID, err)
+	}
 	c.JSON(http.StatusOK, gin.H{"ticket": t})
+}
+
+// userUnread powers the in-app notification badge: with no outbound mail, this
+// endpoint is the only way a user learns an operator has replied.
+func (s *Service) userUnread(c *gin.Context) {
+	u := saasauth.CurrentUser(c)
+	unread, latest, err := s.UnreadForUser(c.Request.Context(), u.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// Explicit null keeps the contract shape stable when there is nothing unread.
+	var latestJSON any
+	if latest != nil {
+		latestJSON = latest
+	}
+	c.JSON(http.StatusOK, gin.H{"unread": unread, "latest": latestJSON})
 }
 
 func (s *Service) userReply(c *gin.Context) {

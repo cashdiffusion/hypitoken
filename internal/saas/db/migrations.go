@@ -780,6 +780,23 @@ ALTER TABLE support_tickets ADD COLUMN meta TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_wallet_tx_kind_time_amt ON wallet_tx(kind, created_at, amount_usd);
 ANALYZE;
 `,
+
+	// v21 — unread tracking for the support desk.
+	//
+	// The desk is deliberately in-app-only (see internal/saas/support), which
+	// means an operator reply is invisible until the user happens to revisit the
+	// tickets page. user_seen_at records when the user last opened the thread;
+	// a ticket counts as unread when last_actor = 'admin' and updated_at is past
+	// that mark. The backfill default of 0 means every existing ticket with an
+	// admin reply surfaces as unread exactly once — acceptable on purpose, since
+	// those are precisely the replies users are likely to have missed.
+	//
+	// No new index: the unread query filters on user_id first, and
+	// idx_support_tickets_user (user_id, created_at DESC) narrows it to one
+	// user's handful of tickets before the residual predicates run.
+	`
+ALTER TABLE support_tickets ADD COLUMN user_seen_at INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 // backfillTokenAttributionSQL recovers token_id / model from the legacy free-text

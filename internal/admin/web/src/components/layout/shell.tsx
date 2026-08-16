@@ -23,6 +23,7 @@ import { MobileMenu } from "@/components/layout/mobile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
+import { useTicketUnread } from "@/hooks/use-ticket-unread";
 import { DISCORD_INVITE } from "@/lib/social";
 import { cn, fmtUSD } from "@/lib/utils";
 
@@ -50,11 +51,13 @@ function SideNavLink({
   end,
   icon: Icon,
   label,
+  badge,
 }: {
   to: string;
   end?: boolean;
   icon: typeof Wallet;
   label: string;
+  badge?: number;
 }) {
   const { pathname } = useLocation();
   const active = end ? pathname === to : pathname === to || pathname.startsWith(`${to}/`);
@@ -78,6 +81,11 @@ function SideNavLink({
       )}
       <Icon className="h-4 w-4" />
       {label}
+      {badge ? (
+        <span className="ml-auto rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums text-primary-foreground">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      ) : null}
     </NavLink>
   );
 }
@@ -85,6 +93,8 @@ function SideNavLink({
 export function AppShell() {
   const { user } = useAuth();
   const { t } = useTranslation();
+  // Single prompt-enabled instance: only the shell may raise the entry toast.
+  const { unread } = useTicketUnread({ prompt: true });
   return (
     <div className="relative min-h-dvh bg-background text-foreground">
       {/* faint ambient gradient mesh — frames the whole app without competing
@@ -103,7 +113,14 @@ export function AppShell() {
         <aside className="hidden w-56 flex-shrink-0 lg:block">
           <nav className="sticky top-24 flex flex-col gap-1">
             {NAV_ITEMS.map((n) => (
-              <SideNavLink key={n.to} to={n.to} end={n.end} icon={n.icon} label={t(n.labelKey)} />
+              <SideNavLink
+                key={n.to}
+                to={n.to}
+                end={n.end}
+                icon={n.icon}
+                label={t(n.labelKey)}
+                badge={n.to === "/app/support" ? unread : undefined}
+              />
             ))}
             {user?.workspaces?.some((w) => w.type === "enterprise" && w.role === "admin") && (
               <SideNavLink to="/app/workspace" icon={Building2} label={t("nav.workspace")} />
