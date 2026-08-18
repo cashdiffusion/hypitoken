@@ -53,6 +53,15 @@ type Service struct {
 	SiteName string
 	SiteURL  string
 
+	// Suspended mirrors saas.referrals_enabled being off. The service is
+	// still constructed and its admin routes still mounted when the
+	// programme is suspended, because past grants have to stay auditable —
+	// but the campaign and tier editors then have no effect until an
+	// operator turns the programme back on and restarts. Surfacing it in
+	// the analytics payload is what lets the admin UI say so, rather than
+	// silently accepting edits that do nothing.
+	Suspended bool
+
 	claimRL *claimLimiter
 }
 

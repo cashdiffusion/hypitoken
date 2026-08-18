@@ -37,10 +37,14 @@ export function ReferralTab() {
   const { t } = useTranslation();
   const [stats, setStats] = useState<ReferralOpsStats | null>(null);
   const [campaigns, setCampaigns] = useState<ReferralCampaign[]>([]);
+  const [suspended, setSuspended] = useState(false);
 
   const load = () => {
-    apiGet<ReferralOpsStats>("/admin/referral/analytics")
-      .then(setStats)
+    apiGet<{ stats: ReferralOpsStats; suspended: boolean }>("/admin/referral/analytics")
+      .then((r) => {
+        setStats(r.stats);
+        setSuspended(r.suspended);
+      })
       .catch(() => {});
     apiGet<{ campaigns: ReferralCampaign[] }>("/admin/referral/campaigns")
       .then((r) => setCampaigns(r.campaigns || []))
@@ -55,6 +59,11 @@ export function ReferralTab() {
 
   return (
     <div className="space-y-8">
+      {suspended && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
+          {t("adminReferral.suspended")}
+        </div>
+      )}
       {stats && stats.daily_budget_usd > 0 && (
         <div
           className={

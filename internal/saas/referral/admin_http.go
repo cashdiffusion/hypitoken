@@ -186,5 +186,7 @@ func (s *Service) adminAnalytics(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, stats)
+	// Piggyback the suspension flag on the payload the tab already fetches,
+	// rather than adding an endpoint just to answer one boolean.
+	c.JSON(http.StatusOK, gin.H{"stats": stats, "suspended": s.Suspended})
 }

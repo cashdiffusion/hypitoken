@@ -76,6 +76,10 @@ interface Analytics {
   totals: Totals;
   channels: ChannelStat[];
   daily: DailyPoint[];
+  // True while saas.referrals_enabled is off: channels still list and their
+  // history still reads, but ?ref= links no longer track and no bonus is
+  // granted, so edits here have no effect until the programme is resumed.
+  suspended?: boolean;
 }
 
 // referralLink builds the shareable homepage link for a channel slug.
@@ -130,6 +134,11 @@ export function AttributionTab() {
   return (
     <FadeIn>
       <div className="space-y-6">
+        {analytics?.suspended && (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
+            {t("admin.growth.suspended")}
+          </div>
+        )}
         {/* headline totals */}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile

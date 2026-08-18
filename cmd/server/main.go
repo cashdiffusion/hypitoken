@@ -383,6 +383,11 @@ func main() {
 		if referralsOn {
 			authH.Referral = referralSvc
 		}
+		// The admin campaign/channel editors stay reachable while suspended so
+		// past grants remain auditable — but they would silently accept edits
+		// that do nothing. Tell the panel, so it can say so.
+		referralSvc.Suspended = !referralsOn
+		growthSvc.SetSuspended(!referralsOn)
 		// Gift auto-claim stays wired: gifts are user-funded transfers, not
 		// signup credit, so already-sent gifts must still be able to land.
 		authH.GiftClaimer = referralSvc

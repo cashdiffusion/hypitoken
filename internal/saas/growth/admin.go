@@ -157,8 +157,9 @@ func (s *Service) adminAnalytics(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"totals":   totals,
-		"channels": stats,
-		"daily":    series,
+		"totals":    totals,
+		"channels":  stats,
+		"daily":     series,
+		"suspended": s.suspended,
 	})
 }

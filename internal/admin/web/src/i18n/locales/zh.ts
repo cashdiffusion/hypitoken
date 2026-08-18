@@ -344,30 +344,9 @@ export default {
     cancel: "取消",
     failed: "保存失败",
   },
-  gift: {
-    cardCaption: "礼品卡",
-    cardTagline: "送你一份算力心意",
-    emailLabel: "对方邮箱",
-    amountLabel: "赠送金额（最高 {{max}}）",
-    messageLabel: "附言",
-    sendBtn: "赠送",
-    sending: "赠送中…",
-    sent: "礼品卡已送出",
-    note: "从你的钱包扣除。对方注册/登录后领取，{{days}} 天未领取自动退回。",
-    giftableHint: "可赠额度 {{amount}} —— 仅限充值获得的余额。",
-    locked:
-      "赠送礼品卡需要账户有充值获得的余额。非充值获得的额度可以自己使用，但不能转赠给其他账户。",
-    lockedCta: "去充值 →",
-    sentTitle: "我送出的",
-    claimLabel: "输入兑换码领取",
-    claimBtn: "领取",
-    claiming: "领取中…",
-    claimed: "已领取 {{amount}}",
-    receivedTitle: "我收到的",
-    noneReceived: "暂无收到的礼品卡",
-    status: { pending: "待领取", claimed: "已领取", expired: "已过期", refunded: "已退回" },
-  },
   adminReferral: {
+    suspended:
+      "邀请计划已暂停：邀请链接不再发放奖励，新用户也不再获得注册赠额。以下为历史数据，此处的编辑在恢复该计划前不会生效。",
     conversions: "成功转化",
     kFactor: "K 因子",
     spend: "平台赠额支出",
@@ -807,6 +786,8 @@ export default {
       noMembers: "暂无成员",
     },
     growth: {
+      suspended:
+        "邀请计划已暂停：?ref= 链接不再统计归因，渠道注册赠额也不再发放。以下为历史数据，此处的编辑在恢复该计划前不会生效。",
       heading: "营销渠道",
       sub: "为每个渠道生成专属推广链接(?ref=…),设置注册赠额,并统计访问 / 转化数据。",
       newBtn: "新建渠道",

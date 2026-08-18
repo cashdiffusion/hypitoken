@@ -44,7 +44,14 @@ type Service struct {
 	db     *sql.DB
 	wallet Wallet
 	fraud  FraudConfig
+	// suspended mirrors saas.referrals_enabled being off — see
+	// referral.Service.Suspended for why the admin surface stays mounted.
+	suspended bool
 }
+
+// SetSuspended records that the invite/channel programme is off, so the admin
+// analytics payload can tell the operator their channel edits are inert.
+func (s *Service) SetSuspended(v bool) { s.suspended = v }
 
 // New builds the growth service over an open SQLite handle and a wallet sink.
 // Anti-abuse runs with safe defaults (see defaultFraudConfig); call

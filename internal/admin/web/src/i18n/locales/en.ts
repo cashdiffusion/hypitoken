@@ -362,30 +362,9 @@ export default {
     cancel: "Cancel",
     failed: "Save failed",
   },
-  gift: {
-    cardCaption: "Gift card",
-    cardTagline: "A little compute, on me",
-    emailLabel: "Recipient email",
-    amountLabel: "Amount (max {{max}})",
-    messageLabel: "Note",
-    sendBtn: "Send gift",
-    sending: "Sending…",
-    sent: "Gift sent",
-    note: "Deducted from your wallet. The recipient claims after sign-up; unclaimed after {{days}} days it returns to you.",
-    giftableHint: "{{amount}} giftable — topped-up credit only.",
-    locked:
-      "Sending gift cards requires topped-up credit. Credit that was not topped up is yours to spend, but cannot be transferred to another account.",
-    lockedCta: "Add credit →",
-    sentTitle: "Sent by me",
-    claimLabel: "Enter a redeem code",
-    claimBtn: "Claim",
-    claiming: "Claiming…",
-    claimed: "Claimed {{amount}}",
-    receivedTitle: "Received",
-    noneReceived: "No gifts received yet",
-    status: { pending: "Pending", claimed: "Claimed", expired: "Expired", refunded: "Refunded" },
-  },
   adminReferral: {
+    suspended:
+      "The invite programme is suspended: invite links grant no reward and new signups receive no credit. The figures below are history — edits here take effect only once the programme is resumed.",
     conversions: "Conversions",
     kFactor: "K-factor",
     spend: "Platform spend",
@@ -828,6 +807,8 @@ export default {
       noMembers: "No members yet",
     },
     growth: {
+      suspended:
+        "The invite programme is suspended: ?ref= links no longer attribute and channel signup bonuses are not granted. The figures below are history — edits here take effect only once the programme is resumed.",
       heading: "Marketing channels",
       sub: "Per-channel referral links (?ref=…) with a configurable signup bonus, plus visit / conversion analytics.",
       newBtn: "New channel",
