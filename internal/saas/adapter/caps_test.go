@@ -81,7 +81,13 @@ func TestPreCheckPerTokenCapsIgnoreSiblingTokenSpend(t *testing.T) {
 			charge(subject.ID)
 			capErr := adapter.PreCheck(ctx, info)
 			if capErr == nil {
+				// The return is redundant at runtime — t.Fatal ends the
+				// goroutine — but staticcheck only recognises that for a
+				// t.Fatal in the test function's own body, not inside a
+				// t.Run closure, and flags every field access below as a
+				// possible nil dereference (SA5011) without it.
 				t.Fatal("subject token spend did not trigger its cap")
+				return
 			}
 			if capErr.Code != tt.wantCode {
 				t.Fatalf("error code = %q, want %q", capErr.Code, tt.wantCode)
