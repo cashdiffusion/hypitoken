@@ -136,7 +136,9 @@ func (s *Service) totals(ctx context.Context, from int64, ov *Overview) error {
 		        COUNT(DISTINCT visitor_id),
 		        COALESCE(SUM(pageviews),0),
 		        COALESCE(SUM(CASE WHEN actions=0 AND pageviews<=1 THEN 1 ELSE 0 END),0),
-		        COALESCE(SUM(duration_ms),0),
+		        -- CAST for the same reason as growth.Stats: an INTEGER column can
+		        -- still hold a REAL, and SUM would then not Scan into int64.
+		        CAST(COALESCE(SUM(duration_ms),0) AS INTEGER),
 		        COALESCE(SUM(CASE WHEN duration_ms>0 THEN 1 ELSE 0 END),0)
 		   FROM web_sessions WHERE started_at >= ?`, from).
 		Scan(&ov.Totals.Sessions, &ov.Totals.Visitors, &ov.Totals.Pageviews, &bounced, &dwellSum, &dwellN); err != nil {

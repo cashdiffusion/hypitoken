@@ -197,8 +197,13 @@ func (s *Service) Stats(ctx context.Context) ([]*ChannelStats, error) {
 		dwellN   int64
 	}{}
 	{
+		// CAST is load-bearing: duration_ms is declared INTEGER but SQLite is
+		// weakly typed and one historical row holds a REAL (5.06), which made
+		// SUM return a float64 and Scan fail — a 500 on the whole admin tab
+		// caused by a single bad row. CAST pins the aggregate's type
+		// regardless of what any row happens to store.
 		rows, err := s.db.QueryContext(ctx,
-			`SELECT slug, COUNT(*), COALESCE(SUM(duration_ms),0), COALESCE(SUM(CASE WHEN duration_ms>0 THEN 1 ELSE 0 END),0)
+			`SELECT slug, COUNT(*), CAST(COALESCE(SUM(duration_ms),0) AS INTEGER), COALESCE(SUM(CASE WHEN duration_ms>0 THEN 1 ELSE 0 END),0)
 			   FROM channel_visits GROUP BY slug`)
 		if err != nil {
 			return nil, err

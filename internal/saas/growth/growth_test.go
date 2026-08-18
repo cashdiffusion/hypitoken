@@ -347,3 +347,36 @@ func TestSignupFraudEmailDomainBurst(t *testing.T) {
 		}
 	}
 }
+
+// A single row storing a REAL in the INTEGER duration_ms column used to take
+// the entire admin attribution tab down with a 500 ("converting driver.Value
+// type float64 to a int64"). SQLite is weakly typed, so the column
+// declaration does not prevent it, and production carries exactly one such
+// row (5.06). Stats must survive it.
+func TestStatsToleratesRealDurationRow(t *testing.T) {
+	store, svc := openTestDB(t)
+	ctx := context.Background()
+
+	if _, err := svc.CreateChannel(ctx, growth.ChannelParams{
+		Slug: "dirty", Name: "Dirty", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := svc.RecordVisit(ctx, "dirty", "visitor-1", ""); err != nil {
+		t.Fatalf("record visit: %v", err)
+	}
+	// Write the float directly — the tracking API clamps to an int, so the
+	// only way to reproduce production's row is to bypass it.
+	if _, err := store.ExecContext(ctx,
+		`UPDATE channel_visits SET duration_ms = 5.06 WHERE slug = 'dirty'`); err != nil {
+		t.Fatalf("seed real duration: %v", err)
+	}
+
+	stats, err := svc.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats with a REAL duration_ms row = %v, want nil", err)
+	}
+	if len(stats) == 0 {
+		t.Fatal("Stats returned no channels")
+	}
+}
