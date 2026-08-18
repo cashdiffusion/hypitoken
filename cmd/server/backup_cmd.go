@@ -13,6 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/wjsoj/CPA-Claude/internal/config"
+	"github.com/wjsoj/CPA-Claude/internal/saas/analytics"
 	"github.com/wjsoj/cc-core/backup"
 	"github.com/wjsoj/cc-core/requestlog"
 )
@@ -221,6 +222,21 @@ func buildManifest(ctx context.Context, cfg *config.Config, configPath, tmpDir s
 		add("saas.db.jwt_secret", cfg.SaaS.DBPath+".jwt_secret", 0o600)
 	} else {
 		log.Warn("backup: saas.db not present/enabled — skipping (no wallet data to back up?)")
+	}
+	// Visitor tracking lives in its own file since the 2026-08-18 corruption
+	// (see internal/saas/analytics/db.go). It is not billing data, so its
+	// absence is never fatal — but it is cheap to carry and the Growth tab
+	// looks empty without it.
+	if cfg.SaaS.Enabled {
+		analyticsSrc := filepath.Join(filepath.Dir(cfg.SaaS.DBPath), analytics.DefaultFileName)
+		if fileExists(analyticsSrc) {
+			snap := filepath.Join(tmpDir, analytics.DefaultFileName)
+			if err := backup.SnapshotSQLite(ctx, analyticsSrc, snap); err != nil {
+				log.Warnf("backup: snapshot %s failed (%v) — continuing without visitor analytics", analytics.DefaultFileName, err)
+			} else {
+				entries = append(entries, backup.FileEntry{Name: analytics.DefaultFileName, SourcePath: snap, Mode: 0o600})
+			}
+		}
 	}
 	if cfg.Shop.Enabled && fileExists(cfg.Shop.DBPath) {
 		snap := filepath.Join(tmpDir, "shop.db")

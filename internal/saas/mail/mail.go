@@ -281,3 +281,41 @@ func ResetEmail(siteName, code string) (subject, html, text string) {
 	text = renderText(siteName, intro, code, expiry)
 	return
 }
+
+// DatabaseAlertEmail builds an operator alert for a detected database
+// integrity failure. Unlike the code mails this one is not a template shell —
+// it carries a diagnostic payload and goes to the operator, not a customer.
+//
+// Kept deliberately plain: the recipient is being woken up, and the useful
+// content is the error text plus what to do next, not layout.
+func DatabaseAlertEmail(siteName, source, detail, observedAt string) (subject, html, text string) {
+	subject = fmt.Sprintf("[%s] ALERT: database integrity failure", siteName)
+	text = fmt.Sprintf(`%s detected SQLite corruption in the SaaS database.
+
+Source:   %s
+Observed: %s
+Detail:   %s
+
+Billing writes are failing while this persists. Recovery outline:
+  1. systemctl stop hypitoken
+  2. cp the live saas.db aside as evidence
+  3. sqlite3 <live> ".recover" | sqlite3 <new.db>, then PRAGMA integrity_check
+  4. backfill any rows .recover dropped from the newest clean snapshot in
+     <dbdir>/backups/ (compare per-table counts before trusting it)
+  5. swap the rebuilt file in and restart
+
+Do not attach or write to the live database with the sqlite3 CLI while the
+server is running — that corrupts it further.`, siteName, source, observedAt, detail)
+
+	html = fmt.Sprintf(`<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;line-height:1.6;color:#111">
+<p style="font-size:16px"><strong>%s detected SQLite corruption in the SaaS database.</strong></p>
+<table cellpadding="4" style="border-collapse:collapse">
+<tr><td><strong>Source</strong></td><td>%s</td></tr>
+<tr><td><strong>Observed</strong></td><td>%s</td></tr>
+<tr><td><strong>Detail</strong></td><td><code>%s</code></td></tr>
+</table>
+<p>Billing writes are failing while this persists.</p>
+<p><strong>Do not</strong> attach or write to the live database with the sqlite3 CLI while the server is running — that corrupts it further.</p>
+</div>`, htmlEsc(siteName), htmlEsc(source), htmlEsc(observedAt), htmlEsc(detail))
+	return
+}

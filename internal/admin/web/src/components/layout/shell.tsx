@@ -1,7 +1,6 @@
 import {
   Building2,
   ChartColumnBig,
-  Gift,
   KeyRound,
   LayoutDashboard,
   LifeBuoy,
@@ -34,7 +33,6 @@ const DISCORD_BLURPLE = "#5865f2";
 const NAV_ITEMS = [
   { to: "/app", labelKey: "nav.dashboard", icon: LayoutDashboard, end: true },
   { to: "/app/leaderboard", labelKey: "nav.arena", icon: Trophy },
-  { to: "/app/invite", labelKey: "nav.invite", icon: Gift },
   { to: "/app/tokens", labelKey: "nav.tokens", icon: KeyRound },
   { to: "/app/billing", labelKey: "nav.billing", icon: Wallet },
   { to: "/app/usage", labelKey: "nav.usage", icon: ChartColumnBig },

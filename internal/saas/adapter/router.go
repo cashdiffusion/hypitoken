@@ -33,7 +33,14 @@ import (
 // /api/v2/admin/credentials/* is exposed. legacyH may be nil — when set, the
 // /api/v2/admin/* group also exposes request-log queries + Anthropic OAuth
 // quota probe (handlers reused from the legacy operator API).
-func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service, arenaH *arena.Service, profileH *profile.Handler, referralH *referral.Service, workspaceH *workspace.Handler, supportH *support.Service) {
+//
+// referralsEnabled is the master switch for the invite / referral / marketing-
+// attribution programme (saas.referrals_enabled, default false — suspended
+// after the 2026-08-08 farming incident). When false the user-facing referral
+// routes and the ?ref= attribution beacons are not mounted at all; the admin
+// routes that read the historical channel / campaign / conversion data stay
+// mounted either way, so the operator can still audit what was granted.
+func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service, arenaH *arena.Service, profileH *profile.Handler, referralH *referral.Service, workspaceH *workspace.Handler, supportH *support.Service, referralsEnabled bool) {
 	v2 := engine.Group("/api/v2")
 
 	// Public.
@@ -45,9 +52,12 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	authH.Routes(authG)
 	billingH.PublicRoutes(v2)
 
-	// Growth (marketing attribution) — public, unauthenticated visit/dwell
-	// tracking beacons. nil when the module is disabled.
-	if growthH != nil {
+	// Growth (marketing attribution) — public, unauthenticated ?ref= visit/dwell
+	// tracking beacons. nil when the module is disabled; also skipped entirely
+	// while the referral programme is suspended, so no attribution is recorded
+	// and no signup can be credited to a channel. (Site-wide visitor analytics
+	// below is a separate module and keeps running.)
+	if growthH != nil && referralsEnabled {
 		growthH.PublicRoutes(v2)
 	}
 	// Analytics (site-wide visitor behaviour) — public, unauthenticated
@@ -130,8 +140,11 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	if profileH != nil {
 		profileH.Routes(authed)
 	}
-	// Referral (invite cards + peer gifting) — authed user routes.
-	if referralH != nil {
+	// Referral (invite cards + peer gifting) — authed user routes. Unmounted
+	// while the programme is suspended (farmed for signup credit on
+	// 2026-08-08: 168 signups, ~$116), so the whole user-facing invite surface
+	// disappears rather than 404-ing feature by feature.
+	if referralH != nil && referralsEnabled {
 		referralH.UserRoutes(authed)
 	}
 
@@ -742,6 +755,10 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 	if credH != nil {
 		credH.Routes(adminG)
 	}
+	// Admin/audit views over the historical channel + campaign + conversion
+	// data. Deliberately mounted even while the programme is suspended — the
+	// operator still has to audit what was already granted, and these are the
+	// re-enable switches.
 	if growthH != nil {
 		growthH.AdminRoutes(adminG)
 	}

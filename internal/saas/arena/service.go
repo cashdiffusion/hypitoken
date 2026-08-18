@@ -99,12 +99,13 @@ func (s *Service) leaderboard(c *gin.Context) {
 		return
 	}
 	metric := db.MetricTokens
-	switch c.Query("metric") {
-	case "requests":
+	if c.Query("metric") == "requests" {
 		metric = db.MetricRequests
-	case "invites":
-		metric = db.MetricInvites
 	}
+	// "invites" is deliberately NOT selectable: the invite programme was farmed
+	// for signup credit (2026-08-08: 168 signups, ~$116) and is suspended, so
+	// the leaderboard must not rank — or advertise — inviting. The per-row
+	// Invites field below stays as a frozen historical count.
 	rows, err := s.DB.Leaderboard(c.Request.Context(), metric, 100)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

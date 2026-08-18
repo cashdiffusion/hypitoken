@@ -13,7 +13,7 @@ import { apiGet, getJWT } from "@/lib/api";
 import type { ArenaEvent, LeaderboardResponse, LeaderRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type Metric = "tokens" | "requests" | "invites";
+type Metric = "tokens" | "requests";
 
 export default function LeaderboardPage() {
   const { t } = useTranslation();
@@ -176,7 +176,6 @@ function MetricToggle({ metric, onChange }: { metric: Metric; onChange: (m: Metr
   const opts: { key: Metric; label: string }[] = [
     { key: "tokens", label: t("arena.metricTokens") },
     { key: "requests", label: t("arena.metricRequests") },
-    { key: "invites", label: t("arena.metricInvites") },
   ];
   return (
     <div className="glass inline-flex rounded-lg p-1">

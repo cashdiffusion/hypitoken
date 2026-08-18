@@ -1,12 +1,10 @@
-import { Activity, ArrowUpRight, Gauge, Gift, KeyRound, Pencil, Wallet } from "lucide-react";
-import { AnimatePresence } from "motion/react";
+import { Activity, ArrowUpRight, Gauge, KeyRound, Pencil, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { NicknameDialog } from "@/components/app/nickname-dialog";
 import { CountUp, GlassPanel, PageHeader, StatTile } from "@/components/app/page-primitives";
 import { TermsNotice } from "@/components/app/terms-notice";
-import { WelcomeBonus } from "@/components/app/welcome-bonus";
 import { SpotlightCard } from "@/components/landing/interactions";
 import { Reveal, RevealItem, RevealStagger } from "@/components/landing/reveal";
 import { useAuth } from "@/hooks/use-auth";
@@ -25,8 +23,6 @@ export default function DashboardPage() {
     wsList.find((w) => w.type === "enterprise") ??
     wsList.find((w) => w.type === "personal") ??
     wsList[0];
-  const location = useLocation();
-  const navigate = useNavigate();
   const [tx, setTx] = useState<WalletTx[]>([]);
   const [tokens, setTokens] = useState<UserToken[]>([]);
   // Account usage summary — the source of truth for lifetime spend. We pull it
@@ -38,23 +34,6 @@ export default function DashboardPage() {
   );
   const [greet, setGreet] = useState<Greeting | null>(null);
   const [nickOpen, setNickOpen] = useState(false);
-
-  // Welcome overlay: register.tsx routes here right after a brand-new signup
-  // with either `state.welcomeBonus` (credited USD → celebration) or
-  // `state.fraud` (suspected repeat device → "bonus withheld" notice). Capture
-  // once, then strip the history state so a refresh/back-nav never replays it.
-  const [welcome, setWelcome] = useState<{ bonus: number; fraud: boolean } | null>(() => {
-    const st = location.state as { welcomeBonus?: number; fraud?: boolean } | null;
-    const bonus = typeof st?.welcomeBonus === "number" && st.welcomeBonus > 0 ? st.welcomeBonus : 0;
-    const fraud = st?.fraud === true;
-    return bonus > 0 || fraud ? { bonus, fraud } : null;
-  });
-  useEffect(() => {
-    const st = location.state as { welcomeBonus?: number; fraud?: boolean } | null;
-    if (st?.welcomeBonus || st?.fraud) {
-      navigate(location.pathname, { replace: true, state: null });
-    }
-  }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
     apiGet<{ transactions: WalletTx[] }>("/billing/transactions").then((r) =>
@@ -76,15 +55,6 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       <TermsNotice />
-      <AnimatePresence>
-        {welcome && (
-          <WelcomeBonus
-            amount={welcome.bonus}
-            fraud={welcome.fraud}
-            onDismiss={() => setWelcome(null)}
-          />
-        )}
-      </AnimatePresence>
       <PageHeader
         eyebrow={greetLine(t)}
         title={
@@ -119,18 +89,6 @@ export default function DashboardPage() {
       )}
 
       <NicknameDialog open={nickOpen} onOpenChange={setNickOpen} />
-
-      <Reveal>
-        <Link
-          to="/app/invite"
-          viewTransition
-          className="group flex items-center gap-3 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm transition-colors hover:bg-primary/10"
-        >
-          <Gift className="h-5 w-5 shrink-0 text-primary" />
-          <span className="flex-1 text-foreground">{t("dashboard.inviteCta")}</span>
-          <ArrowUpRight className="h-4 w-4 shrink-0 text-primary transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-        </Link>
-      </Reveal>
 
       <RevealStagger className="grid gap-4 md:grid-cols-3">
         <RevealItem className="flex">

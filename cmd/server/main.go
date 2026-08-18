@@ -232,6 +232,15 @@ func main() {
 			Username: cfg.SaaS.SMTP.Username, Password: cfg.SaaS.SMTP.Password,
 			From: cfg.SaaS.SMTP.From, UseTLS: cfg.SaaS.SMTP.UseTLS,
 		}, cfg.SaaS.SiteName)
+
+		// Hourly PRAGMA quick_check, plus escalation of any corruption error
+		// that surfaces from live traffic. On 2026-08-18 saas.db developed
+		// page corruption and nothing raised it: the server kept billing
+		// against a broken b-tree for ~20 minutes, dropping every charge,
+		// until a human noticed by failing to log in. Detection was the gap,
+		// not the corruption itself.
+		go saasDB.RunIntegrityChecks(refresherCtx, saasdb.DefaultIntegrityInterval,
+			integrityAlerter(mailer, cfg.SaaS.SiteName, cfg.SaaS.AdminEmail))
 		issuer := saasauth.NewIssuer(cfg.SaaS.JWTSecret, cfg.SaaS.JWTTTL)
 
 		freeReg := true
@@ -239,7 +248,20 @@ func main() {
 			freeReg = *cfg.SaaS.FreeRegister
 		}
 		authH := saasauth.NewHandler(saasDB, issuer, mailer, cfg.SaaS.SiteName, freeReg)
-		if cfg.SaaS.SignupBonusUSD != nil {
+		// referralsOn is the master switch for the whole invite / referral /
+		// channel-attribution programme, the welcome credit included. Default
+		// false (config.ApplyDefaults) — suspended after the 2026-08-08 farming
+		// incident (168 throwaway signups, ~$116 drained via invite fission).
+		//
+		// It gates the welcome credit deliberately: signup_bonus_usd is an OLD
+		// key that a deployed config.yaml may already pin to a positive value,
+		// so keying the grant off that alone would keep paying until somebody
+		// hand-edited prod config. referrals_enabled cannot exist in any config
+		// written before this build, so it is false everywhere on rollout and
+		// shipping the binary is by itself enough to stop the grant. Turning the
+		// programme back on is then one deliberate edit.
+		referralsOn := cfg.SaaS.ReferralsEnabled != nil && *cfg.SaaS.ReferralsEnabled
+		if referralsOn && cfg.SaaS.SignupBonusUSD != nil {
 			authH.TrialBonusUSD = *cfg.SaaS.SignupBonusUSD
 		}
 		tokensH := tokens.New(saasDB)
@@ -298,14 +320,40 @@ func main() {
 			EmailDomainThreshold: cfg.SaaS.SignupFraud.EmailDomainThreshold,
 			DisposableDomains:    cfg.SaaS.SignupFraud.DisposableDomains,
 		})
-		// authH.Referral is set below to the referral service, which composes
-		// growthSvc (personal invite codes first, then admin marketing channels).
+		// authH.Referral is set below to the referral service (which composes
+		// growthSvc: personal invite codes first, then admin marketing channels)
+		// — but only while the referral programme is enabled. growthSvc itself
+		// is always constructed: the admin Growth tab reads its historical
+		// channel/conversion data through the same instance.
 
-		// Analytics (site-wide visitor behaviour). Self-contained module: owns
-		// its own two tables (web_sessions, web_events from migration v7) and
-		// only needs a *sql.DB. Captures EVERY landing-page visitor's first
-		// action / dwell / flow / source, surfaced in the admin Growth tab.
-		analyticsSvc := analytics.New(saasDB.DB)
+		// Analytics (site-wide visitor behaviour). Captures EVERY landing-page
+		// visitor's first action / dwell / flow / source, surfaced in the
+		// admin Growth tab.
+		//
+		// It lives in its OWN database file, not saas.db. This is the highest
+		// write rate and the lowest value data in the product — pageviews and
+		// dwell pings — and on 2026-08-18 it shared a WAL with the wallet when
+		// that file corrupted. Separating them means a damaged tracking table
+		// can no longer stop billing, and the ledger's WAL is no longer
+		// churning on traffic nobody would pay to recover. Falls back to the
+		// shared handle if the dedicated file can't be opened: losing metrics
+		// is not a reason to fail startup.
+		analyticsPath := filepath.Join(filepath.Dir(cfg.SaaS.DBPath), analytics.DefaultFileName)
+		analyticsSvc, err := analytics.Open(analyticsPath)
+		if err != nil {
+			log.Warnf("analytics: cannot open %s (%v) — falling back to the shared saas.db", analyticsPath, err)
+			analyticsSvc = analytics.New(saasDB.DB)
+		} else {
+			log.Infof("analytics: tracking database at %s", analyticsPath)
+			// One-time move of history out of saas.db. No-op once populated;
+			// the source tables stay put until a later release drops them.
+			importCtx, importCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			if err := analyticsSvc.ImportFrom(importCtx, saasDB.DB); err != nil {
+				log.Warnf("analytics: importing history from saas.db failed: %v", err)
+			}
+			importCancel()
+			saasShutdown = append(saasShutdown, func() { _ = analyticsSvc.Close() })
+		}
 
 		// Arena (public leaderboard + real-time "Agent office"). Self-contained:
 		// owns user_profiles (migration v10) via the DB layer, fans billing
@@ -319,9 +367,24 @@ func main() {
 		// admin-channel fallback. It becomes the auth handler's referral granter
 		// (personal invite codes first, growth channels second) and gift
 		// auto-claimer; the adapter calls it to release deferred inviter rewards.
+		//
+		// The programme is SUSPENDED by default (referrals_enabled, default
+		// false): it was farmed on 2026-08-08 — 168 throwaway signups drained
+		// ~$116 through invite fission. When off we still construct the service,
+		// but nothing on the granting path is wired to it: no invite/channel
+		// bonus, no milestone tier, no conversion row, and the user-facing
+		// routes are not mounted (see saasadapter.Mount). The admin/audit routes
+		// and every table stay live so the operator can review what was granted.
 		referralSvc := referral.New(saasDB, mailer, growthSvc, cfg.SaaS.SiteName, cfg.SaaS.SiteURL)
+		// The sweeper runs regardless: it refunds EXPIRED gift escrow back to the
+		// sender's wallet. It grants nothing new, and killing it would strand
+		// real user money in gift_cards rows forever.
 		referralSvc.StartSweeper(refresherCtx)
-		authH.Referral = referralSvc
+		if referralsOn {
+			authH.Referral = referralSvc
+		}
+		// Gift auto-claim stays wired: gifts are user-funded transfers, not
+		// signup credit, so already-sent gifts must still be able to land.
 		authH.GiftClaimer = referralSvc
 		workspaceH := saasworkspace.New(saasDB, mailer, cfg.SaaS.SiteURL, cfg.SaaS.SiteName)
 
@@ -346,7 +409,12 @@ func main() {
 			adapter.MaxOverdraftUSD = *cfg.SaaS.MaxOverdraftUSD
 		}
 		adapter.Arena = arenaSvc
-		adapter.Referral = referralSvc
+		// Deferred inviter payout (reward_on=first_spend). Left nil while the
+		// programme is suspended, otherwise conversions recorded before the
+		// shutdown would keep paying out on the invitee's first spend.
+		if referralsOn {
+			adapter.Referral = referralSvc
+		}
 		s.SetSaaS(adapter)
 
 		// Mount /api/v2/* on every gin engine the server hosts. Both Claude
@@ -374,7 +442,7 @@ func main() {
 			return true, claims.Role == "admin"
 		}
 		for _, h := range s.GinEngines() {
-			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH, referralSvc, workspaceH, supportSvc)
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH, referralSvc, workspaceH, supportSvc, referralsOn)
 			if spaFS != nil {
 				saasadapter.MountSPA(h, spaFS)
 			}
@@ -674,4 +742,24 @@ func loadKeyFile(s string) (string, error) {
 		return strings.TrimSpace(string(data)), nil
 	}
 	return s, nil
+}
+
+// integrityAlerter returns the handler that notifies the operator when the
+// SaaS database reports corruption. A nil-safe no-op when no admin address is
+// configured — the error-level log line still lands either way.
+//
+// Mail is the right channel here despite being slow: the failure is rare,
+// needs a human, and the alternative (only a log line) is exactly what let the
+// 2026-08-18 incident run unnoticed among thousands of ordinary request lines.
+func integrityAlerter(mailer mail.Mailer, siteName, adminEmail string) func(saasdb.IntegrityAlert) {
+	to := strings.TrimSpace(adminEmail)
+	if to == "" || mailer == nil {
+		return nil
+	}
+	return func(a saasdb.IntegrityAlert) {
+		subject, html, text := mail.DatabaseAlertEmail(siteName, a.Source, a.Detail, a.At.Format(time.RFC3339))
+		if err := mailer.Send(to, subject, html, text); err != nil {
+			log.Warnf("saas-db: could not mail integrity alert to %s: %v", to, err)
+		}
+	}
 }

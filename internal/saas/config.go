@@ -54,9 +54,30 @@ type Config struct {
 
 	// SignupBonusUSD is the trial credit granted to every new user who did NOT
 	// arrive through a marketing channel (?ref=). Channel signups get the
-	// channel's own bonus instead (see internal/saas/growth). Default 1.0; set
-	// to 0 to disable the default trial credit.
+	// channel's own bonus instead (see internal/saas/growth).
+	//
+	// Default 0 — the welcome-credit programme is SUSPENDED. It was farmed:
+	// the 2026-08-08 incident burned ~$116 across 168 throwaway signups. The
+	// key is kept so an existing production config.yaml keeps parsing.
+	//
+	// It is subordinate to ReferralsEnabled: an amount set here is granted only
+	// while referrals_enabled is true. That matters on rollout — a deployed
+	// config may already pin signup_bonus_usd to a positive value, and this
+	// suspension must take effect from the binary alone, with no config edit.
 	SignupBonusUSD *float64 `yaml:"signup_bonus_usd"`
+
+	// ReferralsEnabled is the master switch for the whole invite / referral /
+	// marketing-channel-attribution programme: personal invite codes, the
+	// two-sided invite bonus, milestone tiers, ?ref= channel attribution and
+	// its public visit/dwell beacons.
+	//
+	// Default FALSE — suspended after the 2026-08-08 farming incident (168
+	// signups, ~$116 granted through invite fission). Off means the user-facing
+	// routes are not mounted and registration grants nothing and records no
+	// conversion; the packages, tables, ledger history and the admin-side
+	// historical/audit routes stay intact so what was already granted can be
+	// audited. Set to true to re-enable.
+	ReferralsEnabled *bool `yaml:"referrals_enabled"`
 
 	// SignupFraud tunes the signup anti-abuse check that withholds the welcome
 	// bonus from a device/network that already registered.
@@ -239,8 +260,13 @@ func (c *Config) ApplyDefaults(configDir string) {
 		c.FreeRegister = &t
 	}
 	if c.SignupBonusUSD == nil {
-		v := 1.0
+		// Suspended programme: no welcome credit unless an operator opts back in.
+		v := 0.0
 		c.SignupBonusUSD = &v
+	}
+	if c.ReferralsEnabled == nil {
+		f := false
+		c.ReferralsEnabled = &f
 	}
 	if c.FallbackCNYPerUSD <= 0 {
 		c.FallbackCNYPerUSD = 7.2

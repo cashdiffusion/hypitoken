@@ -23,6 +23,9 @@ import (
 // instance; it is safe for concurrent use (all state lives in SQLite).
 type Service struct {
 	db *sql.DB
+	// owned is true when Open created the handle (its own analytics.db) and
+	// false when New wrapped a caller's — only the former may Close it.
+	owned bool
 }
 
 // New builds the analytics service over an open SQLite handle.

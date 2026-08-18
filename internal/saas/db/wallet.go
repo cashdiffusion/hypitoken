@@ -131,6 +131,13 @@ func (db *DB) ChargeWithFloor(ctx context.Context, userID int64, kind string, am
 // (actually-charged) amount is returned so the request log stays in lockstep
 // with the ledger. maxOverdraftUSD <= 0 disables the floor.
 func (db *DB) ChargeWorkspaceWithFloor(ctx context.Context, workspaceID, userID int64, kind string, amountUSD float64, ref, note string, maxOverdraftUSD float64, meta ChargeMeta) (newBal float64, charged float64, err error) {
+	// Billing is the busiest write path and therefore the first place a
+	// damaged file shows up — on 2026-08-18 it produced thousands of
+	// "charge failed: database disk image is malformed" warnings that nothing
+	// escalated. Report ignores every ordinary error; a corruption one wakes
+	// the operator. See integrity.go.
+	defer func() { db.Report(err) }()
+
 	if amountUSD <= 0 {
 		bal, gerr := db.GetWorkspaceBalance(ctx, workspaceID)
 		return bal, 0, gerr

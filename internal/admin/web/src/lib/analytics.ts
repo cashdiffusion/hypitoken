@@ -1,15 +1,14 @@
-// Site-wide visitor-behaviour tracking (client side). Where lib/attribution.ts
-// only follows ?ref= channel visitors, this captures EVERY visitor: a pageview
-// on first load and on each SPA route change, explicit CTA clicks (via a
-// delegated data-track listener), and total dwell time beaconed on page hide.
+// Site-wide visitor-behaviour tracking (client side). Captures EVERY visitor: a
+// pageview on first load and on each SPA route change, explicit CTA clicks (via
+// a delegated data-track listener), and total dwell time beaconed on page hide.
 //
 // Pairs with the backend internal/saas/analytics module. Everything here is
 // best-effort and wrapped so a tracking failure can never break the page. It
-// deliberately reuses attribution's anonymous visitor id when present so a
-// single visitor isn't double-counted across the two systems.
+// still reuses the legacy channel-attribution visitor id when a browser already
+// carries one, so a returning visitor isn't counted twice.
 
-const AN_VID_KEY = "hypi.an_vid"; // our own visitor id (fallback when no ?ref= vid exists)
-const REF_VID_KEY = "hypi.ref_vid"; // attribution's visitor id — reused when present
+const AN_VID_KEY = "hypi.an_vid"; // our own visitor id (the default)
+const REF_VID_KEY = "hypi.ref_vid"; // legacy attribution visitor id — reused when already stored
 const SID_KEY = "hypi.an_sid"; // per-tab session id (sessionStorage: new tab/session = new id)
 
 const TRACK_EVENT = "/api/v2/track/event";
@@ -37,8 +36,9 @@ function randID(prefix: string): string {
   return `${prefix}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 }
 
-// visitor id is stable across sessions (localStorage). Prefer attribution's id
-// so a ?ref= visitor and a plain visitor are the same person to both systems.
+// visitor id is stable across sessions (localStorage). Prefer a legacy
+// attribution id when one is already stored so a returning browser keeps its
+// identity instead of being counted as a brand-new visitor.
 function getVisitorID(): string {
   try {
     const ref = localStorage.getItem(REF_VID_KEY);
@@ -177,8 +177,8 @@ function installActionListener(): void {
 }
 
 // startDwellTracking pings accumulated on-page time periodically and once more
-// on page-hide. Mirrors attribution.startDwellTracking — visibilitychange→hidden
-// + pagehide are the reliable "session end" signals on mobile and desktop.
+// on page-hide — visibilitychange→hidden and pagehide are the reliable
+// "session end" signals on mobile and desktop.
 function startDwellTracking(): void {
   const start = Date.now();
   const elapsed = () => Date.now() - start;

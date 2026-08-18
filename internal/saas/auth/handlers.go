@@ -16,8 +16,13 @@ import (
 
 // ReferralGranter is the optional growth-module seam. After a user registers
 // through a ?ref=<channel> link, it credits the channel's configured signup
-// bonus and records the conversion. nil when the growth module is disabled;
-// implemented by *saas/growth.Service. Defined here (not imported from growth)
+// bonus and records the conversion. nil when the growth module is disabled —
+// which is the default: the invite / referral / attribution programme is
+// SUSPENDED after the 2026-08-08 farming incident (168 throwaway signups,
+// ~$116 granted), so main.go leaves this nil unless saas.referrals_enabled is
+// explicitly turned on. Nil means no channel bonus, no invite bonus, no
+// milestone grant and no conversion row. Implemented by *saas/growth.Service;
+// defined here (not imported from growth)
 // so the auth package keeps no dependency on growth — wiring is one-way, set by
 // main.go. Its error is logged, never blocks registration.
 type ReferralGranter interface {
@@ -48,8 +53,9 @@ type Handler struct {
 	FreeRegister bool
 	CodeTTL      time.Duration
 
-	// Referral is optional; when set, signups carrying a ?ref= channel get the
-	// channel's bonus. Left nil disables attribution entirely.
+	// Referral is optional; when set, signups carrying a ?ref= channel or a
+	// personal invite code get the corresponding bonus. Left nil disables
+	// attribution entirely — the default, while the programme is suspended.
 	Referral ReferralGranter
 
 	// GiftClaimer is optional; when set, a freshly-registered or newly-verified
@@ -58,7 +64,10 @@ type Handler struct {
 
 	// TrialBonusUSD is the welcome credit granted to every new user who did NOT
 	// arrive through a marketing channel. Channel signups are credited by the
-	// growth module instead. Zero disables the default trial credit.
+	// growth module instead. Zero disables the default trial credit, and zero is
+	// what it is left at while the programme is suspended — the caller only
+	// fills it in when saas.referrals_enabled is on (see cmd/server/main.go),
+	// the programme having been farmed for signup credit on 2026-08-08.
 	TrialBonusUSD float64
 
 	codeLimiter *codeRateLimiter
@@ -185,6 +194,8 @@ func (h *Handler) register(c *gin.Context) {
 		}
 	}
 	// Default trial credit for organic signups (no channel), unless flagged.
+	// Dormant by default: TrialBonusUSD is 0 while the welcome-credit programme
+	// is suspended, so this grants nothing and "signup_bonus" comes back as 0.
 	if !channelMatched && !fraud && h.TrialBonusUSD > 0 {
 		if _, berr := h.DB.AddBalance(c.Request.Context(), u.ID, db.TxKindAdjust, h.TrialBonusUSD, "signup_bonus:trial", "新用户试用赠额", true); berr != nil {
 			log.Warnf("register: trial bonus for user %d failed: %v", u.ID, berr)

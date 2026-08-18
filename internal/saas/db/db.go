@@ -18,6 +18,11 @@ import (
 type DB struct {
 	*sql.DB
 	path string
+
+	// corrupt tracks integrity state: the latch set once corruption is seen,
+	// the alert cooldown, and the operator-notification handler. See
+	// integrity.go.
+	corrupt corruptState
 }
 
 // Open opens (or creates) the SQLite file at path with WAL enabled and runs

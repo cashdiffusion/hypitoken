@@ -7,7 +7,6 @@ import { TitleWatcher } from "@/components/title-watcher";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { AuthProvider } from "@/hooks/use-auth";
 import { initWebAnalytics, pathToPage, trackPageview } from "@/lib/analytics";
-import { initAttribution } from "@/lib/attribution";
 import HomePage from "@/routes/home";
 
 // Every route except the landing page is code-split. Before this, all of them
@@ -22,7 +21,6 @@ const DashboardPage = lazy(() => import("@/routes/dashboard"));
 const DocsIndex = lazy(() => import("@/routes/docs").then((m) => ({ default: m.DocsIndex })));
 const DocsLayout = lazy(() => import("@/routes/docs"));
 const ForgotPasswordPage = lazy(() => import("@/routes/forgot-password"));
-const InvitePage = lazy(() => import("@/routes/invite"));
 const JoinPage = lazy(() => import("@/routes/join"));
 const LeaderboardPage = lazy(() => import("@/routes/leaderboard"));
 const LoginPage = lazy(() => import("@/routes/login"));
@@ -38,11 +36,9 @@ const UsagePage = lazy(() => import("@/routes/usage"));
 const WorkspacePage = lazy(() => import("@/routes/workspace"));
 
 export default function App() {
-  // Capture marketing attribution (?ref=) and start site-wide visitor-behaviour
-  // tracking on first load. Both best-effort and self-contained — see
-  // lib/attribution and lib/analytics.
+  // Start site-wide visitor-behaviour tracking on first load. Best-effort and
+  // self-contained — see lib/analytics.
   useEffect(() => {
-    initAttribution();
     initWebAnalytics();
   }, []);
 
@@ -91,7 +87,6 @@ export default function App() {
               >
                 <Route index element={<DashboardPage />} />
                 <Route path="leaderboard" element={<LeaderboardPage />} />
-                <Route path="invite" element={<InvitePage />} />
                 <Route path="tokens" element={<TokensPage />} />
                 <Route path="workspace" element={<WorkspacePage />} />
                 <Route path="billing" element={<BillingPage />} />
