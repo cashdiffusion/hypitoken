@@ -380,3 +380,40 @@ func TestStatsToleratesRealDurationRow(t *testing.T) {
 		t.Fatal("Stats returned no channels")
 	}
 }
+
+// Thirty-one production rows hold a TEXT token name in channel_visits'
+// first_seen column — a column-order bug in a long-gone version of the insert
+// — which makes strftime return NULL and used to 500 the whole admin tab on a
+// plain string Scan. Timeseries must skip those rows and still report the
+// well-formed ones.
+func TestTimeseriesToleratesNonNumericFirstSeen(t *testing.T) {
+	store, svc := openTestDB(t)
+	ctx := context.Background()
+
+	if _, err := svc.CreateChannel(ctx, growth.ChannelParams{
+		Slug: "mixed", Name: "Mixed", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := svc.RecordVisit(ctx, "mixed", "good-visitor", ""); err != nil {
+		t.Fatalf("record visit: %v", err)
+	}
+	// Reproduce the corrupt row shape directly; nothing in the API can write it.
+	if _, err := store.ExecContext(ctx,
+		`INSERT INTO channel_visits (slug, visitor_id, first_seen, last_seen, duration_ms, created_at)
+		 VALUES ('mixed', 'broken-visitor', 'claudecode-mac', 0, 0, 0)`); err != nil {
+		t.Fatalf("seed broken row: %v", err)
+	}
+
+	points, err := svc.Timeseries(ctx, 14)
+	if err != nil {
+		t.Fatalf("Timeseries with a TEXT first_seen row = %v, want nil", err)
+	}
+	var total int64
+	for _, p := range points {
+		total += p.Visitors
+	}
+	if total != 1 {
+		t.Fatalf("visitors across the window = %d, want 1 (the well-formed row only)", total)
+	}
+}

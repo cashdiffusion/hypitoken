@@ -350,6 +350,12 @@ func (s *Service) Timeseries(ctx context.Context, days int) ([]*DailyPoint, erro
 	}
 	from := now.Add(-time.Duration(days) * 24 * time.Hour).Unix()
 
+	// day is scanned as NullString because strftime returns NULL for a row
+	// whose first_seen is not a number, and 31 production rows hold a TEXT
+	// token name there — a column-order bug in some long-gone version of the
+	// insert. Those rows carry no recoverable timestamp, so they simply do
+	// not land in any bucket; scanning into a plain string instead made the
+	// whole admin tab 500.
 	visitRows, err := s.db.QueryContext(ctx,
 		`SELECT strftime('%Y-%m-%d', first_seen, 'unixepoch') AS day, COUNT(*)
 		   FROM channel_visits WHERE first_seen >= ? GROUP BY day`, from)
@@ -357,13 +363,13 @@ func (s *Service) Timeseries(ctx context.Context, days int) ([]*DailyPoint, erro
 		return nil, err
 	}
 	for visitRows.Next() {
-		var day string
+		var day sql.NullString
 		var n int64
 		if err := visitRows.Scan(&day, &n); err != nil {
 			visitRows.Close()
 			return nil, err
 		}
-		if i, ok := idx[day]; ok {
+		if i, ok := idx[day.String]; ok {
 			points[i].Visitors = n
 		}
 	}
@@ -376,13 +382,13 @@ func (s *Service) Timeseries(ctx context.Context, days int) ([]*DailyPoint, erro
 		return nil, err
 	}
 	for signupRows.Next() {
-		var day string
+		var day sql.NullString // same NULL-tolerance as the visit rows above
 		var n int64
 		if err := signupRows.Scan(&day, &n); err != nil {
 			signupRows.Close()
 			return nil, err
 		}
-		if i, ok := idx[day]; ok {
+		if i, ok := idx[day.String]; ok {
 			points[i].Signups = n
 		}
 	}
