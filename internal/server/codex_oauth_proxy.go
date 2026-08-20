@@ -252,31 +252,68 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		// into chat.completion.chunk. A truncated upstream (no terminal event)
 		// is surfaced in the request log instead of looking like a clean stream
 		// end, on both paths.
-		writeSSEResponseHeaders(c, resp)
 		// Branching here rather than through a relay closure is deliberate:
 		// capturing resp in a closure makes bodyclose lose track of the
 		// unconditional Close after this switch and report a false leak.
-		var sawTerminal bool
+		var sawTerminal, wroteAny bool
 		var rerr error
-		var shed shedSignal
+		var res codexStreamResult
 		if isChat {
+			// The chat bridge has no lazy-commit path, so its headers go out
+			// eagerly and a shed there can only ever be demoted, never
+			// withheld. Treat it as already-written for the failover check.
+			writeSSEResponseHeaders(c, resp)
 			sawTerminal, rerr = streamCodexAsChatCompletions(c, resp.Body, &counts, model, chatStreamWantsUsage(body))
+			wroteAny = true
 		} else {
-			sawTerminal, shed, rerr = streamSSECodexBackend(c, resp, &counts)
+			// Lazy commit: headers are written by the relay immediately before
+			// its first byte, so a shed that arrives before any output leaves
+			// the response uncommitted and the failover below is invisible to
+			// the client.
+			res = streamSSECodexBackend(c, resp, &counts, func() { writeSSEResponseHeaders(c, resp) })
+			sawTerminal, wroteAny, rerr = res.sawTerminal, res.wroteAny, res.err
 		}
-		// Upstream shed the turn inside a 200 stream. The demotion above keeps
-		// the CLI retrying instead of ending the session, which is exactly why
-		// this needs saying out loud: the client recovers, so without a log line
-		// nothing records that upstream refused to serve — and a capacity shed
-		// otherwise reaches the operator only as a turn that finished with no
-		// usage, which reads as a broken relay rather than a busy model.
-		if shed.shed {
-			log.Warnf("codex oauth: %s shed the turn mid-stream (capacity=%v); client sees a retryable error", a.ID, shed.capacity)
-			if shed.capacity {
+		// A shed that landed after output started could only be demoted. Say so:
+		// the client recovers, so without a log line nothing records that
+		// upstream refused to serve, and the turn otherwise reaches the operator
+		// as one that finished with no usage — which reads as a broken relay
+		// rather than a busy account.
+		if res.demoted.shed {
+			log.Warnf("codex oauth: %s shed the turn after output started (capacity=%v); client sees a retryable error", a.ID, res.demoted.capacity)
+			if res.demoted.capacity {
 				streamErr = "upstream shed the turn (capacity)"
 			} else {
 				streamErr = "upstream shed the turn (quota/rate)"
 			}
+		}
+		if !sawTerminal && !wroteAny {
+			// Nothing reached the client yet, so this turn can still be rescued
+			// on another credential without the caller ever knowing.
+			_ = resp.Body.Close()
+			if res.shed != "" {
+				// Upstream shed this turn for capacity/quota inside an
+				// otherwise-200 stream. Credential health is deliberately NOT
+				// touched: production shows sheds are account-and-moment
+				// scoped, and cooling the account would take all of its other
+				// models offline over a condition that clears on its own.
+				log.Warnf("codex oauth: %s shed the request before any output (attempt %d, %s): %s — retrying on another credential",
+					a.ID, attempts, time.Since(start).Round(time.Millisecond), res.shed)
+				return true, false
+			}
+			if isClientDisconnect(ctx, rerr) {
+				a.MarkClientCancel("client canceled before first event")
+				s.emitLog(requestlog.Record{
+					Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.ProviderOpenAI,
+					AuthID: a.ID, AuthLabel: a.Label, AuthKind: "oauth", Model: model,
+					Stream: stream, Path: path, Status: 499, Attempts: attempts,
+					DurationMs: time.Since(start).Milliseconds(),
+					Error:      "client canceled before first event",
+				})
+				return false, true
+			}
+			log.Warnf("codex oauth: stream broke before any output via %s (attempt %d, %s): %v — retrying on another credential",
+				a.ID, attempts, time.Since(start).Round(time.Millisecond), rerr)
+			return true, false
 		}
 		if !sawTerminal {
 			// A stream that ends without a terminal event is only an upstream
@@ -510,87 +547,171 @@ func codexTerminalEvent(payload []byte) bool {
 	return false
 }
 
+// codexStreamResult reports the outcome of a Codex backend SSE relay so the
+// caller can choose between a transparent retry (nothing reached the client
+// yet) and a logged give-up (bytes already committed downstream — from that
+// point the exchange is uninterruptible).
+type codexStreamResult struct {
+	sawTerminal bool  // a response.{completed,failed,...} event was relayed
+	wroteAny    bool  // at least one byte was committed to the client
+	err         error // underlying read error when the stream broke early
+	// shed: non-empty when a capacity/quota frame arrived BEFORE any output and
+	// was withheld, leaving failover clean.
+	shed string
+	// demoted: a shed that arrived after output had started, so it could only
+	// be demoted on the way out rather than withheld.
+	demoted shedSignal
+}
+
 // streamSSECodexBackend is the Codex backend SSE passthrough. The format
 // differs from OpenAI's API-key response: events carry JSON payloads
 // structured as `response.completed` / `response.output_item.done` etc.
 // Usage arrives inside the `response.completed` event as
 // `response.usage.{input_tokens, output_tokens, input_tokens_details.cached_tokens}`.
 //
-// Beyond verbatim passthrough it (a) emits an SSE keepalive comment line during
-// silent gaps so intermediaries (Caddy/Cloudflare/the client's own idle timeout)
-// don't cut the long-lived stream while the model is mid-think, and (b) tracks
-// whether the terminal event arrived, so a truncated upstream is logged instead
-// of being passed off to the client as a clean end-of-stream (the root cause of
-// the "stream disconnected before completion" reports). Returns whether a
-// terminal event was observed.
+// Beyond verbatim passthrough it:
+//
+//   - emits an SSE keepalive comment during silent gaps so intermediaries
+//     (Caddy/Cloudflare/the client's own idle timeout) don't cut the long-lived
+//     stream while the model is mid-think;
+//   - tracks whether the terminal event arrived, so a truncated upstream is
+//     logged instead of being passed off as a clean end-of-stream (the root
+//     cause of the "stream disconnected before completion" reports);
+//   - withholds a pre-output capacity/quota shed so the caller can fail over to
+//     another credential invisibly.
+//
+// That last one is the important one. Upstream sheds load as an error frame
+// inside an otherwise-200 stream, and in production ~16% of Codex turns come
+// back that way — but the rate is wildly uneven across accounts (one account
+// served 135 turns with zero sheds in the same window another shed 27% of 97).
+// So a shed is an account-and-moment property, not the model-wide one
+// cc-core/codexerr's doc assumes, and moving the turn to another credential
+// genuinely rescues it. Demotion — which only downgrades the CLI's verdict from
+// session-ending to retryable — remains the fallback for a shed that lands
+// after output has already started.
 //
 // gin's ResponseWriter is not goroutine-safe, so the keepalive goroutine and the
 // read loop share one mutex around every Write/Flush.
-func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Counts) (sawTerminal bool, shed shedSignal, streamErr error) {
+func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Counts, commit func()) codexStreamResult {
 	flusher, _ := c.Writer.(http.Flusher)
 	reader := newLineReader(resp.Body)
+	out := codexStreamResult{}
 
-	// next supplies framing (raw lines) + usage + terminal detection; the shared
-	// cc-core/stream.Relay owns keepalive + write serialization. commit=nil — the
-	// caller commits headers eagerly on this path (verbatim passthrough).
-	next := func() (out []byte, terminal bool, err error) {
-		line, rerr := reader.readLine()
-		if len(line) > 0 {
-			trim := bytes.TrimRight(line, "\r\n")
-			if bytes.HasPrefix(trim, []byte("data:")) {
-				payload := bytes.TrimSpace(trim[5:])
-				if len(payload) > 0 && payload[0] == '{' {
-					counts.Add(extractCodexBackendUsageFromJSON(payload))
+	// shedding latches once a capacity/quota error frame is seen before any
+	// output has reached the client. From that point the rest of the stream is
+	// withheld — including the response.failed that follows — so Relay ends with
+	// SawTerminal=false and WroteAny=false and the caller's pre-output failover
+	// fires. Without the latch the error frame itself counts as the first output
+	// and permanently forecloses failover.
+	shedding := false
+	sentAny := false // whether we've handed Relay any bytes yet
+	// An SSE event is "event: X\ndata: {…}\n\n", and the verdict lives in the
+	// data line — but the event line arrives first. Releasing it immediately
+	// would commit the response before we know whether the frame is one we mean
+	// to withhold, so an event line is held until its data line is classified
+	// and then emitted together with it.
+	var held []byte
 
-					// Upstream sheds capacity as an in-band error frame inside
-					// an otherwise-200 stream. Forwarded verbatim it reaches the
-					// CLI as ApiError::ServerOverloaded, which is TERMINAL for
-					// the session ("Selected model is at capacity") — while the
-					// same failure under nearly any other code lands in the
-					// CLI's Retryable arm and is simply backed off. Demote just
-					// those two codes; the message is left untouched, so the
-					// user still sees why. See cc-core/codexerr.
-					//
-					// Unlike CPA-Claude this path cannot instead WITHHOLD the
-					// frame and fail over: the caller commits response headers
-					// eagerly above (writeResponseHeaders before the relay), so
-					// by the time any frame is classified the response is
-					// already committed. Demotion is the whole fix available
-					// here; giving this path lazy commit would be a separate
-					// change.
-					if codexerr.Classify(payload) == codexerr.ClassRetryable {
-						// Record it before rewriting: after demotion the code no
-						// longer says why the turn was refused, and the caller
-						// needs that to tell a shed apart from a broken relay.
-						shed.shed = true
-						if demoted, ok := codexerr.DemoteCapacityCode(payload); ok {
-							shed.capacity = true
-							tail := line[len(trim):]
-							rebuilt := make([]byte, 0, len("data: ")+len(demoted)+len(tail))
-							rebuilt = append(rebuilt, []byte("data: ")...)
-							rebuilt = append(rebuilt, demoted...)
-							rebuilt = append(rebuilt, tail...)
-							line = rebuilt
+	next := func() (emit []byte, terminal bool, err error) {
+		for {
+			line, rerr := reader.readLine()
+			if len(line) > 0 {
+				trim := bytes.TrimRight(line, "\r\n")
+				switch {
+				case bytes.HasPrefix(trim, []byte("event:")):
+					if !shedding {
+						held = append(held[:0], line...)
+					}
+					line = nil
+
+				case bytes.HasPrefix(trim, []byte("data:")):
+					payload := bytes.TrimSpace(trim[5:])
+					if len(payload) > 0 && payload[0] == '{' {
+						counts.Add(extractCodexBackendUsageFromJSON(payload))
+
+						if codexerr.Classify(payload) == codexerr.ClassRetryable {
+							if !sentAny {
+								// Failover is still possible — withhold this
+								// frame and everything after it, including the
+								// held event line and the response.failed that
+								// follows, so nothing commits the response.
+								shedding = true
+								out.shed = truncate(payload, 200)
+								held = nil
+								line = nil
+							} else if demoted, ok := codexerr.DemoteCapacityCode(payload); ok {
+								// Output already started, so the client must be
+								// told something. Demote the two session-ending
+								// capacity codes to one the CLI retries; the
+								// message is left untouched.
+								out.demoted.shed = true
+								out.demoted.capacity = true
+								tail := line[len(trim):]
+								rebuilt := make([]byte, 0, len("data: ")+len(demoted)+len(tail))
+								rebuilt = append(rebuilt, []byte("data: ")...)
+								rebuilt = append(rebuilt, demoted...)
+								rebuilt = append(rebuilt, tail...)
+								line = rebuilt
+							} else {
+								// Quota/rate after output started: forwarded
+								// untouched (the CLI handles those
+								// non-terminally and reads its retry delay off
+								// the original code), but still worth naming.
+								out.demoted.shed = true
+							}
 						}
-					}
+						// ClassFatal frames are forwarded verbatim: retrying
+						// them elsewhere would fail identically, and the client
+						// needs the real reason.
 
-					if codexTerminalEvent(payload) {
-						terminal = true
-					}
+						if codexTerminalEvent(payload) && !shedding {
+							terminal = true
+						}
 
-					// Withhold the pool's state, LAST — usage extraction, error
-					// classification and terminal detection above all read
-					// `payload` (what upstream said). This is the SSE twin of
-					// the WS frame scrub in codex_ws.go.
-					if scrubbed, keep := downstream.ScrubCodexSSELine(line); !keep {
-						line = nil
-					} else {
-						line = scrubbed
+						// Withhold the pool's state, LAST — usage extraction,
+						// error classification and terminal detection above all
+						// read `payload` (what upstream said). This is the SSE
+						// twin of the WS frame scrub in codex_ws.go.
+						//
+						// A dropped data line takes its held `event:` line with
+						// it: emitting an event with no data is malformed SSE.
+						if scrubbed, keep := downstream.ScrubCodexSSELine(line); !keep {
+							line = nil
+							held = nil
+						} else {
+							line = scrubbed
+						}
 					}
 				}
 			}
+
+			if shedding {
+				line = nil
+				held = nil
+				terminal = false
+			}
+
+			// Emit the held event line together with the line that resolved it.
+			switch {
+			case len(line) > 0 && len(held) > 0:
+				emit = append(append(make([]byte, 0, len(held)+len(line)), held...), line...)
+				held = nil
+			case len(line) > 0:
+				emit = line
+			case rerr != nil && len(held) > 0 && !shedding:
+				// Stream ended with an unresolved event line — release it so
+				// nothing is silently dropped.
+				emit, held = held, nil
+			}
+
+			if len(emit) > 0 {
+				sentAny = true
+			}
+			if len(emit) > 0 || rerr != nil {
+				return emit, terminal, rerr
+			}
+			// Nothing to emit yet (a held event line) — keep reading.
 		}
-		return line, terminal, rerr
 	}
 
 	r := ccstream.Relay(c.Writer, func() {
@@ -598,11 +719,15 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 			flusher.Flush()
 		}
 	}, ccstream.RelayOptions{
+		Commit:           commit,
 		KeepaliveIdle:    10 * time.Second,
 		KeepalivePayload: []byte(":\n\n"),
 		Next:             next,
 	})
-	return r.SawTerminal, shed, r.Err
+	out.sawTerminal = r.SawTerminal
+	out.wroteAny = r.WroteAny
+	out.err = r.Err
+	return out
 }
 
 // extractCodexBackendUsageFromJSON reads usage from the ChatGPT Codex

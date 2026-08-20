@@ -57,7 +57,7 @@ func TestStreamSSECodexBackendTruncated(t *testing.T) {
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 
 	var counts usage.Counts
-	if sawTerminal, _, _ := streamSSECodexBackend(c, resp, &counts); sawTerminal {
+	if res := streamSSECodexBackend(c, resp, &counts, nil); res.sawTerminal {
 		t.Error("stream without a terminal event should report sawTerminal=false")
 	}
 	if !strings.Contains(w.Body.String(), "response.output_text.delta") {
@@ -74,7 +74,7 @@ func TestStreamSSECodexBackendCompleted(t *testing.T) {
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 
 	var counts usage.Counts
-	if sawTerminal, _, _ := streamSSECodexBackend(c, resp, &counts); !sawTerminal {
+	if res := streamSSECodexBackend(c, resp, &counts, nil); !res.sawTerminal {
 		t.Error("stream ending in response.completed should report sawTerminal=true")
 	}
 	if !strings.Contains(w.Body.String(), "response.completed") {
@@ -145,53 +145,99 @@ func TestClientCancelIsNotUpstreamTruncation(t *testing.T) {
 	}
 }
 
-// Upstream sheds capacity as an in-band error frame inside an otherwise-200
-// stream. Forwarded verbatim it reaches the CLI as ApiError::ServerOverloaded,
-// which ends the session ("Selected model is at capacity"); under nearly any
-// other code the CLI just backs off and retries. This path commits headers
-// eagerly so it cannot withhold and fail over — demotion is the fix available
-// here.
-func TestStreamSSECodexBackendDemotesCapacityCodes(t *testing.T) {
-	for _, code := range []string{"server_is_overloaded", "slow_down"} {
+// Capacity shed arrives as an in-band `error` frame followed by
+// `response.failed`, inside an otherwise-200 stream. Forwarding the error frame
+// would (a) commit the response, foreclosing failover, and (b) reach the CLI as
+// ApiError::ServerOverloaded, terminal for the session. Withhold it all instead
+// so the caller can retry on another credential invisibly.
+//
+// Production shows this is worth the trouble: ~16% of Codex turns shed, and the
+// rate is account-scoped (one account served 135 turns with zero sheds while
+// another shed 27% of 97 in the same window), so another credential really can
+// serve the turn.
+func TestStreamSSECodexBackendShedsCapacityBeforeOutput(t *testing.T) {
+	for _, code := range []string{"server_is_overloaded", "slow_down", "rate_limit_exceeded"} {
 		t.Run(code, func(t *testing.T) {
 			c, w := newCodexStreamCtx()
 			body := "event: error\n" +
-				`data: {"type":"error","error":{"code":"` + code + `","message":"we are full"}}` + "\n\n"
+				`data: {"type":"error","error":{"code":"` + code + `","message":"nope"}}` + "\n\n" +
+				"event: response.failed\n" +
+				`data: {"type":"response.failed","response":{"error":{"code":"` + code + `"}}}` + "\n\n"
 			resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 
+			committed := false
 			var counts usage.Counts
-			_, _, _ = streamSSECodexBackend(c, resp, &counts)
+			res := streamSSECodexBackend(c, resp, &counts, func() { committed = true })
 
-			out := w.Body.String()
-			if strings.Contains(out, code) {
-				t.Errorf("session-ending code %q must be demoted, got %q", code, out)
+			if committed {
+				t.Error("commit() must not run — the response must stay uncommitted so failover works")
 			}
-			if !strings.Contains(out, "server_error") {
-				t.Errorf("expected the demoted code, got %q", out)
+			if res.wroteAny {
+				t.Error("wroteAny must be false so the caller's pre-output failover fires")
 			}
-			if !strings.Contains(out, "we are full") {
-				t.Errorf("the upstream message must survive verbatim, got %q", out)
+			if res.sawTerminal {
+				t.Error("sawTerminal must be false — the withheld response.failed must not look like a clean end")
+			}
+			if res.shed == "" {
+				t.Error("shed must carry the withheld frame for diagnostics")
+			}
+			if got := w.Body.String(); got != "" {
+				t.Errorf("nothing may reach the client, got %q", got)
 			}
 		})
 	}
 }
 
-// Codes the CLI already retries, and errors that are the request's own fault,
-// must both pass through untouched — the former needs no help, the latter must
-// keep its real reason.
-func TestStreamSSECodexBackendLeavesOtherErrorsAlone(t *testing.T) {
-	for _, frame := range []string{
-		`{"type":"error","error":{"code":"rate_limit_exceeded","message":"limited"}}`,
-		`{"type":"error","error":{"type":"invalid_request_error","code":"content_policy_violation","message":"blocked"}}`,
-	} {
-		c, w := newCodexStreamCtx()
-		resp := &http.Response{Body: io.NopCloser(strings.NewReader("event: error\ndata: " + frame + "\n\n"))}
+// Once output has started there is no failover left, so the frame must be
+// forwarded — but demoted out of the CLI's session-ending code set so it
+// retries instead of giving up. The human-readable message must survive.
+func TestStreamSSECodexBackendDemotesCapacityAfterOutput(t *testing.T) {
+	c, w := newCodexStreamCtx()
+	body := "event: response.output_text.delta\n" +
+		`data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n" +
+		"event: error\n" +
+		`data: {"type":"error","error":{"code":"server_is_overloaded","message":"we are full"}}` + "\n\n"
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 
-		var counts usage.Counts
-		_, _, _ = streamSSECodexBackend(c, resp, &counts)
+	var counts usage.Counts
+	res := streamSSECodexBackend(c, resp, &counts, func() {})
 
-		if out := w.Body.String(); !strings.Contains(out, frame) {
-			t.Errorf("frame must be forwarded verbatim:\n want %q\n  got %q", frame, out)
-		}
+	if !res.wroteAny {
+		t.Fatal("wroteAny must be true — output already started")
+	}
+	if res.shed != "" {
+		t.Error("must not report a pre-output shed once output has started")
+	}
+	if !res.demoted.shed || !res.demoted.capacity {
+		t.Errorf("the post-output shed must be reported for the log; got %+v", res.demoted)
+	}
+	out := w.Body.String()
+	if strings.Contains(out, "server_is_overloaded") {
+		t.Errorf("the session-ending code must be demoted, got %q", out)
+	}
+	if !strings.Contains(out, "server_error") {
+		t.Errorf("expected the demoted code in the output, got %q", out)
+	}
+	if !strings.Contains(out, "we are full") {
+		t.Errorf("the upstream message must survive verbatim, got %q", out)
+	}
+}
+
+// An error that is the request's own fault must pass through untouched, before
+// output or after: retrying it on another credential would fail identically and
+// the client needs the real reason.
+func TestStreamSSECodexBackendLeavesFatalErrorsAlone(t *testing.T) {
+	frame := `{"type":"error","error":{"type":"invalid_request_error","code":"content_policy_violation","message":"blocked"}}`
+	c, w := newCodexStreamCtx()
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader("event: error\ndata: " + frame + "\n\n"))}
+
+	var counts usage.Counts
+	res := streamSSECodexBackend(c, resp, &counts, func() {})
+
+	if res.shed != "" {
+		t.Errorf("a fatal error is not a shed; got %q", res.shed)
+	}
+	if out := w.Body.String(); !strings.Contains(out, frame) {
+		t.Errorf("frame must be forwarded verbatim:\n want %q\n  got %q", frame, out)
 	}
 }

@@ -2,7 +2,6 @@ package server
 
 import (
 	"bufio"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -114,55 +113,5 @@ func TestAPIKeyStreamBillsFromOriginalPayload(t *testing.T) {
 	_, counts, _ := runAPIKeySSE(t, sse)
 	if counts.InputTokens != 42 || counts.OutputTokens != 7 {
 		t.Errorf("usage = in:%d out:%d, want in:42 out:7", counts.InputTokens, counts.OutputTokens)
-	}
-}
-
-// The OAuth relay has demoted capacity codes since codexerr landed, but said
-// nothing about it — and the demotion is invisible by design, because the CLI
-// recovers. So neither the operator nor the request log ever recorded that
-// upstream refused to serve; a capacity shed surfaced only as a turn that
-// finished with no usage, which reads as a broken relay rather than a busy
-// model. streamSSECodexBackend now reports the shed to its caller.
-func TestOAuthStreamReportsCapacityShed(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := `data: {"type":"error","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded"}}` + "\n\n"
-	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
-
-	var counts usage.Counts
-	_, shed, _ := streamSSECodexBackend(c, resp, &counts)
-
-	if !shed.shed || !shed.capacity {
-		t.Fatalf("a server_is_overloaded frame must be reported as a capacity shed; got shed=%v capacity=%v", shed.shed, shed.capacity)
-	}
-	out := w.Body.String()
-	if strings.Contains(out, "server_is_overloaded") {
-		t.Errorf("the session-ending code must still be demoted on the way out; got %q", out)
-	}
-	if !strings.Contains(out, "Our servers are currently overloaded") {
-		t.Errorf("the upstream message must survive demotion; got %q", out)
-	}
-}
-
-// Quota is account-scoped, not capacity: reported as a shed, never demoted.
-func TestOAuthStreamReportsQuotaShedWithoutDemoting(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := `data: {"type":"error","error":{"code":"insufficient_quota","message":"out of credit"}}` + "\n\n"
-	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
-
-	var counts usage.Counts
-	_, shed, _ := streamSSECodexBackend(c, resp, &counts)
-
-	if !shed.shed {
-		t.Error("a quota frame is a shed turn")
-	}
-	if shed.capacity {
-		t.Error("quota is not a capacity shed and must not be demoted")
-	}
-	if !strings.Contains(w.Body.String(), "insufficient_quota") {
-		t.Errorf("the quota code must reach the client untouched; got %q", w.Body.String())
 	}
 }
