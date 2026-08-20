@@ -259,3 +259,40 @@ func truncateForTest(s string) string {
 	}
 	return s
 }
+
+// A bridged non-stream turn that comes back unaccountable must roll back to the
+// forward loop, not answer the client. Nothing has been written downstream at
+// that point, so trying the next credential is invisible to the caller — while
+// a 502 hands over a hard error with healthy credentials still unused. Observed
+// in production right after the bridge shipped: one flaky relay turned an
+// otherwise serviceable chat/completions request into a client-visible 502.
+func TestCodexAPIKeyBridgedNonStreamWithoutUsageIsRetried(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.6-sol","messages":[{"role":"user","content":"hi"}]}`)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// A completed Responses object carrying no usage at all.
+		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","status":"completed",` +
+			`"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}`))
+	}))
+	defer upstream.Close()
+
+	cred := codexAPIKeyCred("relayF")
+	s := codexAPIKeyTestServer(upstream.URL, cred)
+	c, w := newCodexContext(t, "/v1/chat/completions", body)
+
+	retry, done := s.doForwardCodex(c, cred, "/v1/chat/completions", body, false,
+		"gpt-5.6-sol", "tok-abcdef123456", "client", time.Now(), 1)
+
+	if !retry || done {
+		t.Fatalf("an unaccountable bridged turn must be retried on another credential; got retry=%v done=%v", retry, done)
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("nothing may reach the client before the retry; got %q", truncateForTest(w.Body.String()))
+	}
+	// The fault must still count against the credential so the breaker can act.
+	if _, _, _, consecutive := cred.HealthSnapshot(); consecutive != 1 {
+		t.Fatalf("ConsecutiveFailures = %d, want 1 — the unaccountable response is a credential fault", consecutive)
+	}
+}

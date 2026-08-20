@@ -387,21 +387,27 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 			// dispatch on the bytes exactly like the streaming branch does and
 			// aggregate when needed — the alternative is handing the whole-body
 			// JSON parse an SSE payload and failing a good turn closed.
+			//
+			// Every failure below rolls back to the forward loop (retry=true)
+			// rather than answering the client. Not one byte has been written
+			// yet, so trying the next credential is invisible to the caller —
+			// whereas a 502 here hands over a hard error while healthy
+			// credentials sit unused. This is the same reasoning the retryable
+			// status branch above applies before the response is committed.
 			var payload []byte
 			if responseIsSSE(resp.Header, br) {
 				agg, aerr := aggregateCodexResponseStream(br, &counts)
 				if aerr != nil {
 					_ = resp.Body.Close()
-					log.Warnf("codex proxy(apikey): bridged aggregation via %s failed: %v", a.ID, aerr)
+					log.Warnf("codex proxy(apikey): bridged aggregation via %s failed: %v — rotating to next credential", a.ID, aerr)
 					s.reportCodexAPIKeyFault(a, http.StatusBadGateway, time.Time{})
-					writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusBadGateway, Code: "service_response_error", Message: "The model service returned an incomplete response. Please try again."})
 					s.emitLog(requestlog.Record{
 						Client: clientName, ClientToken: maskClientToken(clientToken),
 						Provider: auth.ProviderOpenAI, AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
 						Model: model, Stream: stream, Path: path, Status: http.StatusBadGateway,
 						DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: aerr.Error(),
 					})
-					return false, true
+					return true, false
 				}
 				payload = agg
 			} else {
@@ -413,29 +419,27 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 			}
 			if usage.MissingUsage(counts) {
 				_ = resp.Body.Close()
-				log.Warnf("codex proxy(apikey): %s returned success without usage on bridged non-stream response; failing closed", a.ID)
+				log.Warnf("codex proxy(apikey): %s returned success without usage on bridged non-stream response — rotating to next credential", a.ID)
 				s.reportCodexAPIKeyFault(a, http.StatusBadGateway, time.Time{})
-				writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusBadGateway, Code: "service_response_error", Message: "The model service returned an incomplete response. Please try again."})
 				s.emitLog(requestlog.Record{
 					Client: clientName, ClientToken: maskClientToken(clientToken),
 					Provider: auth.ProviderOpenAI, AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
 					Model: model, Stream: stream, Path: path, Status: http.StatusBadGateway,
 					DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: usage.MissingUsageError,
 				})
-				return false, true
+				return true, false
 			}
 			converted, cerr := apicompat.ResponsesToChatCompletion(payload, model, time.Now().Unix())
 			if cerr != nil {
 				_ = resp.Body.Close()
-				log.Warnf("codex proxy(apikey): chat/completions render via %s failed: %v", a.ID, cerr)
-				writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusBadGateway, Code: "service_response_error", Message: "The model service returned an incomplete response. Please try again."})
+				log.Warnf("codex proxy(apikey): chat/completions render via %s failed: %v — rotating to next credential", a.ID, cerr)
 				s.emitLog(requestlog.Record{
 					Client: clientName, ClientToken: maskClientToken(clientToken),
 					Provider: auth.ProviderOpenAI, AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
 					Model: model, Stream: stream, Path: path, Status: http.StatusBadGateway,
 					DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: cerr.Error(),
 				})
-				return false, true
+				return true, false
 			}
 			// Content-Type is stamped after the allowlist copy: this branch may
 			// have aggregated an SSE stream, so the upstream's
