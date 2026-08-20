@@ -418,7 +418,16 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 			// status branch above applies before the response is committed.
 			var payload []byte
 			if responseIsSSE(resp.Header, br) {
-				agg, aerr := aggregateCodexResponseStream(br, &counts)
+				agg, aggShed, aerr := aggregateCodexResponseStream(br, &counts)
+				if aggShed != "" {
+					// Same reasoning as the streaming branch: nothing has been
+					// written downstream, so a shed is recoverable on another
+					// credential rather than something the client must see.
+					_ = resp.Body.Close()
+					log.Warnf("codex proxy(apikey): %s shed the bridged non-stream request: %s — rotating to next credential", a.ID, aggShed)
+					s.reportCodexAPIKeyFault(a, http.StatusServiceUnavailable, time.Time{})
+					return true, false
+				}
 				if aerr != nil {
 					_ = resp.Body.Close()
 					log.Warnf("codex proxy(apikey): bridged aggregation via %s failed: %v — rotating to next credential", a.ID, aerr)

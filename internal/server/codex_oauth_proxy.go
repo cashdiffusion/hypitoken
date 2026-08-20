@@ -346,10 +346,26 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	default:
 		// Non-streaming client: aggregate SSE into a single response object
 		// (mirrors CLIProxyAPI's CodexExecutor.Execute aggregation).
-		payload, aerr := aggregateCodexResponseStream(resp.Body, &counts)
+		payload, aggShed, aerr := aggregateCodexResponseStream(resp.Body, &counts)
+		// Both branches below roll back to the forward loop instead of
+		// answering. A non-streaming response is assembled first and sent
+		// second, so at this point not one byte has reached the client and
+		// another credential can serve the turn invisibly.
+		//
+		// This path used to answer 502 on both. In production that made the
+		// non-streaming route 50x worse than the streaming one — 5.0% of
+		// non-streaming turns failed against 0.1% of streaming — because every
+		// shed landed on the client while the streaming relay was quietly
+		// failing them over. All of them were capacity sheds: same model, ~2.3s,
+		// the shape of a turn upstream refused rather than one it botched.
+		if aggShed != "" {
+			log.Warnf("codex oauth: %s shed the non-streaming request (attempt %d, %s): %s — retrying on another credential",
+				a.ID, attempts, time.Since(start).Round(time.Millisecond), aggShed)
+			_ = resp.Body.Close()
+			return true, false
+		}
 		if aerr != nil {
-			log.Warnf("codex oauth: aggregation via %s failed: %v", a.ID, aerr)
-			writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusBadGateway, Code: "service_response_error", Message: "The model service returned an incomplete response. Please try again."})
+			log.Warnf("codex oauth: aggregation via %s failed: %v — retrying on another credential", a.ID, aerr)
 			_ = resp.Body.Close()
 			s.emitLog(requestlog.Record{
 				Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.ProviderOpenAI,
@@ -358,7 +374,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 				DurationMs: time.Since(start).Milliseconds(),
 				Error:      aerr.Error(),
 			})
-			return false, true
+			return true, false
 		}
 		if isChat {
 			converted, cerr := apicompat.ResponsesToChatCompletion(payload, model, time.Now().Unix())
@@ -446,7 +462,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 // the response.output field if it arrived empty. Output shape matches
 // OpenAI's /v1/responses non-streaming reply: the bare `response` object
 // (id, object, output, usage, …) — not the SSE event envelope.
-func aggregateCodexResponseStream(r io.Reader, counts *usage.Counts) ([]byte, error) {
+func aggregateCodexResponseStream(r io.Reader, counts *usage.Counts) (out []byte, shed string, err error) {
 	reader := newLineReader(r)
 	var byIndex []codexOutputSlot
 	var fallback []json.RawMessage
@@ -458,6 +474,17 @@ func aggregateCodexResponseStream(r io.Reader, counts *usage.Counts) ([]byte, er
 			if bytes.HasPrefix(trim, []byte("data:")) {
 				payload := bytes.TrimSpace(trim[5:])
 				if len(payload) > 0 && payload[0] == '{' {
+					// A non-streaming turn is shed exactly like a streaming one
+					// — an error frame inside an otherwise-200 stream — but this
+					// path never looked for it, so the aggregation simply ran to
+					// EOF and reported "stream closed before response.completed"
+					// as a 502. Nothing has been written downstream yet here
+					// (the response is assembled first, sent second), so a shed
+					// is fully recoverable on another credential; report it and
+					// let the caller fail over.
+					if codexerr.Classify(payload) == codexerr.ClassRetryable {
+						return nil, truncate(payload, 200), nil
+					}
 					var ev struct {
 						Type        string          `json:"type"`
 						Item        json.RawMessage `json:"item"`
@@ -476,17 +503,18 @@ func aggregateCodexResponseStream(r io.Reader, counts *usage.Counts) ([]byte, er
 							}
 						case "response.completed":
 							if len(ev.Response) == 0 {
-								return nil, errors.New("response.completed missing response field")
+								return nil, "", errors.New("response.completed missing response field")
 							}
 							counts.Add(extractCodexBackendUsageFromJSON(payload))
-							return patchResponseOutput(ev.Response, byIndex, fallback)
+							payload, perr := patchResponseOutput(ev.Response, byIndex, fallback)
+							return payload, "", perr
 						}
 					}
 				}
 			}
 		}
 		if rerr != nil {
-			return nil, fmt.Errorf("stream closed before response.completed: %w", rerr)
+			return nil, "", fmt.Errorf("stream closed before response.completed: %w", rerr)
 		}
 	}
 }

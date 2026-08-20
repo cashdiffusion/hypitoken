@@ -328,3 +328,68 @@ func TestStreamSSECodexBackendReleasesPreambleOnEOF(t *testing.T) {
 		t.Errorf("the buffered opener must not be swallowed on EOF, got %q", w.Body.String())
 	}
 }
+
+// A non-streaming turn is shed the same way a streaming one is: an error frame
+// inside an otherwise-200 stream. This path never looked for it, so aggregation
+// just ran to EOF and reported "stream closed before response.completed" as a
+// 502 the client had to see.
+//
+// Production made the gap plain: after the streaming relay learned to fail sheds
+// over, the non-streaming route was 50x worse — 5.0% of non-streaming turns
+// returned 5xx against 0.1% of streaming ones, and every one of those was a
+// capacity shed (same model, ~2.3s, the shape of a refusal rather than a botched
+// response).
+func TestAggregateCodexResponseStreamReportsShed(t *testing.T) {
+	for _, code := range []string{"server_is_overloaded", "slow_down", "rate_limit_exceeded"} {
+		t.Run(code, func(t *testing.T) {
+			body := "event: response.created\n" +
+				`data: {"type":"response.created","response":{"id":"resp_1"}}` + "\n\n" +
+				"event: error\n" +
+				`data: {"type":"error","error":{"code":"` + code + `","message":"nope"}}` + "\n\n"
+			var counts usage.Counts
+			out, shed, err := aggregateCodexResponseStream(strings.NewReader(body), &counts)
+
+			if shed == "" {
+				t.Error("a shed must be reported so the caller fails over instead of answering 502")
+			}
+			if err != nil {
+				t.Errorf("a shed is not an aggregation error; got %v", err)
+			}
+			if out != nil {
+				t.Errorf("no payload may be produced from a shed turn; got %q", out)
+			}
+		})
+	}
+}
+
+// A genuinely truncated stream is still an error, not a shed — the two must stay
+// distinguishable so the log says which happened.
+func TestAggregateCodexResponseStreamTruncationIsNotShed(t *testing.T) {
+	body := "event: response.created\n" +
+		`data: {"type":"response.created","response":{"id":"resp_1"}}` + "\n\n"
+	var counts usage.Counts
+	_, shed, err := aggregateCodexResponseStream(strings.NewReader(body), &counts)
+	if shed != "" {
+		t.Errorf("a truncation is not a shed; got %q", shed)
+	}
+	if err == nil {
+		t.Error("a stream ending without response.completed must report an error")
+	}
+}
+
+// The happy path must be untouched by the shed check.
+func TestAggregateCodexResponseStreamStillAggregates(t *testing.T) {
+	body := "event: response.completed\n" +
+		`data: {"type":"response.completed","response":{"id":"r","output":[],"usage":{"input_tokens":7,"output_tokens":3}}}` + "\n\n"
+	var counts usage.Counts
+	out, shed, err := aggregateCodexResponseStream(strings.NewReader(body), &counts)
+	if err != nil || shed != "" {
+		t.Fatalf("clean stream must aggregate: shed=%q err=%v", shed, err)
+	}
+	if len(out) == 0 {
+		t.Error("a completed stream must produce a payload")
+	}
+	if counts.InputTokens != 7 || counts.OutputTokens != 3 {
+		t.Errorf("usage must be collected: in=%d out=%d", counts.InputTokens, counts.OutputTokens)
+	}
+}
