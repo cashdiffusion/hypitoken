@@ -35,11 +35,11 @@ func TestStreamCodexAsChatCompletions(t *testing.T) {
 	resp := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}
 
 	var counts usage.Counts
-	sawTerminal, err := streamCodexAsChatCompletions(c, resp.Body, &counts, "gpt-5.6-sol", false)
-	if err != nil && !errors.Is(err, io.EOF) {
-		t.Fatalf("relay error: %v", err)
+	res := streamCodexAsChatCompletions(c, resp.Body, &counts, "gpt-5.6-sol", false, func() {})
+	if res.err != nil && !errors.Is(res.err, io.EOF) {
+		t.Fatalf("relay error: %v", res.err)
 	}
-	if !sawTerminal {
+	if !res.sawTerminal {
 		t.Error("terminal event not observed")
 	}
 
@@ -79,8 +79,8 @@ func TestStreamCodexAsChatCompletionsTruncatedUpstream(t *testing.T) {
 	resp := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}
 
 	var counts usage.Counts
-	sawTerminal, _ := streamCodexAsChatCompletions(c, resp.Body, &counts, "gpt-5.6-sol", false)
-	if sawTerminal {
+	res := streamCodexAsChatCompletions(c, resp.Body, &counts, "gpt-5.6-sol", false, func() {})
+	if res.sawTerminal {
 		t.Error("truncated upstream reported as terminal")
 	}
 	out := rec.Body.String()
@@ -124,5 +124,144 @@ func TestCodexModelUnsupported(t *testing.T) {
 		if got := codexModelUnsupported(tc.status, []byte(tc.body)); got != tc.want {
 			t.Errorf("codexModelUnsupported(%d, %s) = %v, want %v", tc.status, tc.body, got, tc.want)
 		}
+	}
+}
+
+// The chat bridge erases a shed. apicompat.Translate has no case for
+// {"type":"error"}, so the frame yields nothing, and the response.failed that
+// follows renders as an ordinary finish frame with finish_reason "stop". Before
+// this was handled the client therefore received a well-formed, EMPTY,
+// successful-looking completion — the model appearing to return nothing and
+// stop normally — while sawTerminal=true suppressed the caller's failover and
+// nothing was recorded anywhere. That is strictly worse than the native path,
+// where the CLI at least sees the code and backs off.
+func TestStreamCodexAsChatCompletionsWithholdsPreOutputShed(t *testing.T) {
+	for _, code := range []string{"server_is_overloaded", "slow_down", "rate_limit_exceeded"} {
+		t.Run(code, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+
+			body := codexSSE(
+				`{"type":"response.created","response":{"id":"resp_1"}}`,
+				`{"type":"error","error":{"code":"`+code+`","message":"we are full"}}`,
+				`{"type":"response.failed","response":{"status":"failed","error":{"code":"`+code+`"}}}`,
+			)
+			committed := false
+			var counts usage.Counts
+			res := streamCodexAsChatCompletions(c, strings.NewReader(body), &counts,
+				"gpt-5.6-sol", false, func() { committed = true })
+
+			if committed {
+				t.Error("commit() must not run — the response must stay uncommitted so failover works")
+			}
+			if res.wroteAny {
+				t.Error("wroteAny must be false so the caller's pre-output failover fires")
+			}
+			if res.sawTerminal {
+				t.Error("the withheld response.failed must not be reported as a clean terminal")
+			}
+			if res.shed == "" {
+				t.Error("the withheld frame must be reported so the caller retries elsewhere")
+			}
+			if got := rec.Body.String(); got != "" {
+				t.Errorf("nothing may reach the client, got %q", got)
+			}
+		})
+	}
+}
+
+// Once output has started there is no failover left. Demotion — the fallback
+// the native relays use — buys nothing here either, because the code never
+// reaches the client in the first place. So the only thing left is to record
+// that it happened, which is what keeps a shed from reading as a healthy turn
+// that merely stopped early.
+func TestStreamCodexAsChatCompletionsRecordsPostOutputShed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	body := codexSSE(
+		`{"type":"response.output_text.delta","delta":"partial"}`,
+		`{"type":"error","error":{"code":"server_is_overloaded","message":"we are full"}}`,
+		`{"type":"response.failed","response":{"status":"failed"}}`,
+	)
+	var counts usage.Counts
+	res := streamCodexAsChatCompletions(c, strings.NewReader(body), &counts,
+		"gpt-5.6-sol", false, func() {})
+
+	if res.shed != "" {
+		t.Errorf("must not report a withheld shed once output has started; got %q", res.shed)
+	}
+	if !res.demoted.shed || !res.demoted.capacity {
+		t.Errorf("the post-output shed must be recorded; got %+v", res.demoted)
+	}
+	if !res.wroteAny {
+		t.Error("wroteAny must be true — content already reached the client")
+	}
+	if out := rec.Body.String(); !strings.Contains(out, `"content":"partial"`) {
+		t.Errorf("content delivered before the shed must survive:\n%s", out)
+	}
+}
+
+// Quota and rate codes are account-scoped rather than capacity, and the caller
+// labels the request log from that split.
+func TestStreamCodexAsChatCompletionsSplitsQuotaFromCapacity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	body := codexSSE(
+		`{"type":"response.output_text.delta","delta":"partial"}`,
+		`{"type":"error","error":{"code":"insufficient_quota","message":"out of credit"}}`,
+	)
+	var counts usage.Counts
+	res := streamCodexAsChatCompletions(c, strings.NewReader(body), &counts,
+		"gpt-5.6-sol", false, func() {})
+
+	if !res.demoted.shed {
+		t.Error("a quota frame is still a shed")
+	}
+	if res.demoted.capacity {
+		t.Error("quota is not a capacity shed")
+	}
+	if got := shedTurnLabel(res.demoted.capacity); got != "upstream shed the turn (quota/rate)" {
+		t.Errorf("request-log label = %q", got)
+	}
+}
+
+// A healthy turn must be untouched: openers produce no frames of their own, so
+// the first byte is real content and commit fires exactly once with it.
+func TestStreamCodexAsChatCompletionsCommitsOnFirstContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	body := codexSSE(
+		`{"type":"response.created","response":{"id":"resp_1"}}`,
+		`{"type":"response.in_progress","response":{"id":"resp_1"}}`,
+		`{"type":"response.output_text.delta","delta":"hi"}`,
+		`{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":11,"output_tokens":3}}}`,
+	)
+	commits := 0
+	var counts usage.Counts
+	res := streamCodexAsChatCompletions(c, strings.NewReader(body), &counts,
+		"gpt-5.6-sol", false, func() { commits++ })
+
+	if commits != 1 {
+		t.Errorf("commit must fire exactly once, got %d", commits)
+	}
+	if !res.sawTerminal || !res.wroteAny {
+		t.Errorf("healthy turn: sawTerminal=%v wroteAny=%v", res.sawTerminal, res.wroteAny)
+	}
+	if res.shed != "" || res.demoted.shed {
+		t.Errorf("healthy turn must report no shed: %+v", res)
+	}
+	out := rec.Body.String()
+	if !strings.Contains(out, `"content":"hi"`) || !strings.Contains(out, "data: [DONE]") {
+		t.Errorf("healthy stream mangled:\n%s", out)
+	}
+	if counts.InputTokens != 11 || counts.OutputTokens != 3 {
+		t.Errorf("usage lost: in=%d out=%d", counts.InputTokens, counts.OutputTokens)
 	}
 }

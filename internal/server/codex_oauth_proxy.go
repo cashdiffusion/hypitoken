@@ -258,33 +258,30 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		var sawTerminal, wroteAny bool
 		var rerr error
 		var res codexStreamResult
+		// Both relays commit lazily: headers are written immediately before the
+		// first byte, so a shed that arrives before any output leaves the
+		// response uncommitted and the failover below is invisible to the
+		// client. They report the same codexStreamResult, so everything
+		// downstream is shared.
 		if isChat {
-			// The chat bridge has no lazy-commit path, so its headers go out
-			// eagerly and a shed there can only ever be demoted, never
-			// withheld. Treat it as already-written for the failover check.
-			writeSSEResponseHeaders(c, resp)
-			sawTerminal, rerr = streamCodexAsChatCompletions(c, resp.Body, &counts, model, chatStreamWantsUsage(body))
-			wroteAny = true
+			res = streamCodexAsChatCompletions(c, resp.Body, &counts, model, chatStreamWantsUsage(body), func() { writeSSEResponseHeaders(c, resp) })
 		} else {
-			// Lazy commit: headers are written by the relay immediately before
-			// its first byte, so a shed that arrives before any output leaves
-			// the response uncommitted and the failover below is invisible to
-			// the client.
 			res = streamSSECodexBackend(c, resp, &counts, func() { writeSSEResponseHeaders(c, resp) })
-			sawTerminal, wroteAny, rerr = res.sawTerminal, res.wroteAny, res.err
 		}
-		// A shed that landed after output started could only be demoted. Say so:
-		// the client recovers, so without a log line nothing records that
-		// upstream refused to serve, and the turn otherwise reaches the operator
-		// as one that finished with no usage — which reads as a broken relay
-		// rather than a busy account.
+		sawTerminal, wroteAny, rerr = res.sawTerminal, res.wroteAny, res.err
+		// A shed that landed after output started could not be withheld. Say so
+		// either way: on the native route the CLI quietly retries, on the chat
+		// route the frame is dropped in translation, and in both cases nothing
+		// would otherwise record that upstream refused to serve — the turn
+		// reaches the operator as one that finished with no usage, which reads
+		// as a broken relay rather than a busy account.
 		if res.demoted.shed {
-			log.Warnf("codex oauth: %s shed the turn after output started (capacity=%v); client sees a retryable error", a.ID, res.demoted.capacity)
-			if res.demoted.capacity {
-				streamErr = "upstream shed the turn (capacity)"
-			} else {
-				streamErr = "upstream shed the turn (quota/rate)"
-			}
+			// What the client ends up seeing differs by route — the native
+			// relay demotes the code so the CLI retries, while the chat bridge
+			// cannot because the translation drops error frames outright — so
+			// this says only what upstream did.
+			log.Warnf("codex oauth: %s shed the turn after output started (capacity=%v)", a.ID, res.demoted.capacity)
+			streamErr = shedTurnLabel(res.demoted.capacity)
 		}
 		if !sawTerminal && !wroteAny {
 			// Nothing reached the client yet, so this turn can still be rescued

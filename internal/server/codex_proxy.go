@@ -329,6 +329,9 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	// event, so the request log names it instead of showing a clean 200 for a
 	// stream the client saw break.
 	var streamTruncated bool
+	// shedLabel records an upstream that refused the turn mid-stream, using the
+	// same wording as the OAuth path so both aggregate together.
+	var shedLabel string
 	outcome := usage.StreamComplete
 	// logStatus defaults to the upstream's. A mid-stream client hang-up
 	// overrides it to 499 so a cancellation stops masquerading as a clean 200
@@ -351,7 +354,6 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		br := bufio.NewReaderSize(resp.Body, 64*1024)
 		switch {
 		case stream && responseIsSSE(resp.Header, br):
-			writeSSEResponseHeaders(c, resp)
 			var clientGone bool
 			if bridged {
 				// Bridged stream: the upstream speaks Responses SSE and the
@@ -361,12 +363,32 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 				// name — the rendered frames must echo what was requested, not
 				// the relay's model_map'd name, which is why rewriteClientModel
 				// has no role here.
-				sawTerminal, rerr := streamCodexAsChatCompletions(c, br, &counts, model, chatStreamWantsUsage(body))
-				clientGone = !sawTerminal && isClientDisconnect(ctx, rerr)
-				if !sawTerminal && !clientGone {
-					log.Warnf("codex proxy(apikey): bridged SSE ended before terminal event via %s: %v", a.ID, rerr)
+				//
+				// Commits lazily, so a shed arriving before any output leaves
+				// the response uncommitted and can be retried elsewhere.
+				res := streamCodexAsChatCompletions(c, br, &counts, model, chatStreamWantsUsage(body), func() { writeSSEResponseHeaders(c, resp) })
+				if res.shed != "" {
+					// Not a byte has reached the client, so this turn is still
+					// fully recoverable on another credential. Without this the
+					// translation would have rendered the shed as an empty but
+					// successful-looking completion — see
+					// streamCodexAsChatCompletions.
+					_ = resp.Body.Close()
+					log.Warnf("codex proxy(apikey): %s shed the bridged stream before any output: %s — rotating to next credential", a.ID, res.shed)
+					s.reportCodexAPIKeyFault(a, http.StatusServiceUnavailable, time.Time{})
+					return true, false
+				}
+				if res.demoted.shed {
+					log.Warnf("codex proxy(apikey): %s shed the bridged stream after output started (capacity=%v)", a.ID, res.demoted.capacity)
+					shedLabel = shedTurnLabel(res.demoted.capacity)
+				}
+				clientGone = !res.sawTerminal && isClientDisconnect(ctx, res.err)
+				if !res.sawTerminal && !clientGone {
+					log.Warnf("codex proxy(apikey): bridged SSE ended before terminal event via %s: %v", a.ID, res.err)
+					streamTruncated = true
 				}
 			} else {
+				writeSSEResponseHeaders(c, resp)
 				sse := streamSSEOpenAI(c, br, &counts, rewriteClientModel)
 				clientGone = sse.clientGone
 				// An in-band capacity/quota frame is why a turn can end with
@@ -376,6 +398,7 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 				if sse.shed {
 					log.Warnf("codex proxy(apikey): %s shed the turn mid-stream (capacity=%v); the client sees a retryable error, not a session-ending one",
 						a.ID, sse.capacity)
+					shedLabel = shedTurnLabel(sse.capacity)
 				}
 				// A stream that stops without a terminal event is what the
 				// client reports as "stream disconnected before completion".
@@ -547,8 +570,14 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		}
 	}
 	errField := outcome.LogError()
-	// Same label the OAuth path uses, so the two aggregate together in the
-	// request log instead of hiding half the truncations under a clean 200.
+	// Same labels the OAuth path uses, so the two aggregate together in the
+	// request log instead of hiding half of these under a clean 200. A shed
+	// outranks a truncation because it is the cause: a turn upstream refused
+	// ends without a terminal event, so labelling it "truncated" would report
+	// the symptom and lose why it happened.
+	if errField == "" && shedLabel != "" {
+		errField = shedLabel
+	}
 	if errField == "" && streamTruncated {
 		errField = "stream truncated before terminal event"
 	}
@@ -614,6 +643,17 @@ func (s *Server) reportCodexAPIKeyFault(a *auth.Auth, status int, resetAt time.T
 		return
 	}
 	a.MarkFailure(fmt.Sprintf("upstream %d", status))
+}
+
+// shedTurnLabel renders the request-log tag for a turn upstream refused. Both
+// credential kinds and all four relay paths route through it, so the wording
+// can never drift between them — the tag is what makes sheds countable across
+// the whole deployment.
+func shedTurnLabel(capacity bool) string {
+	if capacity {
+		return "upstream shed the turn (capacity)"
+	}
+	return "upstream shed the turn (quota/rate)"
 }
 
 // setJSONBool sets a top-level boolean field on a JSON object body, preserving
