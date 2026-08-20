@@ -547,6 +547,21 @@ func codexTerminalEvent(payload []byte) bool {
 	return false
 }
 
+// codexPreambleEvent reports whether a Codex SSE payload is one of the
+// content-free events upstream always opens with. They carry no model output,
+// so holding them back costs the client nothing — and it keeps the response
+// uncommitted long enough for a capacity shed to be withheld and failed over
+// instead of being forwarded as an error the user has to see.
+func codexPreambleEvent(payload []byte) bool {
+	var ev struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(payload, &ev) != nil {
+		return false
+	}
+	return ev.Type == "response.created" || ev.Type == "response.in_progress"
+}
+
 // codexStreamResult reports the outcome of a Codex backend SSE relay so the
 // caller can choose between a transparent retry (nothing reached the client
 // yet) and a logged give-up (bytes already committed downstream — from that
@@ -611,6 +626,22 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 	// to withhold, so an event line is held until its data line is classified
 	// and then emitted together with it.
 	var held []byte
+	// preamble buffers the content-free opening events (response.created,
+	// response.in_progress) until the stream reveals what it is.
+	//
+	// Without this the withhold above never fires in practice: upstream always
+	// opens with response.created, forwarding it commits the response, and the
+	// shed frame that arrives a second later is then stuck on the demote path.
+	// Production bore that out — after shipping the withhold, it triggered zero
+	// times while 52 sheds in the same window took the demote branch.
+	//
+	// The buffer is released the moment any other event arrives, so it holds
+	// only for the gap between response.created and the first real event. The
+	// cost is that Relay's keepalive does not start until the first byte, so
+	// that gap runs unprotected; it is bounded by upstream sending literally
+	// anything else, and a shed — the case this exists for — lands at a median
+	// of 3.3s.
+	var preamble []byte
 
 	next := func() (emit []byte, terminal bool, err error) {
 		for {
@@ -633,11 +664,13 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 							if !sentAny {
 								// Failover is still possible — withhold this
 								// frame and everything after it, including the
-								// held event line and the response.failed that
-								// follows, so nothing commits the response.
+								// held event line, any buffered preamble and
+								// the response.failed that follows, so nothing
+								// commits the response.
 								shedding = true
 								out.shed = truncate(payload, 200)
 								held = nil
+								preamble = nil
 								line = nil
 							} else if demoted, ok := codexerr.DemoteCapacityCode(payload); ok {
 								// Output already started, so the client must be
@@ -668,6 +701,19 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 							terminal = true
 						}
 
+						// Buffer a content-free opener instead of emitting it,
+						// so it does not count as output and foreclose failover.
+						// Anything else falls through and flushes the buffer.
+						if !sentAny && !shedding && codexPreambleEvent(payload) {
+							if scrubbed, keep := downstream.ScrubCodexSSELine(line); keep {
+								preamble = append(preamble, held...)
+								preamble = append(preamble, scrubbed...)
+							}
+							held = nil
+							line = nil
+							continue
+						}
+
 						// Withhold the pool's state, LAST — usage extraction,
 						// error classification and terminal detection above all
 						// read `payload` (what upstream said). This is the SSE
@@ -691,6 +737,18 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 				terminal = false
 			}
 
+			// The blank line that closes an SSE event belongs to the event
+			// before it, so while an opener is buffered its terminator has to be
+			// buffered too. Left alone it matches none of the cases above, falls
+			// straight through to the emit switch as a line of its own, and
+			// there it both flushes the buffer early and marks the stream as
+			// having produced output — which is exactly what forecloses the
+			// failover this buffer exists to preserve.
+			if !sentAny && !shedding && len(preamble) > 0 && len(line) > 0 && len(bytes.TrimSpace(line)) == 0 {
+				preamble = append(preamble, line...)
+				continue
+			}
+
 			// Emit the held event line together with the line that resolved it.
 			switch {
 			case len(line) > 0 && len(held) > 0:
@@ -702,6 +760,15 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 				// Stream ended with an unresolved event line — release it so
 				// nothing is silently dropped.
 				emit, held = held, nil
+			}
+
+			// Flush the buffered opener ahead of whatever released it, so the
+			// client still receives the stream in upstream's original order. On
+			// a clean EOF with nothing but a preamble, release it too rather
+			// than swallowing the whole response.
+			if len(preamble) > 0 && !shedding && (len(emit) > 0 || rerr != nil) {
+				emit = append(append(make([]byte, 0, len(preamble)+len(emit)), preamble...), emit...)
+				preamble = nil
 			}
 
 			if len(emit) > 0 {
