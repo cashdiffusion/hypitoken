@@ -362,6 +362,24 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			return true, false
 		}
 		if aerr != nil {
+			// A client that hung up mid-aggregation surfaces here as the same
+			// read error an upstream fault would — but there is nobody left to
+			// retry for. Rotating anyway burns a credential per attempt on a
+			// request no one is listening to, and ends in a 502 delivered to a
+			// closed connection. Seen in production immediately after this
+			// branch learned to retry: one canceled turn spent 8 attempts.
+			if isClientDisconnect(ctx, aerr) {
+				a.MarkClientCancel("client canceled before aggregation completed")
+				_ = resp.Body.Close()
+				s.emitLog(requestlog.Record{
+					Client: clientName, ClientToken: maskClientToken(clientToken), Provider: auth.ProviderOpenAI,
+					AuthID: a.ID, AuthLabel: a.Label, AuthKind: "oauth", Model: model,
+					Stream: stream, Path: path, Status: 499, Attempts: attempts,
+					DurationMs: time.Since(start).Milliseconds(),
+					Error:      "client canceled",
+				})
+				return false, true
+			}
 			log.Warnf("codex oauth: aggregation via %s failed: %v — retrying on another credential", a.ID, aerr)
 			_ = resp.Body.Close()
 			s.emitLog(requestlog.Record{

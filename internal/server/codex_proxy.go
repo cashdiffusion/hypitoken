@@ -453,6 +453,21 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 				}
 				if aerr != nil {
 					_ = resp.Body.Close()
+					// A client that hung up mid-aggregation reaches us as the
+					// same read error an upstream fault would, but there is
+					// nobody left to retry for — and the credential is
+					// blameless, so its health must not be touched either.
+					if isClientDisconnect(ctx, aerr) {
+						a.MarkClientCancel(usage.ClientCanceledError)
+						log.Infof("codex proxy(apikey): client canceled during bridged aggregation via %s", a.ID)
+						s.emitLog(requestlog.Record{
+							Client: clientName, ClientToken: maskClientToken(clientToken),
+							Provider: auth.ProviderOpenAI, AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
+							Model: model, Stream: stream, Path: path, Status: 499,
+							DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: "client canceled",
+						})
+						return false, true
+					}
 					log.Warnf("codex proxy(apikey): bridged aggregation via %s failed: %v — rotating to next credential", a.ID, aerr)
 					s.reportCodexAPIKeyFault(a, http.StatusBadGateway, time.Time{})
 					s.emitLog(requestlog.Record{

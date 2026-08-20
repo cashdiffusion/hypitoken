@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -294,5 +295,54 @@ func TestCodexAPIKeyBridgedNonStreamWithoutUsageIsRetried(t *testing.T) {
 	// The fault must still count against the credential so the breaker can act.
 	if _, _, _, consecutive := cred.HealthSnapshot(); consecutive != 1 {
 		t.Fatalf("ConsecutiveFailures = %d, want 1 — the unaccountable response is a credential fault", consecutive)
+	}
+}
+
+// A client that hangs up mid-aggregation surfaces as the same read error an
+// upstream fault would, but there is nobody left to retry for. Rotating anyway
+// burns one credential per attempt on a request no one is listening to and ends
+// in a 502 written to a closed connection.
+//
+// Observed in production the minute the aggregation branch learned to retry:
+// one canceled turn spent 8 attempts before giving up, another 9.
+func TestCodexAPIKeyBridgedAggregationClientCancelIsNotRetried(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.6-sol","messages":[{"role":"user","content":"hi"}]}`)
+
+	// Upstream opens an SSE stream and never finishes it; the client's context
+	// is canceled underneath, which is what a real hang-up looks like here.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"r\"}}\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(300 * time.Millisecond)
+	}))
+	defer upstream.Close()
+
+	cred := codexAPIKeyCred("relayG")
+	s := codexAPIKeyTestServer(upstream.URL, cred)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	ctx, cancel := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(ctx)
+	c.Request.Header.Set("Content-Type", "application/json")
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		cancel()
+	}()
+
+	retry, done := s.doForwardCodex(c, cred, "/v1/chat/completions", body, false,
+		"gpt-5.6-sol", "tok-abcdef123456", "client", time.Now(), 1)
+
+	if retry || !done {
+		t.Fatalf("a client hang-up must end the exchange, not rotate credentials; got retry=%v done=%v", retry, done)
+	}
+	// The credential did nothing wrong, so its health must be untouched.
+	if _, _, _, consecutive := cred.HealthSnapshot(); consecutive != 0 {
+		t.Errorf("ConsecutiveFailures = %d, want 0 — the client left, the relay is blameless", consecutive)
 	}
 }
