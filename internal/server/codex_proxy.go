@@ -15,7 +15,9 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/wjsoj/cc-core/apicompat"
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/downstream"
 	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/requestlog"
 	"github.com/wjsoj/cc-core/usage"
@@ -189,7 +191,32 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	if baseURL == "" {
 		baseURL = strings.TrimRight(s.cfg.OpenAIBaseURL, "/")
 	}
-	// Join BaseURL with the inbound endpoint via the shared rule
+	// Codex API-key providers are reached over the Responses protocol by
+	// default: an inbound /v1/chat/completions is translated into a Responses
+	// body and sent to the provider's /v1/responses, then rendered back as
+	// chat.completion{,.chunk} on the way down. These relays resell Codex
+	// capacity, which is Responses-native — several host /v1/responses only, so
+	// forwarding chat/completions verbatim reached an endpoint that either
+	// 404s or falls back to a different (non-Codex) upstream pool.
+	//
+	// The bridge is best-effort: a body apicompat declines to translate falls
+	// back to verbatim chat/completions forwarding, which is what a plain
+	// OpenAI-compatible gateway expects. Same translator as the OAuth path
+	// (codex_oauth_proxy.go), so both credential kinds render identically.
+	isChat := path == "/v1/chat/completions"
+	bridged := false
+	sourceBody := body
+	upstreamPath := path
+	if isChat {
+		if converted, cerr := apicompat.ChatCompletionsToResponses(body); cerr == nil {
+			sourceBody = converted
+			upstreamPath = "/v1/responses"
+			bridged = true
+		} else {
+			log.Infof("codex proxy(apikey): chat/completions bridge declined body via %s: %v — forwarding verbatim", a.ID, cerr)
+		}
+	}
+	// Join BaseURL with the (possibly bridged) endpoint via the shared rule
 	// (mimicry.JoinCodexAPIKeyUpstreamURL):
 	//   BaseURL=https://api.openai.com/v1 + /v1/responses → .../v1/responses ✓
 	//   BaseURL=https://relay.example     + /v1/responses → .../v1/responses ✓ (bare origin keeps /v1)
@@ -197,11 +224,22 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	// A bare-origin relay (new-api/one-api) serves under /v1, so we no longer
 	// strip it into a /responses request that hit the gateway HTML homepage and
 	// surfaced as "stream disconnected before completion".
-	upURL := mimicry.JoinCodexAPIKeyUpstreamURL(baseURL, path)
+	upURL := mimicry.JoinCodexAPIKeyUpstreamURL(baseURL, upstreamPath)
 
-	upstreamBody := body
+	upstreamBody := sourceBody
 	rewriteClientModel := ""
-	if stream {
+	// stream_options.include_usage is a Chat Completions field; Responses
+	// reports usage on response.completed unconditionally. Injecting it into a
+	// bridged body would get rejected as an unknown parameter, so it stays on
+	// the verbatim path only. A bridged body instead carries the client's
+	// stream intent explicitly, since the translator does not set it.
+	if bridged {
+		if rewritten, err := setJSONBool(upstreamBody, "stream", stream); err == nil {
+			upstreamBody = rewritten
+		} else {
+			log.Warnf("codex proxy(apikey): stream flag injection failed on bridged body via %s: %v", a.ID, err)
+		}
+	} else if stream {
 		if rewritten, err := usage.EnsureOpenAIStreamUsage(upstreamBody); err == nil {
 			upstreamBody = rewritten
 		} else {
@@ -305,9 +343,26 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		// = $0). Mirrors the OAuth path and sub2api, which both dispatch on the
 		// requested stream rather than the response header.
 		br := bufio.NewReaderSize(resp.Body, 64*1024)
-		if stream && responseIsSSE(resp.Header, br) {
+		switch {
+		case stream && responseIsSSE(resp.Header, br):
 			writeSSEResponseHeaders(c, resp)
-			clientGone := streamSSEOpenAI(c, br, &counts, rewriteClientModel)
+			var clientGone bool
+			if bridged {
+				// Bridged stream: the upstream speaks Responses SSE and the
+				// client asked for chat.completion.chunk. Usage is read off the
+				// raw upstream events inside the translator, so billing matches
+				// the native path byte for byte. `model` is the client-facing
+				// name — the rendered frames must echo what was requested, not
+				// the relay's model_map'd name, which is why rewriteClientModel
+				// has no role here.
+				sawTerminal, rerr := streamCodexAsChatCompletions(c, br, &counts, model, chatStreamWantsUsage(body))
+				clientGone = !sawTerminal && isClientDisconnect(ctx, rerr)
+				if !sawTerminal && !clientGone {
+					log.Warnf("codex proxy(apikey): bridged SSE ended before terminal event via %s: %v", a.ID, rerr)
+				}
+			} else {
+				clientGone = streamSSEOpenAI(c, br, &counts, rewriteClientModel)
+			}
 			outcome = usage.ClassifyStreamOutcome(counts, clientGone)
 			switch outcome {
 			case usage.StreamClientCanceled:
@@ -326,7 +381,70 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 				log.Warnf("codex proxy(apikey): %s streamed success without usage; billing $0 and cooling credential", a.ID)
 				s.reportCodexAPIKeyFault(a, http.StatusBadGateway, time.Time{})
 			}
-		} else {
+		case bridged:
+			// Non-streaming bridged request. The relay may still answer with an
+			// SSE stream (several ignore `stream:false` on /v1/responses), so
+			// dispatch on the bytes exactly like the streaming branch does and
+			// aggregate when needed — the alternative is handing the whole-body
+			// JSON parse an SSE payload and failing a good turn closed.
+			var payload []byte
+			if responseIsSSE(resp.Header, br) {
+				agg, aerr := aggregateCodexResponseStream(br, &counts)
+				if aerr != nil {
+					_ = resp.Body.Close()
+					log.Warnf("codex proxy(apikey): bridged aggregation via %s failed: %v", a.ID, aerr)
+					s.reportCodexAPIKeyFault(a, http.StatusBadGateway, time.Time{})
+					writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusBadGateway, Code: "service_response_error", Message: "The model service returned an incomplete response. Please try again."})
+					s.emitLog(requestlog.Record{
+						Client: clientName, ClientToken: maskClientToken(clientToken),
+						Provider: auth.ProviderOpenAI, AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
+						Model: model, Stream: stream, Path: path, Status: http.StatusBadGateway,
+						DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: aerr.Error(),
+					})
+					return false, true
+				}
+				payload = agg
+			} else {
+				payload, _ = io.ReadAll(br)
+				// Responses reports usage as input_tokens/output_tokens, not
+				// the Chat Completions prompt_/completion_ pair, so this needs
+				// the Codex extractor rather than extractOpenAIUsageFromJSON.
+				counts.Add(extractCodexBackendUsageFromJSON(payload))
+			}
+			if usage.MissingUsage(counts) {
+				_ = resp.Body.Close()
+				log.Warnf("codex proxy(apikey): %s returned success without usage on bridged non-stream response; failing closed", a.ID)
+				s.reportCodexAPIKeyFault(a, http.StatusBadGateway, time.Time{})
+				writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusBadGateway, Code: "service_response_error", Message: "The model service returned an incomplete response. Please try again."})
+				s.emitLog(requestlog.Record{
+					Client: clientName, ClientToken: maskClientToken(clientToken),
+					Provider: auth.ProviderOpenAI, AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
+					Model: model, Stream: stream, Path: path, Status: http.StatusBadGateway,
+					DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: usage.MissingUsageError,
+				})
+				return false, true
+			}
+			converted, cerr := apicompat.ResponsesToChatCompletion(payload, model, time.Now().Unix())
+			if cerr != nil {
+				_ = resp.Body.Close()
+				log.Warnf("codex proxy(apikey): chat/completions render via %s failed: %v", a.ID, cerr)
+				writeAPIError(c, auth.ProviderOpenAI, APIError{Status: http.StatusBadGateway, Code: "service_response_error", Message: "The model service returned an incomplete response. Please try again."})
+				s.emitLog(requestlog.Record{
+					Client: clientName, ClientToken: maskClientToken(clientToken),
+					Provider: auth.ProviderOpenAI, AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
+					Model: model, Stream: stream, Path: path, Status: http.StatusBadGateway,
+					DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: cerr.Error(),
+				})
+				return false, true
+			}
+			// Content-Type is stamped after the allowlist copy: this branch may
+			// have aggregated an SSE stream, so the upstream's
+			// text/event-stream would misdescribe the single JSON object.
+			downstream.CopyResponseHeaders(c.Writer.Header(), resp.Header, time.Now())
+			c.Writer.Header().Set("Content-Type", "application/json")
+			c.Writer.WriteHeader(http.StatusOK)
+			_, _ = c.Writer.Write(converted)
+		default:
 			respBody, _ := io.ReadAll(br)
 			if rewriteClientModel != "" {
 				respBody = rewriteResponseModel(respBody, rewriteClientModel)
@@ -456,6 +574,27 @@ func (s *Server) reportCodexAPIKeyFault(a *auth.Auth, status int, resetAt time.T
 		return
 	}
 	a.MarkFailure(fmt.Sprintf("upstream %d", status))
+}
+
+// setJSONBool sets a top-level boolean field on a JSON object body, preserving
+// every other field's raw bytes. Used to stamp the client's `stream` intent
+// onto a bridged Responses body — apicompat's translator deliberately leaves
+// the field unset, because the Codex backend path forces it in the sanitizer
+// while a generic relay honors whatever the caller asks for.
+func setJSONBool(body []byte, field string, v bool) ([]byte, error) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return nil, err
+	}
+	if obj == nil {
+		return body, nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	obj[field] = b
+	return json.Marshal(obj)
 }
 
 // responseIsSSE reports whether a <400 response should be parsed as an SSE

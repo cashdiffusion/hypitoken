@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -24,9 +25,15 @@ import (
 // terminal tracking come from the same cc-core relay the native /v1/responses
 // passthrough uses, so a bridged stream behaves identically under a slow
 // upstream or an intermediary idle timeout.
-func streamCodexAsChatCompletions(c *gin.Context, resp *http.Response, counts *usage.Counts, model string, includeUsage bool) (sawTerminal bool, streamErr error) {
+//
+// Takes an io.Reader rather than the *http.Response so both bridge callers can
+// use it: the OAuth path hands over resp.Body directly, while the API-key path
+// has already wrapped the body in a bufio.Reader to sniff SSE-vs-JSON
+// (responseIsSSE peeks) and must pass that reader in — reading resp.Body afresh
+// would drop whatever the sniff already buffered.
+func streamCodexAsChatCompletions(c *gin.Context, upstream io.Reader, counts *usage.Counts, model string, includeUsage bool) (sawTerminal bool, streamErr error) {
 	flusher, _ := c.Writer.(http.Flusher)
-	reader := newLineReader(resp.Body)
+	reader := newLineReader(upstream)
 	st := apicompat.NewStreamState(model, includeUsage, time.Now().Unix())
 
 	// One upstream event can expand into several chat frames (role + tool-call

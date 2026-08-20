@@ -35,7 +35,7 @@ func TestStreamCodexAsChatCompletions(t *testing.T) {
 	resp := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}
 
 	var counts usage.Counts
-	sawTerminal, err := streamCodexAsChatCompletions(c, resp, &counts, "gpt-5.6-sol", false)
+	sawTerminal, err := streamCodexAsChatCompletions(c, resp.Body, &counts, "gpt-5.6-sol", false)
 	if err != nil && !errors.Is(err, io.EOF) {
 		t.Fatalf("relay error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestStreamCodexAsChatCompletionsTruncatedUpstream(t *testing.T) {
 	resp := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}
 
 	var counts usage.Counts
-	sawTerminal, _ := streamCodexAsChatCompletions(c, resp, &counts, "gpt-5.6-sol", false)
+	sawTerminal, _ := streamCodexAsChatCompletions(c, resp.Body, &counts, "gpt-5.6-sol", false)
 	if sawTerminal {
 		t.Error("truncated upstream reported as terminal")
 	}

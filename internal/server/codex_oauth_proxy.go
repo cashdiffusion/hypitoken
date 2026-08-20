@@ -259,7 +259,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		var sawTerminal bool
 		var rerr error
 		if isChat {
-			sawTerminal, rerr = streamCodexAsChatCompletions(c, resp, &counts, model, chatStreamWantsUsage(body))
+			sawTerminal, rerr = streamCodexAsChatCompletions(c, resp.Body, &counts, model, chatStreamWantsUsage(body))
 		} else {
 			sawTerminal, rerr = streamSSECodexBackend(c, resp, &counts)
 		}
