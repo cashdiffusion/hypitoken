@@ -258,10 +258,25 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		// unconditional Close after this switch and report a false leak.
 		var sawTerminal bool
 		var rerr error
+		var shed shedSignal
 		if isChat {
 			sawTerminal, rerr = streamCodexAsChatCompletions(c, resp.Body, &counts, model, chatStreamWantsUsage(body))
 		} else {
-			sawTerminal, rerr = streamSSECodexBackend(c, resp, &counts)
+			sawTerminal, shed, rerr = streamSSECodexBackend(c, resp, &counts)
+		}
+		// Upstream shed the turn inside a 200 stream. The demotion above keeps
+		// the CLI retrying instead of ending the session, which is exactly why
+		// this needs saying out loud: the client recovers, so without a log line
+		// nothing records that upstream refused to serve — and a capacity shed
+		// otherwise reaches the operator only as a turn that finished with no
+		// usage, which reads as a broken relay rather than a busy model.
+		if shed.shed {
+			log.Warnf("codex oauth: %s shed the turn mid-stream (capacity=%v); client sees a retryable error", a.ID, shed.capacity)
+			if shed.capacity {
+				streamErr = "upstream shed the turn (capacity)"
+			} else {
+				streamErr = "upstream shed the turn (quota/rate)"
+			}
 		}
 		if !sawTerminal {
 			// A stream that ends without a terminal event is only an upstream
@@ -511,7 +526,7 @@ func codexTerminalEvent(payload []byte) bool {
 //
 // gin's ResponseWriter is not goroutine-safe, so the keepalive goroutine and the
 // read loop share one mutex around every Write/Flush.
-func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Counts) (sawTerminal bool, streamErr error) {
+func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Counts) (sawTerminal bool, shed shedSignal, streamErr error) {
 	flusher, _ := c.Writer.(http.Flusher)
 	reader := newLineReader(resp.Body)
 
@@ -544,7 +559,12 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 					// here; giving this path lazy commit would be a separate
 					// change.
 					if codexerr.Classify(payload) == codexerr.ClassRetryable {
+						// Record it before rewriting: after demotion the code no
+						// longer says why the turn was refused, and the caller
+						// needs that to tell a shed apart from a broken relay.
+						shed.shed = true
 						if demoted, ok := codexerr.DemoteCapacityCode(payload); ok {
+							shed.capacity = true
 							tail := line[len(trim):]
 							rebuilt := make([]byte, 0, len("data: ")+len(demoted)+len(tail))
 							rebuilt = append(rebuilt, []byte("data: ")...)
@@ -582,7 +602,7 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 		KeepalivePayload: []byte(":\n\n"),
 		Next:             next,
 	})
-	return r.SawTerminal, r.Err
+	return r.SawTerminal, shed, r.Err
 }
 
 // extractCodexBackendUsageFromJSON reads usage from the ChatGPT Codex

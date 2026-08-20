@@ -57,7 +57,7 @@ func TestStreamSSECodexBackendTruncated(t *testing.T) {
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 
 	var counts usage.Counts
-	if sawTerminal, _ := streamSSECodexBackend(c, resp, &counts); sawTerminal {
+	if sawTerminal, _, _ := streamSSECodexBackend(c, resp, &counts); sawTerminal {
 		t.Error("stream without a terminal event should report sawTerminal=false")
 	}
 	if !strings.Contains(w.Body.String(), "response.output_text.delta") {
@@ -74,7 +74,7 @@ func TestStreamSSECodexBackendCompleted(t *testing.T) {
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 
 	var counts usage.Counts
-	if sawTerminal, _ := streamSSECodexBackend(c, resp, &counts); !sawTerminal {
+	if sawTerminal, _, _ := streamSSECodexBackend(c, resp, &counts); !sawTerminal {
 		t.Error("stream ending in response.completed should report sawTerminal=true")
 	}
 	if !strings.Contains(w.Body.String(), "response.completed") {
@@ -160,7 +160,7 @@ func TestStreamSSECodexBackendDemotesCapacityCodes(t *testing.T) {
 			resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 
 			var counts usage.Counts
-			_, _ = streamSSECodexBackend(c, resp, &counts)
+			_, _, _ = streamSSECodexBackend(c, resp, &counts)
 
 			out := w.Body.String()
 			if strings.Contains(out, code) {
@@ -188,7 +188,7 @@ func TestStreamSSECodexBackendLeavesOtherErrorsAlone(t *testing.T) {
 		resp := &http.Response{Body: io.NopCloser(strings.NewReader("event: error\ndata: " + frame + "\n\n"))}
 
 		var counts usage.Counts
-		_, _ = streamSSECodexBackend(c, resp, &counts)
+		_, _, _ = streamSSECodexBackend(c, resp, &counts)
 
 		if out := w.Body.String(); !strings.Contains(out, frame) {
 			t.Errorf("frame must be forwarded verbatim:\n want %q\n  got %q", frame, out)

@@ -675,10 +675,29 @@ func looksLikeSSE(br *bufio.Reader) bool {
 	return false
 }
 
+// shedSignal records an in-band shed observed while relaying a Codex SSE
+// stream: upstream accepted the request, answered 200, then refused the turn
+// with an error frame instead of content.
+//
+// Both relays report it — OAuth and API-key alike — because the demotion that
+// keeps the client's session alive is invisible by design: the CLI recovers, so
+// nothing downstream ever says how often upstream is shedding. Without this the
+// only trace was a turn that finished with no usage, which reads as "the relay
+// is broken" rather than "the model was at capacity".
+type shedSignal struct {
+	// shed: an error frame classified as retryable (capacity, quota, or rate).
+	shed bool
+	// capacity: that shed was one of the two session-terminating capacity
+	// codes, and was demoted on the way out so the CLI retries instead of
+	// ending the session.
+	capacity bool
+}
+
 // sseRelayOutcome is what one API-key SSE relay observed, beyond the bytes it
 // forwarded. Each field drives a different decision, so they are reported
 // separately rather than collapsed into a status.
 type sseRelayOutcome struct {
+	shedSignal
 	// clientGone: the CLIENT is what ended the stream.
 	clientGone bool
 	// sawTerminal: a stream-terminating event arrived. Without one the client
@@ -686,12 +705,6 @@ type sseRelayOutcome struct {
 	// upstream fault and must be visible in the log rather than passed off as a
 	// clean end-of-stream.
 	sawTerminal bool
-	// shed: upstream refused the turn mid-stream with a capacity/quota/rate
-	// error frame inside an otherwise-200 response.
-	shed bool
-	// capacity: that shed was one of the two session-terminating capacity
-	// codes, and was demoted on the way out.
-	capacity bool
 }
 
 // streamSSEOpenAI is the OpenAI SSE passthrough. The wire format is `data:
