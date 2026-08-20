@@ -17,9 +17,11 @@ import (
 
 	"github.com/wjsoj/cc-core/apicompat"
 	"github.com/wjsoj/cc-core/auth"
+	"github.com/wjsoj/cc-core/codexerr"
 	"github.com/wjsoj/cc-core/downstream"
 	"github.com/wjsoj/cc-core/mimicry"
 	"github.com/wjsoj/cc-core/requestlog"
+	ccstream "github.com/wjsoj/cc-core/stream"
 	"github.com/wjsoj/cc-core/usage"
 )
 
@@ -323,6 +325,10 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 
 	var counts usage.Counts
 	var errSnippet string
+	// streamTruncated records an upstream that stopped without a terminal
+	// event, so the request log names it instead of showing a clean 200 for a
+	// stream the client saw break.
+	var streamTruncated bool
 	outcome := usage.StreamComplete
 	// logStatus defaults to the upstream's. A mid-stream client hang-up
 	// overrides it to 499 so a cancellation stops masquerading as a clean 200
@@ -361,7 +367,23 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 					log.Warnf("codex proxy(apikey): bridged SSE ended before terminal event via %s: %v", a.ID, rerr)
 				}
 			} else {
-				clientGone = streamSSEOpenAI(c, br, &counts, rewriteClientModel)
+				sse := streamSSEOpenAI(c, br, &counts, rewriteClientModel)
+				clientGone = sse.clientGone
+				// An in-band capacity/quota frame is why a turn can end with
+				// output but no usage. Naming it separates "the relay shed this
+				// turn" from "the relay is broken", which the bare
+				// missing-usage warning below could never distinguish.
+				if sse.shed {
+					log.Warnf("codex proxy(apikey): %s shed the turn mid-stream (capacity=%v); the client sees a retryable error, not a session-ending one",
+						a.ID, sse.capacity)
+				}
+				// A stream that stops without a terminal event is what the
+				// client reports as "stream disconnected before completion".
+				// This path had no way to see it until now.
+				if !sse.sawTerminal && !clientGone {
+					log.Warnf("codex proxy(apikey): %s SSE ended before terminal event (truncated upstream) — client will report a disconnect", a.ID)
+					streamTruncated = true
+				}
 			}
 			outcome = usage.ClassifyStreamOutcome(counts, clientGone)
 			switch outcome {
@@ -516,6 +538,11 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		}
 	}
 	errField := outcome.LogError()
+	// Same label the OAuth path uses, so the two aggregate together in the
+	// request log instead of hiding half the truncations under a clean 200.
+	if errField == "" && streamTruncated {
+		errField = "stream truncated before terminal event"
+	}
 	if resp.StatusCode >= 400 {
 		errField = fmt.Sprintf("upstream %d: %s", resp.StatusCode, truncate([]byte(errSnippet), 200))
 	}
@@ -648,22 +675,62 @@ func looksLikeSSE(br *bufio.Reader) bool {
 	return false
 }
 
+// sseRelayOutcome is what one API-key SSE relay observed, beyond the bytes it
+// forwarded. Each field drives a different decision, so they are reported
+// separately rather than collapsed into a status.
+type sseRelayOutcome struct {
+	// clientGone: the CLIENT is what ended the stream.
+	clientGone bool
+	// sawTerminal: a stream-terminating event arrived. Without one the client
+	// raises "stream disconnected before completion", so its absence is a real
+	// upstream fault and must be visible in the log rather than passed off as a
+	// clean end-of-stream.
+	sawTerminal bool
+	// shed: upstream refused the turn mid-stream with a capacity/quota/rate
+	// error frame inside an otherwise-200 response.
+	shed bool
+	// capacity: that shed was one of the two session-terminating capacity
+	// codes, and was demoted on the way out.
+	capacity bool
+}
+
 // streamSSEOpenAI is the OpenAI SSE passthrough. The wire format is `data:
-// <json>\n\n` with a terminal `data: [DONE]`. Usage arrives in the final
-// chunk when stream_options.include_usage is on (we always ensure that);
-// parsing it here keeps billing correct for streaming clients.
+// <json>\n\n` with a terminal `data: [DONE]`; Codex relays answering
+// /v1/responses instead terminate with a `response.completed`-family event.
+// Usage arrives in the final chunk when stream_options.include_usage is on (we
+// always ensure that); parsing it here keeps billing correct for streaming
+// clients.
 //
-// It returns whether the CLIENT is what ended the stream. That distinction is
-// load-bearing for billing: an upstream that never reported usage is a relay
-// fault (bill nothing, cool the credential), while a client hang-up is the
-// user's own choice (bill the partial usage, leave health alone). Conflating
-// the two is what made every Ctrl-C both overcharge and trip the breaker.
+// This path used to be a bare read/write loop while the OAuth path
+// (streamSSECodexBackend) had three protections it lacked. Every one of them
+// matters more here, because API-key relays now carry the bulk of Codex
+// traffic:
 //
-// The read error alone cannot tell them apart — an upstream RST and a client
-// disconnect surface identically at the reader — so the signal comes from the
-// request context plus the write side, exactly as the Anthropic and
-// Codex-OAuth paths already do.
-func streamSSEOpenAI(c *gin.Context, reader *bufio.Reader, counts *usage.Counts, rewriteClientModel string) (clientGone bool) {
+//   - Keepalive. A model that thinks for a minute writes nothing, and the
+//     intermediaries in between (Caddy, Cloudflare, the client's own idle
+//     timeout) cut a silent connection. The client reports that as "stream
+//     disconnected before completion".
+//   - Terminal tracking. Without it a truncated upstream is indistinguishable
+//     from a clean end, so the fault is invisible in the request log — which is
+//     why these disconnects looked like they came from nowhere.
+//   - Capacity demotion. Upstream sheds load as an in-band error frame inside a
+//     200 stream. Forwarded verbatim, `server_is_overloaded` reaches the CLI as
+//     ApiError::ServerOverloaded, which is TERMINAL for the session; the same
+//     failure under nearly any other code lands in the CLI's Retryable arm and
+//     is merely backed off. cc-core's codexerr.ClientFrame rewrites just that
+//     code and leaves the human-readable message intact.
+//
+// Billing and health are read from the ORIGINAL payload, before demotion —
+// after ClientFrame the code no longer says why the request failed.
+//
+// clientGone is load-bearing for billing: an upstream that never reported usage
+// is a relay fault (bill nothing, cool the credential), while a client hang-up
+// is the user's own choice (bill the partial usage, leave health alone).
+// Conflating the two is what made every Ctrl-C both overcharge and trip the
+// breaker. The read error alone cannot tell them apart — an upstream RST and a
+// client disconnect surface identically at the reader — so the signal comes
+// from the request context, exactly as the Anthropic and Codex-OAuth paths do.
+func streamSSEOpenAI(c *gin.Context, reader *bufio.Reader, counts *usage.Counts, rewriteClientModel string) sseRelayOutcome {
 	flusher, _ := c.Writer.(http.Flusher)
 	// c.Request is nil in unit tests that drive the relay directly; treat that
 	// as "no cancellation signal" rather than panicking on the hot path.
@@ -671,43 +738,71 @@ func streamSSEOpenAI(c *gin.Context, reader *bufio.Reader, counts *usage.Counts,
 	if c.Request != nil {
 		ctx = c.Request.Context()
 	}
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			trim := bytes.TrimRight(line, "\r\n")
-			outLine := line
-			if bytes.HasPrefix(trim, []byte("data:")) {
-				payload := bytes.TrimSpace(trim[5:])
-				// Skip the DONE sentinel and non-JSON payloads.
-				if len(payload) > 0 && payload[0] == '{' {
-					if rewriteClientModel != "" {
-						if rewritten := rewriteResponseModel(payload, rewriteClientModel); rewritten != nil {
-							tail := line[len(trim):]
-							rebuilt := make([]byte, 0, len("data: ")+len(rewritten)+len(tail))
-							rebuilt = append(rebuilt, []byte("data: ")...)
-							rebuilt = append(rebuilt, rewritten...)
-							rebuilt = append(rebuilt, tail...)
-							outLine = rebuilt
-						}
+
+	var out sseRelayOutcome
+	next := func() (emit []byte, terminal bool, err error) {
+		line, rerr := reader.ReadBytes('\n')
+		if len(line) == 0 {
+			return nil, false, rerr
+		}
+		trim := bytes.TrimRight(line, "\r\n")
+		outLine := line
+		if bytes.HasPrefix(trim, []byte("data:")) {
+			payload := bytes.TrimSpace(trim[5:])
+			switch {
+			case bytes.Equal(payload, []byte("[DONE]")):
+				terminal = true
+			case len(payload) > 0 && payload[0] == '{':
+				// Accounting first, on the untouched payload.
+				counts.Add(extractOpenAIUsageFromJSON(payload))
+				if codexTerminalEvent(payload) {
+					terminal = true
+				}
+				if codexerr.Classify(payload) == codexerr.ClassRetryable {
+					out.shed = true
+				}
+				rewritten := payload
+				if rewriteClientModel != "" {
+					if r := rewriteResponseModel(rewritten, rewriteClientModel); r != nil {
+						rewritten = r
 					}
-					counts.Add(extractOpenAIUsageFromJSON(payload))
+				}
+				// Demote only the two session-ending capacity codes. Quota and
+				// rate codes are left alone: the CLI handles them
+				// non-terminally and parses its retry delay off the original.
+				if frame, shed, capacity := codexerr.ClientFrame(rewritten); shed {
+					rewritten = frame
+					if capacity {
+						out.capacity = true
+					}
+				}
+				if !bytes.Equal(rewritten, payload) {
+					tail := line[len(trim):]
+					rebuilt := make([]byte, 0, len("data: ")+len(rewritten)+len(tail))
+					rebuilt = append(rebuilt, []byte("data: ")...)
+					rebuilt = append(rebuilt, rewritten...)
+					rebuilt = append(rebuilt, tail...)
+					outLine = rebuilt
 				}
 			}
-			if _, werr := c.Writer.Write(outLine); werr != nil {
-				// Writing to the client failed — it hung up. Nothing further can
-				// be delivered, and the credential is blameless.
-				return true
-			}
-			if flusher != nil {
-				flusher.Flush()
-			}
 		}
-		if err != nil {
-			// A read error with our own context already canceled means the
-			// client left and the transport tore the upstream down behind it.
-			return ctx != nil && ctx.Err() != nil
-		}
+		return outLine, terminal, rerr
 	}
+
+	// commit=nil: this path commits headers eagerly before the relay starts
+	// (writeSSEResponseHeaders), matching the OAuth passthrough.
+	r := ccstream.Relay(c.Writer, func() {
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}, ccstream.RelayOptions{
+		KeepaliveIdle:    10 * time.Second,
+		KeepalivePayload: []byte(":\n\n"),
+		Next:             next,
+	})
+	out.sawTerminal = r.SawTerminal
+	out.clientGone = isClientDisconnect(ctx, r.Err)
+	return out
 }
 
 // extractOpenAIUsageFromJSON pulls a usage.Counts from an OpenAI-shaped
