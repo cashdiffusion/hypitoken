@@ -76,8 +76,15 @@ func (s *Server) forward(c *gin.Context, provider, path string) {
 	// Per-window slot identity. Each Claude Code CLI window sends a distinct
 	// X-Claude-Code-Session-Id, so the same user opening multiple windows is
 	// scheduled as multiple independent slots (and can land on different
-	// upstream credentials). Empty for raw API callers → one slot per token.
+	// upstream credentials).
 	slotID := clientSlotID(c)
+	if slotID == "" {
+		// Nothing on the wire named a session. Before falling back to one slot
+		// per token — which pins every caller behind a third-party relay to a
+		// single credential — try to recover the conversation from the body and
+		// spread it over a bounded set of buckets. See relay_fanout.go.
+		slotID = fanoutSlotID(body, sessionlessFanoutWidth)
+	}
 
 	// Parse minimal request metadata for usage reporting + streaming detection.
 	var peek struct {
