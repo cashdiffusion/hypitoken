@@ -498,16 +498,8 @@ func (h *Handler) handleStatusHistory(c *gin.Context) {
 	}
 
 	f := requestlog.Filter{Dir: h.cfg.LogDir, Limit: 100000}
-	if body.From != "" {
-		if t, err := parseDateBound(body.From, false); err == nil {
-			f.From = t
-		}
-	}
-	if body.To != "" {
-		if t, err := parseDateBound(body.To, true); err == nil {
-			f.To = t
-		}
-	}
+	// Day labels keep the query cube-eligible; see applyDateBounds.
+	applyDateBounds(&f, body.From, body.To)
 	res, err := requestlog.Query(f)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

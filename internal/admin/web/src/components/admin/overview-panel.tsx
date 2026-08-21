@@ -67,9 +67,14 @@ export function OverviewPanel({ refreshTick }: { refreshTick: number }) {
       fromD.setDate(today.getDate() - (DAYS - 1));
       const from = `${fromD.getFullYear()}-${pad(fromD.getMonth() + 1)}-${pad(fromD.getDate())}`;
       const to = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+      // dims asks for only the three rollups this panel renders — the by-day
+      // bucket is never read here (the sparkline comes from /requests/hourly),
+      // and each rollup the server skips is a GROUP BY it does not run.
       const [d, all, hr, creds] = await Promise.all([
-        apiGet<RequestsResp>(`/admin/requests?limit=1&from=${from}&to=${to}`),
-        apiGet<RequestsResp>(`/admin/requests?limit=1`),
+        apiGet<RequestsResp>(
+          `/admin/requests?limit=1&dims=summary,by_client,by_model&from=${from}&to=${to}`,
+        ),
+        apiGet<RequestsResp>(`/admin/requests?limit=1&dims=summary`),
         apiGet<{ buckets: HourBucket[] }>(`/admin/requests/hourly?hours=24`),
         apiGet<{ credentials: Credential[] }>(`/admin/credentials`),
       ]);

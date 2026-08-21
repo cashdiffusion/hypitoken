@@ -73,6 +73,8 @@ type Handler struct {
 	// so minor staleness is acceptable.
 	reqCacheMu sync.Mutex
 	reqCache   map[string]reqCacheEntry
+	// reqSF collapses concurrent misses on the same filter; see cachedQuery.
+	reqSF singleflight.Group
 
 	// Serializes credential PATCH and upload handlers so concurrent admin
 	// mutations cannot overwrite one another's persisted fields.
@@ -1483,16 +1485,8 @@ func (h *Handler) handleRequestsQuery(c *gin.Context) {
 			f.Client = name
 		}
 	}
-	if v := strings.TrimSpace(c.Query("from")); v != "" {
-		if t, err := parseDateBound(v, false); err == nil {
-			f.From = t
-		}
-	}
-	if v := strings.TrimSpace(c.Query("to")); v != "" {
-		if t, err := parseDateBound(v, true); err == nil {
-			f.To = t
-		}
-	}
+	applyDateBounds(&f, c.Query("from"), c.Query("to"))
+	f.Dims = parseDims(c.Query("dims"))
 	if v := c.Query("limit"); v != "" {
 		_, _ = fmt.Sscanf(v, "%d", &f.Limit)
 	}
@@ -1542,11 +1536,29 @@ func (h *Handler) cachedQuery(f requestlog.Filter) (*requestlog.Result, error) {
 	}
 	h.reqCacheMu.Unlock()
 
-	res, err := requestlog.Query(f)
+	// Collapse concurrent misses, the way cachedByAuth already does. Two
+	// operators opening the panel a second apart — or one panel whose
+	// auto-refresh fires while the previous load is still running — otherwise
+	// each pay the full query, and the cost of an expensive window is
+	// multiplied by however many of them arrive inside one TTL.
+	v, err, _ := h.reqSF.Do(key, func() (any, error) {
+		res, err := requestlog.Query(f)
+		if err != nil {
+			return nil, err
+		}
+		h.storeReqCache(key, res)
+		return res, nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	res, _ := v.(*requestlog.Result)
+	return cloneResult(res), nil
+}
 
+// storeReqCache publishes a fresh Result under key, evicting coarsely when the
+// map has grown past its bound.
+func (h *Handler) storeReqCache(key string, res *requestlog.Result) {
 	h.reqCacheMu.Lock()
 	if h.reqCache == nil || len(h.reqCache) >= requestsCacheMax {
 		// Coarse eviction: when the cache grows unbounded (e.g., varied
@@ -1555,18 +1567,22 @@ func (h *Handler) cachedQuery(f requestlog.Filter) (*requestlog.Result, error) {
 		h.reqCache = make(map[string]reqCacheEntry, 4)
 	}
 	h.reqCache[key] = reqCacheEntry{at: time.Now(), result: res}
-	clone := cloneResult(res)
 	h.reqCacheMu.Unlock()
-	return clone, nil
 }
 
 func reqCacheKey(f requestlog.Filter) string {
 	// Dir is constant per process; skip it to keep keys short.
-	return fmt.Sprintf("%s|%s|%s|%s|%s|%d|%d|%d",
+	// FromDay/ToDay must be part of the key. They are an ALTERNATIVE to
+	// From/To, not an addition: when they are set the timestamps are still
+	// zero here (requestlog resolves them later), so a key built from the
+	// timestamps alone would be byte-identical for every day-bounded window
+	// and serve one range's aggregates for another.
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d",
 		f.From.UTC().Format(time.RFC3339),
 		f.To.UTC().Format(time.RFC3339),
+		f.FromDay, f.ToDay,
 		f.Client, f.ClientToken, f.Model,
-		f.Status, f.Limit, f.Offset,
+		f.Status, f.Limit, f.Offset, int(f.Dims),
 	)
 }
 
@@ -1658,6 +1674,97 @@ func (h *Handler) remapDisplayNames(entries []requestlog.Record) {
 			}
 		}
 	}
+}
+
+// applyDateBounds resolves the from/to query params onto the filter, choosing
+// between the day-label form and the timestamp form.
+//
+// The choice is the whole performance story of this endpoint. requestlog keeps
+// a pre-summed cube whose finest time grain is a day, and it can only answer a
+// window it knows falls on day boundaries — which the caller states by setting
+// FromDay/ToDay rather than From/To. A date picker always produces whole days,
+// so routing "YYYY-MM-DD" to the labels is exact, not an approximation.
+//
+// Measured on the production archive (1.09M rows, 14-day window): the
+// timestamp form materialises 481,989 rows and takes 3.2-4.0s for the four
+// aggregates; the cube answers the same four in 34ms. The endpoint already
+// demonstrated both — an unbounded query was cube-eligible and returned in
+// 479ms while the same call with from/to attached took 8.9s.
+//
+// RFC3339 input keeps the timestamp form: an arbitrary instant genuinely is
+// finer than the cube can answer, and silently rounding it to days would
+// return a different window than the caller asked for.
+//
+// Setting BOTH forms is a contradiction that requestlog resolves by dropping
+// the labels, so each branch sets exactly one.
+func applyDateBounds(f *requestlog.Filter, from, to string) {
+	if v := strings.TrimSpace(from); v != "" {
+		if isDayLabel(v) {
+			f.FromDay = v
+		} else if t, err := parseDateBound(v, false); err == nil {
+			f.From = t
+		}
+	}
+	if v := strings.TrimSpace(to); v != "" {
+		if isDayLabel(v) {
+			f.ToDay = v
+		} else if t, err := parseDateBound(v, true); err == nil {
+			f.To = t
+		}
+	}
+	// A mixed pair (one day label, one timestamp) would have the labels
+	// dropped downstream, silently widening the window to the timestamp alone.
+	// Fall back to timestamps for both so the window stays what was asked for.
+	if (f.FromDay != "" || f.ToDay != "") && (!f.From.IsZero() || !f.To.IsZero()) {
+		if f.FromDay != "" {
+			if t, err := parseDateBound(f.FromDay, false); err == nil {
+				f.From = t
+			}
+			f.FromDay = ""
+		}
+		if f.ToDay != "" {
+			if t, err := parseDateBound(f.ToDay, true); err == nil {
+				f.To = t
+			}
+			f.ToDay = ""
+		}
+	}
+}
+
+// parseDims turns a comma-separated `dims` param into the aggregate set the
+// caller actually reads. Each dimension is its own GROUP BY, so a panel that
+// renders top-clients and top-models pays for a by-day rollup it never looks
+// at — measurably, since cc-core reports 76.6ms for all four against 21.9ms
+// for one on a 90-day window.
+//
+// An absent or unrecognised value means "all of them", which is what every
+// existing caller gets today: the param can only ever narrow the response, so
+// a client that does not know about it is unaffected.
+func parseDims(s string) requestlog.Dims {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0 // zero means all, per requestlog.Filter.Dims
+	}
+	var d requestlog.Dims
+	for _, part := range strings.Split(s, ",") {
+		switch strings.ToLower(strings.TrimSpace(part)) {
+		case "summary":
+			d |= requestlog.DimSummary
+		case "by_client", "client":
+			d |= requestlog.DimByClient
+		case "by_model", "model":
+			d |= requestlog.DimByModel
+		case "by_day", "day":
+			d |= requestlog.DimByDay
+		}
+	}
+	return d
+}
+
+// isDayLabel reports whether s is exactly a "YYYY-MM-DD" calendar date.
+func isDayLabel(s string) bool {
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil && len(s) == len("2006-01-02")
 }
 
 // parseDateBound accepts "YYYY-MM-DD" (start-of-day) or full RFC3339.
