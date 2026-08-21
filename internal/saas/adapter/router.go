@@ -34,14 +34,30 @@ import (
 // /api/v2/admin/* group also exposes request-log queries + Anthropic OAuth
 // quota probe (handlers reused from the legacy operator API).
 //
+// svcH may be nil — when set (saas.service_tokens is configured) the
+// machine-to-machine /api/v2/svc/* group is mounted for the sibling HypiHub
+// service. See service.go.
+//
+// ssoH may be nil — when set (saas.sso_return_origins is non-empty) the
+// cross-origin single-sign-on minting route POST /api/v2/auth/sso/code is
+// mounted on the authenticated group. See sso.go.
+//
 // referralsEnabled is the master switch for the invite / referral / marketing-
 // attribution programme (saas.referrals_enabled, default false — suspended
 // after the 2026-08-08 farming incident). When false the user-facing referral
 // routes and the ?ref= attribution beacons are not mounted at all; the admin
 // routes that read the historical channel / campaign / conversion data stay
 // mounted either way, so the operator can still audit what was granted.
-func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service, arenaH *arena.Service, profileH *profile.Handler, referralH *referral.Service, workspaceH *workspace.Handler, supportH *support.Service, referralsEnabled bool) {
+func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *tokens.Handler, billingH *billing.Handler, adminH *admin.Handler, credH *admin.CredHandler, iss *saasauth.Issuer, legacyH *legacyadmin.Handler, logDir string, catalog *pricing.Catalog, growthH *growth.Service, analyticsH *analytics.Service, arenaH *arena.Service, profileH *profile.Handler, referralH *referral.Service, workspaceH *workspace.Handler, supportH *support.Service, svcH *ServiceHandler, ssoH *SSOHandler, referralsEnabled bool) {
 	v2 := engine.Group("/api/v2")
+
+	// Service-to-service (/api/v2/svc/*) — the sibling HypiHub gateway sharing
+	// these accounts and wallets. Mounted ONLY when saas.service_tokens is
+	// non-empty: svcH is nil otherwise and the entire group ceases to exist,
+	// which is the right default for every deployment that doesn't run HypiHub.
+	// Registered before the user-facing groups purely so it sits outside them —
+	// it authenticates by X-Service-Token, never by a user JWT.
+	svcH.Mount(v2)
 
 	// Public.
 	v2.GET("/site", func(c *gin.Context) {
@@ -125,6 +141,11 @@ func Mount(engine *gin.Engine, store *db.DB, authH *saasauth.Handler, tokensH *t
 		user["workspaces"] = wsOut
 		c.JSON(http.StatusOK, gin.H{"user": user, "group": g})
 	})
+	// Cross-origin SSO handoff (POST /auth/sso/code). Registered on the AUTHED
+	// group even though its sibling path /auth/* is public: the code it returns
+	// is a session, so only the holder of that session may ask for one. nil —
+	// and therefore absent — unless saas.sso_return_origins lists an origin.
+	ssoH.AuthedRoutes(authed)
 	tokensH.Routes(authed.Group("/tokens"))
 	billingH.UserRoutes(authed.Group("/billing"))
 	// Spend analytics. Only needs the store, so it's built here rather than

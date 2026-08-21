@@ -117,6 +117,12 @@ export default {
       appealAction: "Appeal",
       submit: "Sign in",
     },
+    // Cross-site handoff to the sibling product (hub.novadiffusion.com).
+    sso: {
+      hypihub: "HypiHub",
+      continueTo: "Signing in to continue to {{product}}",
+      failed: "Couldn't hand your session over. You're signed in to HypiToken instead.",
+    },
     sessionExpired: "Your session has expired. Please sign in again.",
     register: {
       title: "Create account",

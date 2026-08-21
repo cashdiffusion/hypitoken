@@ -206,6 +206,57 @@ saas:
   # Open registration. Set false to require operator-pre-creation.
   free_register: true
 
+  # 姊妹服务（HypiHub 汇枢，图片/视频生成网关）的机器对机器凭证。
+  #
+  # HypiHub 与本服务共用同一套用户账号和 USD 钱包，但它不会直接打开 saas.db
+  # ——第二个进程写同一个 SQLite 会和迁移器抢锁、并绕开本仓库 _txlock=immediate
+  # 的写入纪律。它改为用同一个 HS256 密钥离线校验 hypitoken 签发的 JWT，再通过
+  # /api/v2/svc/* 这组接口扣款/退款。请求头 X-Service-Token 携带下面任意一条。
+  #
+  # ⚠️ 这不是用户凭证：持有者可以对**任意** workspace 扣款。必须当作数据库密码
+  #    对待，并且 /api/v2/svc/ 绝对不能暴露到公网 —— 请在 Caddy/Nginx 反代层
+  #    直接拦掉该前缀，只允许内网（同机 127.0.0.1 或私有网段）访问。
+  #
+  # 留空（默认）时整个 /api/v2/svc 路由组根本不会挂载，不跑 HypiHub 的部署无需
+  # 关心这一项。每条可写成三种形式：明文 token、"sha256:<64位hex>"（配置文件里
+  # 不留明文）、或 "@/path/to/file"（从文件读，一行一条）——与
+  # trusted_relay_tokens、支付网关密钥的约定一致。
+  service_tokens: []
+  # service_tokens:
+  #   - "sha256:3b1f...64位hex..."
+  #   - "@/etc/hypitoken/hypihub.token"
+
+  # 跨站单点登录：允许把本站会话交接过去的 origin 白名单（**精确比对**）。
+  #
+  # 姊妹站 HypiHub（汇枢）跑在 hub.novadiffusion.com，与本站 api.novadiffusion.com
+  # **不同源**：localStorage 不共享、也没有跨这两个域的 cookie，所以用户在本站登录后
+  # 到那边仍然是未登录状态。解决办法是一次性交接码：浏览器带着 ?return= 回到本站，
+  # 本站签发一枚 120 秒的一次性 code，浏览器把它带过去，HypiHub 后端再拿 code 到
+  # /api/v2/svc/sso/redeem 换一枚正常 JWT。
+  #
+  # ⚠️ 这一项就是整个功能的安全边界。/api/v2/auth/sso/code 收到的 return_url 来自
+  #    浏览器（也就是可能来自攻击者），而它换到的 code 在这 120 秒里**等价于该用户的
+  #    密码**。把 code 送到攻击者的站点 = 账号完全失陷。
+  #
+  # ⚠️ 因此这里是「归一化 origin 的精确字符串相等」，不做也永远不要改成前缀匹配、
+  #    后缀匹配或通配子域 —— 那些全都是**开放重定向**：
+  #      - 前缀匹配 "https://hub.novadiffusion.com" 会放行
+  #        "https://hub.novadiffusion.com.evil.com"（把域名接在后面即可）；
+  #      - 通配 "*.novadiffusion.com" 会放行攻击者能拿到 CNAME 的任意子域。
+  #    配置里写通配符会在**启动时直接 fatal**，不会被静默忽略。
+  #
+  # 每条只写 origin：scheme://host[:port]，不带 path / query / fragment，也不带
+  # 用户名密码。大小写和默认端口会被归一化（https://x.com:443 == https://x.com），
+  # 其余一律严格：http 与 https 是两个 origin，不同端口是两个 origin，子域不继承。
+  # 写错任意一条 = 启动 fatal（宁可起不来，也不要一个悄悄少了一行的白名单）。
+  #
+  # 留空（默认）时 POST /api/v2/auth/sso/code 根本不会挂载，不跑 HypiHub 的部署
+  # 无需关心这一项。（换取 JWT 的 /api/v2/svc/sso/redeem 属于上面的 svc 路由组，
+  # 由 service_tokens 单独控制。）
+  sso_return_origins: []
+  # sso_return_origins:
+  #   - "https://hub.novadiffusion.com"
+
   # Maximum USD a user wallet may be driven negative by in-flight requests
   # (one large request, or many concurrent ones, can each pass the balance>0
   # check and then bill against a near-zero balance). Charges are clamped so the

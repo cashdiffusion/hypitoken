@@ -156,17 +156,7 @@ func (db *DB) ChargeWorkspaceWithFloor(ctx context.Context, workspaceID, userID 
 		return 0, 0, err
 	}
 
-	charged = amountUSD
-	if maxOverdraftUSD > 0 {
-		// Clamp so the post-charge balance never drops below the floor. If the
-		// wallet is already at/below the floor, charge nothing.
-		if room := bal + maxOverdraftUSD; charged > room {
-			charged = room
-		}
-		if charged < 0 {
-			charged = 0
-		}
-	}
+	charged = clampCharge(bal, amountUSD, maxOverdraftUSD)
 	newBal = bal - charged
 	if charged == 0 {
 		return newBal, 0, nil
@@ -176,22 +166,81 @@ func (db *DB) ChargeWorkspaceWithFloor(ctx context.Context, workspaceID, userID 
 	if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET balance_usd = ?, updated_at = ? WHERE id = ?`, newBal, now, workspaceID); err != nil {
 		return 0, 0, err
 	}
-	// `ref` is still written in its legacy "token=<id> model=<name>" form even
-	// though both fields now have real columns: /billing/transactions and
-	// /workspaces/:id/ledger render it, and it doubles as an audit trail against
-	// which the structured columns can be re-derived.
-	if _, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx
-		(user_id, workspace_id, kind, amount_usd, ref, note, created_at,
-		 token_id, model, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		userID, workspaceID, kind, -charged, ref, note, now,
-		meta.TokenID, meta.Model, meta.InputTokens, meta.OutputTokens, meta.CacheReadTokens, meta.CacheCreateTokens); err != nil {
+	if _, err := insertLedgerTx(ctx, tx, ledgerRow{
+		UserID: userID, WorkspaceID: workspaceID, Kind: kind,
+		AmountUSD: -charged, Ref: ref, Note: note, CreatedAt: now, Meta: meta,
+	}); err != nil {
 		return 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, 0, err
 	}
 	return newBal, charged, nil
+}
+
+// clampCharge returns how much of amountUSD may actually be taken from a wallet
+// resting at bal without pushing it below -maxOverdraftUSD. maxOverdraftUSD <= 0
+// disables the floor and the full amount is taken. A wallet already at or past
+// the floor yields 0 — the floor is never deepened.
+//
+// Extracted so the idempotent HTTP charge path (wallet_idem.go) shares one
+// definition of the clamp with the in-process one above rather than restating
+// it: two copies of the money math is how the ledger and the request log stop
+// agreeing.
+func clampCharge(bal, amountUSD, maxOverdraftUSD float64) float64 {
+	charged := amountUSD
+	if maxOverdraftUSD > 0 {
+		if room := bal + maxOverdraftUSD; charged > room {
+			charged = room
+		}
+		if charged < 0 {
+			charged = 0
+		}
+	}
+	return charged
+}
+
+// ledgerRow is one wallet_tx insert. AmountUSD is SIGNED in the table's
+// convention: negative for a debit (charge), positive for a credit (topup /
+// adjust / refund).
+type ledgerRow struct {
+	UserID      int64
+	WorkspaceID int64
+	Kind        string
+	AmountUSD   float64
+	Ref         string
+	Note        string
+	CreatedAt   int64
+	Meta        ChargeMeta
+
+	// IdemKey / Product are v22 and empty for every in-process caller. A
+	// non-empty IdemKey is covered by the partial UNIQUE index, so a duplicate
+	// insert fails the transaction instead of double-billing.
+	IdemKey string
+	Product string
+}
+
+// insertLedgerTx writes one wallet_tx row inside the caller's transaction and
+// returns its id.
+//
+// `ref` is still written in its legacy "token=<id> model=<name>" form even
+// though both fields now have real columns: /billing/transactions and
+// /workspaces/:id/ledger render it, and it doubles as an audit trail against
+// which the structured columns can be re-derived.
+func insertLedgerTx(ctx context.Context, tx *sql.Tx, r ledgerRow) (int64, error) {
+	res, err := tx.ExecContext(ctx, `INSERT INTO wallet_tx
+		(user_id, workspace_id, kind, amount_usd, ref, note, created_at,
+		 token_id, model, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
+		 idem_key, product)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.UserID, r.WorkspaceID, r.Kind, r.AmountUSD, r.Ref, r.Note, r.CreatedAt,
+		r.Meta.TokenID, r.Meta.Model, r.Meta.InputTokens, r.Meta.OutputTokens,
+		r.Meta.CacheReadTokens, r.Meta.CacheCreateTokens,
+		r.IdemKey, r.Product)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
 }
 
 // PersonalWorkspaceID resolves a user's personal (home) workspace id.

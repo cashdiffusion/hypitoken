@@ -10,8 +10,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -134,6 +139,192 @@ type Config struct {
 
 	// HealthCheck cadence for API-key credentials.
 	HealthCheckInterval time.Duration `yaml:"health_check_interval"`
+
+	// ServiceTokens authenticate a SIBLING SERVICE — today HypiHub, the
+	// image/video generation gateway — calling the machine-to-machine
+	// /api/v2/svc/* routes to resolve a user token and move that user's
+	// wallet. They are NOT user credentials and grant no user identity: a
+	// holder can debit any workspace, so treat them exactly like a database
+	// password.
+	//
+	// The /api/v2/svc group is mounted only while this list is non-empty; an
+	// empty list (the default) means those routes do not exist at all, which
+	// is the correct posture for every deployment that doesn't run HypiHub.
+	//
+	// These routes MUST NOT be internet-reachable. Bind the sibling to a
+	// private interface or block /api/v2/svc/ at the reverse proxy — the
+	// token is the only thing standing between the public internet and every
+	// wallet in the fleet.
+	//
+	// Each entry may be a raw token, "sha256:<hex>" so the config need not
+	// hold the secret in the clear, or "@/path/to/file" to read it from a file
+	// (one token per line) — the same conventions as trusted_relay_tokens and
+	// the payment-gateway keys.
+	ServiceTokens []string `yaml:"service_tokens,omitempty"`
+
+	// SSOReturnOrigins is the EXACT-match allowlist of origins a cross-site
+	// single-sign-on handoff may be sent to (see docs/SPEC.md §12 in the
+	// hypihub repo). Each entry is an origin — scheme://host[:port], no path,
+	// e.g. "https://hub.novadiffusion.com".
+	//
+	// POST /api/v2/auth/sso/code takes a return_url from the browser, and the
+	// code it mints is, for its 120-second life, that user's session. Sending
+	// it to an attacker-chosen origin is a full account takeover, so the check
+	// is exact string equality against a normalized origin and nothing else:
+	// no prefix match, no suffix match, no wildcard subdomain. Every one of
+	// those is an open redirect wearing an allowlist's clothes — a prefix
+	// match on "https://hub.example.com" admits "https://hub.example.com.evil",
+	// and a "*.example.com" wildcard admits any subdomain an attacker can get
+	// a CNAME on.
+	//
+	// Empty (the default) means the SSO code endpoint is not mounted at all,
+	// which is the right posture for every deployment without a sibling site.
+	SSOReturnOrigins []string `yaml:"sso_return_origins,omitempty"`
+}
+
+// OriginAllowlist is a parsed, normalized set of origins compared by exact
+// equality.
+//
+// Parsed ONCE at startup, not per request: a return_url check that re-parses
+// operator config on the hot path is a check that can start failing open
+// halfway through the process's life. Malformed entries are a boot-time fatal
+// (see NewOriginAllowlist) rather than a silently-dropped line, because an
+// allowlist that quietly lost its only entry looks exactly like a working one
+// until somebody notices the feature is off — or, worse, until the code that
+// consumes it treats "empty" as "allow".
+type OriginAllowlist struct {
+	origins []string
+}
+
+// NewOriginAllowlist normalizes each entry to lowercase scheme://host[:port].
+//
+// Returns (nil, nil) for an empty list: that is "the feature is off", and the
+// caller must not mount the route. Any malformed entry is an error the caller
+// is expected to treat as fatal.
+//
+// Rejected deliberately: anything carrying a path, query, fragment, or
+// userinfo. Those are not origins, and accepting them would invite the belief
+// that the path portion is being checked — it never is, so "https://x.com/safe"
+// in the config would silently authorize "https://x.com/anything".
+func NewOriginAllowlist(entries []string) (*OriginAllowlist, error) {
+	a := &OriginAllowlist{}
+	for _, raw := range entries {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		// Checked before parsing so a wildcard always earns the wildcard
+		// message rather than whatever generic complaint the parser reaches
+		// first — the operator who wrote "*.example.com" needs to be told why
+		// it is refused, not merely that it is.
+		if strings.Contains(raw, "*") {
+			return nil, fmt.Errorf("saas.sso_return_origins: %q: wildcards are not supported — "+
+				"a wildcard origin is an open redirect; list each origin in full", raw)
+		}
+		origin, err := NormalizeOrigin(raw)
+		if err != nil {
+			return nil, fmt.Errorf("saas.sso_return_origins: %q: %w", raw, err)
+		}
+		if !slices.Contains(a.origins, origin) {
+			a.origins = append(a.origins, origin)
+		}
+	}
+	if len(a.origins) == 0 {
+		return nil, nil
+	}
+	return a, nil
+}
+
+// NormalizeOrigin parses one origin string into canonical lowercase
+// scheme://host[:port] form. The default port for the scheme is dropped so
+// "https://x.com:443" and "https://x.com" compare equal.
+func NormalizeOrigin(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", errors.New("not a valid URL")
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", errors.New(`scheme must be "http" or "https"`)
+	}
+	if u.User != nil {
+		return "", errors.New("must not contain userinfo")
+	}
+	if u.Opaque != "" {
+		return "", errors.New("must be scheme://host[:port]")
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return "", errors.New("missing host")
+	}
+	// Only a bare origin, or an origin with the empty/"/" path a browser sends
+	// as document.origin. Anything more specific is not an origin.
+	if p := strings.TrimSuffix(u.EscapedPath(), "/"); p != "" {
+		return "", errors.New("must not contain a path — list the origin only")
+	}
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return "", errors.New("must not contain a query or fragment")
+	}
+	port := u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		// net/url already rejects a non-numeric port, but be explicit: this
+		// value is about to be compared by string equality.
+		if _, err := strconv.Atoi(port); err != nil {
+			return "", errors.New("invalid port")
+		}
+		host = net.JoinHostPort(host, port)
+	}
+	return scheme + "://" + host, nil
+}
+
+// Allows reports whether rawURL's origin is on the list, and returns the
+// trimmed URL the caller should hand back to the browser.
+//
+// EXACT equality on the normalized origin. The path of rawURL is not checked
+// and not restricted — the origin is the whole security boundary here, since
+// any page on an allowed origin is already trusted with the user's session
+// there. What matters is that no unlisted origin can ever be reached, which is
+// why this is string equality and not any form of matching.
+func (a *OriginAllowlist) Allows(rawURL string) (string, bool) {
+	if a == nil || len(a.origins) == 0 {
+		return "", false
+	}
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.User != nil || u.Opaque != "" {
+		return "", false
+	}
+	origin, err := NormalizeOrigin(u.Scheme + "://" + u.Host)
+	if err != nil {
+		return "", false
+	}
+	if !slices.Contains(a.origins, origin) {
+		return "", false
+	}
+	return rawURL, true
+}
+
+// Origins returns the normalized entries, for logging and for the SPA's own
+// pre-flight check. Copy, so a caller cannot mutate the allowlist.
+func (a *OriginAllowlist) Origins() []string {
+	if a == nil {
+		return nil
+	}
+	return slices.Clone(a.origins)
+}
+
+// Len reports how many origins are configured. Nil-safe.
+func (a *OriginAllowlist) Len() int {
+	if a == nil {
+		return 0
+	}
+	return len(a.origins)
 }
 
 type SMTPConfig struct {

@@ -69,10 +69,40 @@ func NewAdapter(store *db.DB, catalog *pricing.Catalog, rate *billing.Rate) *Ada
 func (a *Adapter) Lookup(token string) (server.SaaSTokenInfo, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	return a.LookupCtx(ctx, token)
+}
+
+// LookupCtx is Lookup with a caller-supplied context. Lookup itself is on the
+// proxy's hot ingress path and must not inherit the client's cancellation, so
+// it keeps its own 2s budget; the service routes (/api/v2/svc/*) already run
+// under context.WithoutCancel and pass it through here.
+func (a *Adapter) LookupCtx(ctx context.Context, token string) (server.SaaSTokenInfo, bool) {
 	t, err := a.DB.GetUserTokenByValue(ctx, token)
 	if err != nil {
 		return server.SaaSTokenInfo{}, false
 	}
+	return a.resolveToken(ctx, t)
+}
+
+// LookupByTokenID resolves the same identity from a token's numeric id rather
+// than its secret value. The sibling service holds an id after /svc/resolve and
+// should not have to re-send (or store) the raw key on every later call.
+func (a *Adapter) LookupByTokenID(ctx context.Context, tokenID int64) (server.SaaSTokenInfo, bool) {
+	if tokenID <= 0 {
+		return server.SaaSTokenInfo{}, false
+	}
+	t, err := a.DB.GetUserToken(ctx, tokenID)
+	if err != nil {
+		return server.SaaSTokenInfo{}, false
+	}
+	return a.resolveToken(ctx, t)
+}
+
+// resolveToken turns a token row into the full billing identity: owning user,
+// billing workspace, membership, stacked caps and multipliers. Extracted from
+// Lookup so every entry point (secret, id) resolves identically — a second copy
+// would be a second set of rules for who is allowed to spend.
+func (a *Adapter) resolveToken(ctx context.Context, t *db.UserToken) (server.SaaSTokenInfo, bool) {
 	u, err := a.DB.GetUser(ctx, t.UserID)
 	if err != nil {
 		return server.SaaSTokenInfo{}, false

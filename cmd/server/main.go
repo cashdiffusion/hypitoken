@@ -241,6 +241,15 @@ func main() {
 		// not the corruption itself.
 		go saasDB.RunIntegrityChecks(refresherCtx, saasdb.DefaultIntegrityInterval,
 			integrityAlerter(mailer, cfg.SaaS.SiteName, cfg.SaaS.AdminEmail))
+
+		// Sweep spent / expired cross-origin SSO handoff codes every 10 minutes,
+		// collecting anything that expired more than an hour ago. Each row is a
+		// bearer credential with a 120-second life, and saas.db is snapshotted
+		// daily and shipped off-host — so dead rows are cleared rather than left
+		// to accumulate in every backup forever. Unconditional: the table exists
+		// from migration v23 whether or not the feature is configured, and a
+		// no-op DELETE costs nothing.
+		go saasDB.RunSSOCodePrune(refresherCtx, 10*time.Minute)
 		issuer := saasauth.NewIssuer(cfg.SaaS.JWTSecret, cfg.SaaS.JWTTTL)
 
 		freeReg := true
@@ -446,8 +455,35 @@ func main() {
 			}
 			return true, claims.Role == "admin"
 		}
+		// Machine-to-machine routes for the sibling HypiHub gateway, which shares
+		// these user accounts and wallets over HTTP instead of opening saas.db.
+		// nil when saas.service_tokens is unset — then /api/v2/svc/* is never
+		// mounted at all. A malformed entry is fatal: silently running with the
+		// integration off would look identical to a firewall problem on the
+		// sibling's side.
+		svcTokens, err := saasadapter.NewServiceTokenSet(cfg.SaaS.ServiceTokens)
+		if err != nil {
+			log.Fatalf("saas: %v", err)
+		}
+		// The issuer is the same one /auth/login uses: a session adopted across
+		// origins must be indistinguishable from one obtained by logging in here.
+		svcH := saasadapter.NewServiceHandler(adapter, svcTokens).WithIssuer(issuer)
+
+		// Cross-origin SSO handoff (docs/SPEC.md §12 in the hypihub repo).
+		// Parsed ONCE here so a malformed origin is a boot-time fatal rather
+		// than a line silently dropped from the allowlist — a shortened
+		// allowlist looks exactly like a working one right up until it either
+		// turns the feature off or, in a sloppier implementation, fails open.
+		// nil when saas.sso_return_origins is empty, and then the minting route
+		// does not exist at all.
+		ssoOrigins, err := saas.NewOriginAllowlist(cfg.SaaS.SSOReturnOrigins)
+		if err != nil {
+			log.Fatalf("saas: %v", err)
+		}
+		ssoH := saasadapter.NewSSOHandler(saasDB, ssoOrigins)
+
 		for _, h := range s.GinEngines() {
-			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH, referralSvc, workspaceH, supportSvc, referralsOn)
+			saasadapter.Mount(h, saasDB, authH, tokensH, billingH, adminH, credH, issuer, legacyAdmin, cfg.LogDir, catalog, growthSvc, analyticsSvc, arenaSvc, profileH, referralSvc, workspaceH, supportSvc, svcH, ssoH, referralsOn)
 			if spaFS != nil {
 				saasadapter.MountSPA(h, spaFS)
 			}

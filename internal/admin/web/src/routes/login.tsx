@@ -1,6 +1,6 @@
 import { Layers, Receipt, ShieldCheck } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { type FormEvent, lazy, type ReactNode, Suspense, useState } from "react";
+import { type FormEvent, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -13,7 +13,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
+import { useSsoHandoff } from "@/hooks/use-sso-handoff";
 import { apiPost } from "@/lib/api";
+import { readSsoReturn, ssoProductKey, withSsoReturn } from "@/lib/sso";
 import type { User } from "@/lib/types";
 import { cn, errMsg, errStatus } from "@/lib/utils";
 
@@ -39,9 +41,32 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  // `?return=` is attacker-supplied, so it lives in component state and
+  // nowhere durable. Captured once at mount: pinning it here also means a
+  // mid-flow history rewrite can't swap the destination out from under us.
+  const [returnUrl] = useState(() => readSsoReturn(loc.search));
+  const { finish } = useSsoHandoff(returnUrl);
 
   const locState = loc.state as { from?: string } | null;
-  if (user) return <Navigate to={locState?.from ?? "/app"} replace />;
+  const target = locState?.from ?? "/app";
+  // Cosmetic only — naming the destination in the heading. Whether the URL is
+  // actually allowed is the server's call, made in /auth/sso/code.
+  const productKey = ssoProductKey(returnUrl);
+
+  // Already signed in. Without ?return= this is the long-standing bounce to the
+  // dashboard; with it, the visitor arrived from the sibling product, so they
+  // get the same handoff — re-asking a live session for its password would
+  // undo the entire point of the flow.
+  useEffect(() => {
+    if (!user || !returnUrl) return;
+    void finish(() => nav(target, { replace: true }));
+  }, [user, returnUrl, finish, nav, target]);
+
+  if (user && !returnUrl) return <Navigate to={target} replace />;
+  // Handoff in flight (or falling back after one failed). Same near-invisible
+  // hold App.tsx uses between route chunks — flashing a login form at someone
+  // who is already signed in reads as a bug.
+  if (user) return <div className="min-h-dvh bg-background" aria-busy="true" />;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -50,7 +75,9 @@ export default function LoginPage() {
       const r = await apiPost<{ token: string; user: User }>("/auth/login", { email, password });
       signIn(r.token, r.user);
       toast.success(t("auth.login.welcomeBack"));
-      nav("/app");
+      // With ?return= this leaves for the sibling product; without it, or if
+      // the handoff fails, it is the plain dashboard navigation as before.
+      await finish(() => nav("/app"));
     } catch (e) {
       // A disabled account is the one login failure with somewhere to go: the
       // appeal channel. Anti-abuse enforcement is probabilistic and does catch
@@ -72,7 +99,12 @@ export default function LoginPage() {
   };
 
   return (
-    <AuthLayout side="right" title={t("auth.login.title")} sub={t("auth.login.sub")}>
+    <AuthLayout
+      side="right"
+      eyebrow={productKey ? t("auth.sso.continueTo", { product: t(productKey) }) : undefined}
+      title={t("auth.login.title")}
+      sub={t("auth.login.sub")}
+    >
       <AuthForm onSubmit={submit} className="space-y-4">
         <AuthRow className="space-y-2">
           <Label htmlFor="email">{t("common.email")}</Label>
@@ -112,7 +144,12 @@ export default function LoginPage() {
         </AuthRow>
         <AuthRow className="text-center text-sm text-muted-foreground">
           {t("auth.login.noAccount")}{" "}
-          <Link to="/register" className="text-primary underline-offset-4 hover:underline">
+          {/* carry ?return= across so a brand-new account lands back at the
+              product that sent them here, not on our dashboard */}
+          <Link
+            to={withSsoReturn("/register", returnUrl)}
+            className="text-primary underline-offset-4 hover:underline"
+          >
             {t("auth.login.createOne")}
           </Link>
         </AuthRow>
@@ -177,11 +214,16 @@ export function AuthRow({ children, className }: { children: ReactNode; classNam
 export function AuthLayout({
   title,
   sub,
+  eyebrow,
   children,
   side = "right",
 }: {
   title: string;
   sub?: string;
+  // Optional line above the title, in the site-wide `.eyebrow` treatment
+  // (mono, ~11px, uppercase, muted). Used by the SSO handoff to say which
+  // product the visitor is signing in to continue to.
+  eyebrow?: string;
   children: ReactNode;
   side?: "left" | "right";
 }) {
@@ -287,6 +329,7 @@ export function AuthLayout({
         className="glass relative z-10 w-full max-w-sm rounded-3xl p-7 shadow-2xl sm:p-8"
       >
         <div className="mb-6">
+          {eyebrow && <div className="eyebrow mb-2">{eyebrow}</div>}
           <h1 className="font-display text-2xl font-semibold tracking-tight">{title}</h1>
           {sub && <p className="mt-1.5 text-sm text-muted-foreground">{sub}</p>}
         </div>

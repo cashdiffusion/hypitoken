@@ -1,6 +1,6 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { OtpField } from "@/components/auth/otp-field";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,9 @@ import { Input } from "@/components/ui/input";
 import type { OtpState } from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
+import { useSsoHandoff } from "@/hooks/use-sso-handoff";
 import { apiPost } from "@/lib/api";
+import { readSsoReturn, ssoProductKey, withSsoReturn } from "@/lib/sso";
 import type { User } from "@/lib/types";
 import { cn, errMsg } from "@/lib/utils";
 import { AuthForm, AuthLayout, AuthRow, authBtn } from "./login";
@@ -17,6 +19,7 @@ import { AuthForm, AuthLayout, AuthRow, authBtn } from "./login";
 export default function RegisterPage() {
   const { user, signIn } = useAuth();
   const nav = useNavigate();
+  const loc = useLocation();
   const { t } = useTranslation();
   const [step, setStep] = useState<"start" | "verify">("start");
   const [email, setEmail] = useState("");
@@ -25,8 +28,21 @@ export default function RegisterPage() {
   const [busy, setBusy] = useState(false);
   const [otpState, setOtpState] = useState<OtpState>("idle");
   const [agreed, setAgreed] = useState(false);
+  // Attacker-supplied; component state only, captured once. See lib/sso.ts.
+  const [returnUrl] = useState(() => readSsoReturn(loc.search));
+  const { finish } = useSsoHandoff(returnUrl);
+  const productKey = ssoProductKey(returnUrl);
 
-  if (user) return <Navigate to="/app" replace />;
+  // Same rule as the login page: an already-authenticated visitor who arrived
+  // with ?return= is here to be handed to the sibling product, not to be
+  // parked on our dashboard.
+  useEffect(() => {
+    if (!user || !returnUrl) return;
+    void finish(() => nav("/app", { replace: true }));
+  }, [user, returnUrl, finish, nav]);
+
+  if (user && !returnUrl) return <Navigate to="/app" replace />;
+  if (user) return <div className="min-h-dvh bg-background" aria-busy="true" />;
 
   const sendCode = async (e: FormEvent) => {
     e.preventDefault();
@@ -65,7 +81,9 @@ export default function RegisterPage() {
       // hold on the celebration (confetti + green cells) before navigating.
       window.setTimeout(() => {
         signIn(r.token, r.user);
-        nav("/app");
+        // With ?return= the browser leaves for the sibling product; otherwise
+        // (or if the handoff fails) this is the dashboard as before.
+        void finish(() => nav("/app"));
       }, 1200);
     } catch (e) {
       setOtpState("error");
@@ -83,6 +101,7 @@ export default function RegisterPage() {
     return (
       <AuthLayout
         side="left"
+        eyebrow={productKey ? t("auth.sso.continueTo", { product: t(productKey) }) : undefined}
         title={t("auth.register.verifyTitle")}
         sub={t("auth.register.verifySub", { email })}
       >
@@ -130,7 +149,12 @@ export default function RegisterPage() {
   }
 
   return (
-    <AuthLayout side="left" title={t("auth.register.title")} sub={t("auth.register.sub")}>
+    <AuthLayout
+      side="left"
+      eyebrow={productKey ? t("auth.sso.continueTo", { product: t(productKey) }) : undefined}
+      title={t("auth.register.title")}
+      sub={t("auth.register.sub")}
+    >
       <AuthForm key="start" onSubmit={sendCode} className="space-y-4">
         <AuthRow className="space-y-2">
           <Label htmlFor="email">{t("common.email")}</Label>
@@ -198,7 +222,10 @@ export default function RegisterPage() {
         </AuthRow>
         <AuthRow className="text-center text-sm text-muted-foreground">
           {t("auth.register.already")}{" "}
-          <Link to="/login" className="text-primary underline-offset-4 hover:underline">
+          <Link
+            to={withSsoReturn("/login", returnUrl)}
+            className="text-primary underline-offset-4 hover:underline"
+          >
             {t("auth.login.title")}
           </Link>
         </AuthRow>

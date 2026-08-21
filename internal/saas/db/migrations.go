@@ -797,6 +797,83 @@ ANALYZE;
 	`
 ALTER TABLE support_tickets ADD COLUMN user_seen_at INTEGER NOT NULL DEFAULT 0;
 `,
+
+	// v22 — replay protection on the ledger, for out-of-process billers.
+	//
+	// Every wallet_tx written so far came from an IN-PROCESS caller on the
+	// proxy hot path, which settles a charge exactly once and has no way to
+	// retry it: if ChargeWorkspaceWithFloor fails, the money is simply lost
+	// (that is the 14865-charge incident, not a duplicate-billing one). So the
+	// ledger never needed an idempotency key.
+	//
+	// The sibling HypiHub service bills over HTTP (/api/v2/svc/charge), and an
+	// HTTP client WILL retry — a timeout, a dropped connection, a 502 from a
+	// reverse proxy all leave the caller unable to tell "not charged" from
+	// "charged, response lost". Retrying without a key double-charges on every
+	// network blip; not retrying loses the charge. The key makes the retry
+	// safe, and the UNIQUE index — not the SELECT that precedes it — is what
+	// actually enforces it: two concurrent retries can both miss on the read,
+	// and only one can land the insert.
+	//
+	// Partial (WHERE idem_key <> '') so the ~900k existing rows and every
+	// in-process charge written from now on, all of which carry the '' default,
+	// stay outside the index: NULL-free uniqueness would otherwise collapse the
+	// entire historical ledger into one allowed row.
+	//
+	// `product` names the biller (e.g. 'hypihub') so per-product revenue is
+	// answerable from the ledger alone; '' is the proxy itself.
+	`
+ALTER TABLE wallet_tx ADD COLUMN idem_key TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_tx_idem ON wallet_tx(idem_key) WHERE idem_key <> '';
+ALTER TABLE wallet_tx ADD COLUMN product TEXT NOT NULL DEFAULT '';
+`,
+
+	// v23 — one-time cross-origin SSO handoff codes.
+	//
+	// The sibling HypiHub gateway runs on hub.novadiffusion.com, a DIFFERENT
+	// origin from this service. localStorage is per-origin, so the JWT the user
+	// already holds here is invisible over there and there is no cookie that
+	// spans both. Rather than ask the customer to log in twice, hypitoken mints a
+	// short-lived code, the browser carries it across in the query string, and
+	// HypiHub redeems it server-to-server for a freshly-signed JWT.
+	//
+	// `code` stores the SHA-256 of the raw code, NEVER the code itself. This
+	// table is a bearer-credential store: a row is, for 120 seconds, equivalent
+	// to that user's password. Storing the plaintext would mean a snapshot of
+	// saas.db — which is copied to <dbdir>/backups daily and shipped off-host —
+	// hands whoever reads it live sessions for every user mid-handoff. Hashed,
+	// the file is worth nothing without the code the browser already spent.
+	// Same reasoning as user_tokens' hashed keys; the redeem path hashes the
+	// presented code and looks that up.
+	//
+	// `used_at` (0 = unused) rather than DELETE-on-redeem: keeping the spent row
+	// until the pruner collects it is what makes a replay a distinguishable
+	// no-op instead of an indistinguishable miss, and it costs one integer.
+	// One-shot redemption is enforced by UPDATE ... WHERE used_at = 0 inside the
+	// redeem transaction and read back through RowsAffected — the preceding
+	// SELECT is a convenience, not the guard.
+	//
+	// return_url is stored for the audit trail — so an incident can say where a
+	// session was handed to — and it is what the mint endpoint echoes back to
+	// the browser, so the redirect is built from a value this service validated
+	// rather than from the address bar. The redeem path does NOT compare it
+	// against the calling service: a service token already authorizes every
+	// wallet in the fleet, so there is nothing such a comparison would defend.
+	//
+	// The expiry index serves the 10-minute pruner. It is deliberately NOT
+	// UNIQUE and not on user_id: a user may legitimately have several codes in
+	// flight (two tabs, a retried redirect), and each is independently one-shot.
+	`
+CREATE TABLE IF NOT EXISTS sso_codes (
+  code       TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL,
+  return_url TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_sso_codes_expiry ON sso_codes(expires_at);
+`,
 }
 
 // backfillTokenAttributionSQL recovers token_id / model from the legacy free-text

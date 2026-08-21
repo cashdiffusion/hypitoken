@@ -115,6 +115,12 @@ export default {
       appealAction: "提交申诉",
       submit: "登录",
     },
+    // 跨站登录交接（hub.novadiffusion.com）。
+    sso: {
+      hypihub: "汇枢 HypiHub",
+      continueTo: "登录后继续前往 {{product}}",
+      failed: "跨站登录跳转失败，已为你保留 HypiToken 的登录状态。",
+    },
     sessionExpired: "登录已过期，请重新登录。",
     register: {
       title: "创建账号",
