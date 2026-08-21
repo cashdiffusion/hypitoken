@@ -2,8 +2,14 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // Bounded fan-out slots for callers that declare no session of their own.
@@ -61,7 +67,8 @@ func fanoutSlotID(body []byte, width int) string {
 	if width <= 1 {
 		return ""
 	}
-	anchor := conversationAnchor(body)
+	anchor, src := conversationAnchor(body)
+	fanoutStats.record(src)
 	if anchor == "" {
 		return ""
 	}
@@ -129,34 +136,36 @@ type anchorItem struct {
 // cache but a broken request, since the id was minted by, and is only valid
 // on, the account that produced it. Left anchorless, such a caller keeps the
 // single sticky slot it has always had.
-func conversationAnchor(body []byte) string {
+func conversationAnchor(body []byte) (string, anchorSource) {
 	if len(body) == 0 {
-		return ""
+		return "", anchorNone
 	}
 	var p anchorPeek
 	if json.Unmarshal(body, &p) != nil {
-		return ""
+		return "", anchorNone
+	}
+	if p.PromptCacheKey != "" {
+		return p.PromptCacheKey, anchorCacheKey
 	}
 	for _, id := range []string{
-		p.PromptCacheKey,
 		p.ClientMetadata.SessionID,
 		p.ClientMetadata.ThreadID,
 		p.ConversationID,
 		p.Metadata.UserID,
 	} {
 		if id != "" {
-			return id
+			return id, anchorMetadata
 		}
 	}
 	if p.PreviousResponseID != "" {
-		return ""
+		return "", anchorChainNoSession
 	}
 	for _, raw := range []json.RawMessage{p.Input, p.Messages} {
 		if a := firstUserContent(raw); a != "" {
-			return a
+			return a, anchorContent
 		}
 	}
-	return ""
+	return "", anchorNone
 }
 
 // firstUserContent returns the raw content of the first user-authored entry of
@@ -180,4 +189,63 @@ func firstUserContent(raw json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+// Anchor-source accounting. Whether the fan-out is doing anything at all
+// depends entirely on what the caller's body happens to carry, which is not
+// visible from the request log: a slot is not recorded there, so a token whose
+// bodies yield no anchor looks exactly like one that fans out and happens to be
+// quiet. Counting the sources and reporting them periodically is what makes the
+// difference observable — and tells us which anchor is actually load-bearing in
+// production, rather than which one we assumed would be.
+type anchorSource int
+
+const (
+	anchorNone anchorSource = iota
+	anchorCacheKey
+	anchorMetadata
+	anchorContent
+	anchorChainNoSession
+)
+
+var anchorSourceNames = [...]string{"none", "prompt_cache_key", "client_metadata", "first_user_message", "response_chain(no session)"}
+
+type anchorStats struct {
+	mu     sync.Mutex
+	counts [len(anchorSourceNames)]uint64
+	last   time.Time
+}
+
+var fanoutStats anchorStats
+
+// record counts one classification and reports the running tallies at most
+// once a minute, so a busy proxy pays one log line rather than one per request.
+func (s *anchorStats) record(src anchorSource) {
+	s.mu.Lock()
+	s.counts[src]++
+	now := time.Now()
+	if s.last.IsZero() {
+		s.last = now
+	}
+	if now.Sub(s.last) < time.Minute {
+		s.mu.Unlock()
+		return
+	}
+	snapshot := s.counts
+	s.counts = [len(anchorSourceNames)]uint64{}
+	s.last = now
+	s.mu.Unlock()
+
+	parts := make([]string, 0, len(snapshot))
+	var total uint64
+	for i, n := range snapshot {
+		if n == 0 {
+			continue
+		}
+		total += n
+		parts = append(parts, fmt.Sprintf("%s=%d", anchorSourceNames[i], n))
+	}
+	if total > 0 {
+		log.Infof("fanout: sessionless anchors over the last minute: %s", strings.Join(parts, " "))
+	}
 }

@@ -208,3 +208,28 @@ func TestPreviousResponseIDWithoutSessionKeepsOneSlot(t *testing.T) {
 		t.Fatalf("chain moved slot %q → %q despite a stable session id", first, got)
 	}
 }
+
+// The classification drives the only production visibility we have into
+// whether the fan-out engages at all, so each branch must report the source it
+// actually used rather than a plausible-looking default.
+func TestAnchorSourceClassification(t *testing.T) {
+	mk := func(m map[string]any) []byte { b, _ := json.Marshal(m); return b }
+	for _, tc := range []struct {
+		name string
+		body []byte
+		want anchorSource
+	}{
+		{"prompt_cache_key", mk(map[string]any{"prompt_cache_key": "s1", "client_metadata": map[string]any{"session_id": "s2"}}), anchorCacheKey},
+		{"client_metadata", mk(map[string]any{"client_metadata": map[string]any{"session_id": "s2"}}), anchorMetadata},
+		{"thread_id", mk(map[string]any{"client_metadata": map[string]any{"thread_id": "t1"}}), anchorMetadata},
+		{"first user message", mk(map[string]any{"input": []any{map[string]any{"role": "user", "content": "hi"}}}), anchorContent},
+		{"response chain", mk(map[string]any{"previous_response_id": "r1", "input": []any{map[string]any{"role": "user", "content": "hi"}}}), anchorChainNoSession},
+		{"nothing", mk(map[string]any{"model": "gpt-5.6-sol"}), anchorNone},
+		{"unparseable", []byte("<html>"), anchorNone},
+	} {
+		_, got := conversationAnchor(tc.body)
+		if got != tc.want {
+			t.Errorf("%s: source = %s, want %s", tc.name, anchorSourceNames[got], anchorSourceNames[tc.want])
+		}
+	}
+}
