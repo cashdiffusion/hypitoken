@@ -1676,57 +1676,41 @@ func (h *Handler) remapDisplayNames(entries []requestlog.Record) {
 	}
 }
 
-// applyDateBounds resolves the from/to query params onto the filter, choosing
-// between the day-label form and the timestamp form.
+// applyDateBounds sets a Filter's window from the `from`/`to` strings the
+// panel sends. Mirrors CPA-Claude's helper of the same name, which has had
+// this since the earlier index work; hypitoken never got the port.
 //
-// The choice is the whole performance story of this endpoint. requestlog keeps
-// a pre-summed cube whose finest time grain is a day, and it can only answer a
-// window it knows falls on day boundaries — which the caller states by setting
-// FromDay/ToDay rather than From/To. A date picker always produces whole days,
-// so routing "YYYY-MM-DD" to the labels is exact, not an approximation.
+// Bare "YYYY-MM-DD" — which is all a date picker can produce — is passed
+// through as day *labels* rather than converted to instants here. That is what
+// lets requestlog answer from the pre-summed cube: the two forms describe the
+// same window, but only the labelled one can be matched against the cube's day
+// grain. Measured on this deployment's archive (1.09M rows, the panel's own
+// 14-day window), the timestamp form materialises 481,989 rows and takes
+// 3.2-4.0s for the four aggregates while the cube answers them in 34ms — and
+// the endpoint demonstrated both at once, returning in 479ms with no window
+// (a zero window IS cube-eligible) and 8.9s with one attached.
 //
-// Measured on the production archive (1.09M rows, 14-day window): the
-// timestamp form materialises 481,989 rows and takes 3.2-4.0s for the four
-// aggregates; the cube answers the same four in 34ms. The endpoint already
-// demonstrated both — an unbounded query was cube-eligible and returned in
-// 479ms while the same call with from/to attached took 8.9s.
-//
-// RFC3339 input keeps the timestamp form: an arbitrary instant genuinely is
-// finer than the cube can answer, and silently rounding it to days would
-// return a different window than the caller asked for.
-//
-// Setting BOTH forms is a contradiction that requestlog resolves by dropping
-// the labels, so each branch sets exactly one.
+// Anything else (an RFC3339 instant, i.e. a sub-day window) still becomes a
+// timestamp bound and takes the row-by-row path, which is the only path that
+// can express it.
 func applyDateBounds(f *requestlog.Filter, from, to string) {
-	if v := strings.TrimSpace(from); v != "" {
-		if isDayLabel(v) {
-			f.FromDay = v
-		} else if t, err := parseDateBound(v, false); err == nil {
+	from, to = strings.TrimSpace(from), strings.TrimSpace(to)
+	// Both bounds must take the same form. requestlog drops the labels when
+	// timestamps are also set, so a mixed pair would silently widen the window
+	// to whichever half survived; falling through to timestamps for both keeps
+	// the window the caller asked for.
+	if (isDayLabel(from) && isDayLabel(to)) || (isDayLabel(from) && to == "") || (from == "" && isDayLabel(to)) {
+		f.FromDay, f.ToDay = from, to
+		return
+	}
+	if from != "" {
+		if t, err := parseDateBound(from, false); err == nil {
 			f.From = t
 		}
 	}
-	if v := strings.TrimSpace(to); v != "" {
-		if isDayLabel(v) {
-			f.ToDay = v
-		} else if t, err := parseDateBound(v, true); err == nil {
+	if to != "" {
+		if t, err := parseDateBound(to, true); err == nil {
 			f.To = t
-		}
-	}
-	// A mixed pair (one day label, one timestamp) would have the labels
-	// dropped downstream, silently widening the window to the timestamp alone.
-	// Fall back to timestamps for both so the window stays what was asked for.
-	if (f.FromDay != "" || f.ToDay != "") && (!f.From.IsZero() || !f.To.IsZero()) {
-		if f.FromDay != "" {
-			if t, err := parseDateBound(f.FromDay, false); err == nil {
-				f.From = t
-			}
-			f.FromDay = ""
-		}
-		if f.ToDay != "" {
-			if t, err := parseDateBound(f.ToDay, true); err == nil {
-				f.To = t
-			}
-			f.ToDay = ""
 		}
 	}
 }
