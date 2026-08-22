@@ -414,3 +414,84 @@ func TestReconcileChargesRefusesAnAmbiguousMask(t *testing.T) {
 		t.Fatalf("balance = %v, want 40 — an ambiguous mask must not be charged to a guess", got)
 	}
 }
+
+// TestDryRunReportsAnAlreadySettledWindow closes the loop the request log
+// cannot: nothing in req records that a dropped charge was later recovered, so
+// without consulting the ledger a dry run over a repaired window is
+// indistinguishable from one over a fresh outage — and the operator's only way
+// to find out would be to run --apply, which is the wrong direction for a
+// command whose dry run exists to be the safe thing to do first.
+func TestDryRunReportsAnAlreadySettledWindow(t *testing.T) {
+	dir := t.TempDir()
+	saasPath := filepath.Join(dir, "saas.db")
+	secret, wsID := seedSaaS(t, saasPath, 100)
+
+	rdb := newRequestIndex(t, dir)
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	from, to := base.Add(-time.Minute), base.Add(10*time.Minute)
+	insertReq(t, rdb, base, secret, "openai", 6, 0, 0)
+
+	if err := reconcileCharges(dir, saasPath, 0, from, to, true); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	afterApply := balanceOf(t, saasPath, wsID)
+
+	// The request log still shows the row as unbilled — user_id is never
+	// backfilled — so the ledger is the only thing that knows.
+	d, err := saasdb.OpenReadOnly(saasPath)
+	if err != nil {
+		t.Fatalf("open read-only: %v", err)
+	}
+	defer func() { _ = d.Close() }()
+
+	key := idemKeyFor(from, to, 1, "openai")
+	settled, err := d.SettledIdemKeys(context.Background(), []string{key})
+	if err != nil {
+		t.Fatalf("settled keys: %v", err)
+	}
+	if len(settled) != 1 {
+		t.Fatalf("SettledIdemKeys returned %d rows for a settled window, want 1 (key %q)", len(settled), key)
+	}
+	want := 6 * testCodexMultiplier
+	if got := settled[key]; got-want > 1e-9 || want-got > 1e-9 {
+		t.Fatalf("settled amount = %v, want %v", got, want)
+	}
+
+	// And the dry run itself still moves nothing.
+	if err := reconcileCharges(dir, saasPath, 0, from, to, false); err != nil {
+		t.Fatalf("dry run over a settled window: %v", err)
+	}
+	if got := balanceOf(t, saasPath, wsID); got != afterApply {
+		t.Fatalf("balance moved during a dry run: %v → %v", afterApply, got)
+	}
+}
+
+// TestSettledIdemKeysIgnoresUnrelatedRows: the ledger is full of ordinary
+// charges carrying no key, and a lookup that matched them would report every
+// window as already repaired.
+func TestSettledIdemKeysIgnoresUnrelatedRows(t *testing.T) {
+	dir := t.TempDir()
+	saasPath := filepath.Join(dir, "saas.db")
+	_, _ = seedSaaS(t, saasPath, 100)
+
+	d, err := saasdb.OpenReadOnly(saasPath)
+	if err != nil {
+		t.Fatalf("open read-only: %v", err)
+	}
+	defer func() { _ = d.Close() }()
+
+	ctx := context.Background()
+	got, err := d.SettledIdemKeys(ctx, []string{"reconcile:1-2:tok9:openai"})
+	if err != nil {
+		t.Fatalf("settled keys: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("SettledIdemKeys matched %d unrelated row(s): %v", len(got), got)
+	}
+	// The seed topup carries an empty idem_key; an empty needle must not find it.
+	if got, err = d.SettledIdemKeys(ctx, []string{""}); err != nil {
+		t.Fatalf("empty key: %v", err)
+	} else if len(got) != 0 {
+		t.Fatalf("an empty idem_key matched %d row(s)", len(got))
+	}
+}

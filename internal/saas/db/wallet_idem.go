@@ -287,3 +287,53 @@ func isUniqueViolation(err error) bool {
 	}
 	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
+
+// SettledIdemKeys reports which of the given idempotency keys already have a
+// ledger row, mapping each to the magnitude that was moved.
+//
+// The replay protection itself does not need this — walletIdem detects a
+// duplicate on its own. It exists so a REPORT can tell a settled window from an
+// unsettled one. Reconciliation reads the request log, and nothing there
+// records that a charge was later recovered, so a dry run over an
+// already-repaired window looks identical to one over a fresh outage. Without
+// this an operator's only way to find out is to run --apply and read what it
+// says, which is the wrong direction for a command whose dry run exists to be
+// the safe thing to do first.
+func (db *DB) SettledIdemKeys(ctx context.Context, keys []string) (map[string]float64, error) {
+	out := make(map[string]float64, len(keys))
+	// Empty keys are dropped, not queried. Every ordinary in-process charge
+	// carries idem_key='' (that is what the v22 index is partial on), so an
+	// empty needle matches a haystack of unrelated rows and would report an
+	// unsettled group as already repaired — silently skipping money that is
+	// still owed.
+	args := make([]any, 0, len(keys))
+	for _, k := range keys {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		args = append(args, k)
+	}
+	if len(args) == 0 {
+		return out, nil
+	}
+	placeholders := strings.Repeat("?,", len(args)-1) + "?"
+	rows, err := db.QueryContext(ctx,
+		`SELECT idem_key, amount_usd FROM wallet_tx WHERE idem_key IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var k string
+		var amt float64
+		if err := rows.Scan(&k, &amt); err != nil {
+			return nil, err
+		}
+		if amt < 0 {
+			amt = -amt
+		}
+		out[k] = amt
+	}
+	return out, rows.Err()
+}

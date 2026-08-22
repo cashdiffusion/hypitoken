@@ -117,6 +117,9 @@ type settlement struct {
 	// Unresolved records why a group could not be priced (deleted token,
 	// deleted workspace). Such rows are reported and skipped, never guessed at.
 	Unresolved string
+	// SettledUSD is non-zero when this group's idempotency key is already in
+	// the ledger — an earlier run repaired it, and this one will not move money.
+	SettledUSD float64
 }
 
 func reconcileCharges(logDir, saasPath string, maxOverdraftUSD float64, from, to time.Time, apply bool) error {
@@ -178,6 +181,28 @@ func reconcileCharges(logDir, saasPath string, maxOverdraftUSD float64, from, to
 		settlements = append(settlements, s)
 	}
 
+	// Nothing in the request log records that a dropped charge was later
+	// recovered, so ask the ledger before reporting: an already-repaired window
+	// must not look like a fresh outage.
+	keys := make([]string, 0, len(settlements))
+	for _, s := range settlements {
+		if s.Unresolved == "" {
+			keys = append(keys, idemKeyFor(from, to, s.TokenID, s.Provider))
+		}
+	}
+	settled, err := sdb.SettledIdemKeys(ctx, keys)
+	if err != nil {
+		return fmt.Errorf("check settled keys: %w", err)
+	}
+	for i := range settlements {
+		if settlements[i].Unresolved != "" {
+			continue
+		}
+		if amt, ok := settled[idemKeyFor(from, to, settlements[i].TokenID, settlements[i].Provider)]; ok {
+			settlements[i].SettledUSD = amt
+		}
+	}
+
 	sort.Slice(settlements, func(i, j int) bool { return settlements[i].OwedUSD > settlements[j].OwedUSD })
 
 	printSettlementReport(settlements, from, to, apply)
@@ -186,6 +211,15 @@ func reconcileCharges(logDir, saasPath string, maxOverdraftUSD float64, from, to
 		return nil
 	}
 	return applySettlements(ctx, sdb, settlements, from, to, maxOverdraftUSD)
+}
+
+// idemKeyFor names one settlement. One key per (window, token, provider), so
+// re-running a window is a no-op rather than a second debit. Defined once
+// because the report and the apply path must agree on it exactly: if they
+// drifted, the report would say "unsettled" about rows apply would then refuse
+// to settle, or worse, the other way round.
+func idemKeyFor(from, to time.Time, tokenID int64, provider string) string {
+	return fmt.Sprintf("reconcile:%d-%d:tok%d:%s", from.Unix(), to.Unix(), tokenID, provider)
 }
 
 // buildUnmasker returns a function mapping a masked client_token back to its
@@ -281,16 +315,20 @@ func printSettlementReport(ss []settlement, from, to time.Time, apply bool) {
 
 	var totalCost, totalOwed float64
 	var totalReqs int64
-	var unresolved int
+	var unresolved, alreadySettled int
 	for _, s := range ss {
 		tok := s.ClientToken
 		if len(tok) > 13 {
 			tok = tok[:13] + "…"
 		}
 		ws := "ws" + strconv.FormatInt(s.WorkspaceID, 10) + " user" + strconv.FormatInt(s.UserID, 10)
-		if s.Unresolved != "" {
+		switch {
+		case s.Unresolved != "":
 			ws = "SKIPPED: " + s.Unresolved
 			unresolved++
+		case s.SettledUSD > 0:
+			ws += fmt.Sprintf("  [already settled $%.6f]", s.SettledUSD)
+			alreadySettled++
 		}
 		fmt.Printf("%-14s %-10s %8d %12.6f %6.3f %12.6f  %s\n",
 			tok, s.Provider, s.Requests, s.CostUSD, s.Multiplier, s.OwedUSD, ws)
@@ -300,16 +338,14 @@ func printSettlementReport(ss []settlement, from, to time.Time, apply bool) {
 	}
 	fmt.Printf("\n%-14s %-10s %8d %12.6f %6s %12.6f\n", "TOTAL", "", totalReqs, totalCost, "", totalOwed)
 	if unresolved > 0 {
-		fmt.Printf("%d group(s) skipped because the token no longer resolves.\n", unresolved)
+		fmt.Printf("%d group(s) skipped because the token could not be resolved.\n", unresolved)
+	}
+	if alreadySettled > 0 {
+		fmt.Printf("%d group(s) were already settled by an earlier run; re-running moves no money.\n", alreadySettled)
 	}
 }
 
 func applySettlements(ctx context.Context, sdb *saasdb.DB, ss []settlement, from, to time.Time, maxOverdraftUSD float64) error {
-	// One key per (window, token, provider). Re-running the same window is a
-	// no-op rather than a second debit, which is what makes this command safe
-	// to point at a window somebody may already have settled.
-	keyPrefix := fmt.Sprintf("reconcile:%d-%d", from.Unix(), to.Unix())
-
 	var settled, replayed, skipped int
 	var settledUSD float64
 	fmt.Println()
@@ -318,7 +354,7 @@ func applySettlements(ctx context.Context, sdb *saasdb.DB, ss []settlement, from
 			skipped++
 			continue
 		}
-		key := fmt.Sprintf("%s:tok%d:%s", keyPrefix, s.TokenID, s.Provider)
+		key := idemKeyFor(from, to, s.TokenID, s.Provider)
 		res, err := sdb.ChargeWorkspaceIdem(ctx, saasdb.IdemChargeReq{
 			IdempotencyKey: key,
 			Product:        "reconcile",
