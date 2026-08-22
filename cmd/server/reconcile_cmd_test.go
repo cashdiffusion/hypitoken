@@ -10,6 +10,7 @@ import (
 	"time"
 
 	saasdb "github.com/wjsoj/CPA-Claude/internal/saas/db"
+	"github.com/wjsoj/CPA-Claude/internal/server"
 )
 
 // Reconciliation moves real money, so these tests assert the arithmetic and
@@ -50,9 +51,13 @@ func newRequestIndex(t *testing.T, dir string) *sql.DB {
 	return rdb
 }
 
-// insertReq writes one request-log row. userID 0 with multiplier 0 is exactly
-// what proxy.go leaves behind when Charge failed — the marker reconciliation
-// keys on.
+// insertReq writes one request-log row, storing the token MASKED exactly as
+// the proxy does. Seeding the secret here instead would have made every one of
+// these tests pass against a command that could not resolve a single real
+// production row — which is what happened.
+//
+// userID 0 with multiplier 0 is what proxy.go leaves behind when Charge
+// failed: the marker reconciliation keys on.
 func insertReq(t *testing.T, rdb *sql.DB, ts time.Time, token, provider string, cost float64, userID int64, attemptOnly int) {
 	t.Helper()
 	mult := 0.0
@@ -62,7 +67,7 @@ func insertReq(t *testing.T, rdb *sql.DB, ts time.Time, token, provider string, 
 	if _, err := rdb.Exec(
 		`INSERT INTO req (ts, client_token, provider, input, output, cost_usd, billed_usd, multiplier, attempt_only, user_id)
 		 VALUES (?, ?, ?, 100, 20, ?, ?, ?, ?, ?)`,
-		ts.UnixNano(), token, provider, cost, cost, mult, attemptOnly, userID); err != nil {
+		ts.UnixNano(), server.MaskClientToken(token), provider, cost, cost, mult, attemptOnly, userID); err != nil {
 		t.Fatalf("insert req: %v", err)
 	}
 }
@@ -352,5 +357,60 @@ func TestDryRunDoesNotWriteTheSaaSDatabase(t *testing.T) {
 	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
 		t.Fatalf("dry run modified saas.db: size %d→%d, mtime %s→%s",
 			before.Size(), after.Size(), before.ModTime(), after.ModTime())
+	}
+}
+
+// TestReconcileChargesRefusesAnAmbiguousMask is the safety limit on recovering
+// a secret from a masked value. First-6 + last-4 is not a unique key, and if
+// two live tokens collide there is no evidence in the request log saying which
+// one spent the money. Billing either is billing a real customer for another
+// customer's traffic — worse than leaving the charge uncollected, which is the
+// status quo anyway. So the group is reported and skipped.
+func TestReconcileChargesRefusesAnAmbiguousMask(t *testing.T) {
+	dir := t.TempDir()
+	saasPath := filepath.Join(dir, "saas.db")
+
+	d, err := saasdb.Open(saasPath)
+	if err != nil {
+		t.Fatalf("open saas db: %v", err)
+	}
+	ctx := context.Background()
+	u, err := d.CreateUser(ctx, "collide@example.test", "hash", "user", 1, true)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := d.AddBalance(ctx, u.ID, "topup", 40, "seed", "seed", false); err != nil {
+		t.Fatalf("fund: %v", err)
+	}
+	ws, err := d.PersonalWorkspaceID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	// Two distinct secrets sharing a first-6 and last-4, inserted directly:
+	// CreateUserToken generates random secrets and cannot be made to collide.
+	colliding := []string{"sk-cpa-aaaaaaaaaaaa-TAIL", "sk-cpa-bbbbbbbbbbbb-TAIL"}
+	for _, sec := range colliding {
+		if _, err := d.ExecContext(ctx,
+			`INSERT INTO user_tokens (user_id, token, name, workspace_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+			u.ID, sec, "collide", ws, time.Now().Unix()); err != nil {
+			t.Fatalf("insert token: %v", err)
+		}
+	}
+	if a, b := server.MaskClientToken(colliding[0]), server.MaskClientToken(colliding[1]); a != b {
+		t.Fatalf("test setup is wrong: masks differ (%q vs %q)", a, b)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	rdb := newRequestIndex(t, dir)
+	base := time.Now().Add(-time.Hour)
+	insertReq(t, rdb, base, colliding[0], "openai", 20, 0, 0)
+
+	if err := reconcileCharges(dir, saasPath, 0, base.Add(-time.Minute), base.Add(time.Minute), true); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if got := balanceOf(t, saasPath, ws); got != 40 {
+		t.Fatalf("balance = %v, want 40 — an ambiguous mask must not be charged to a guess", got)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/wjsoj/CPA-Claude/internal/config"
 	"github.com/wjsoj/CPA-Claude/internal/saas/adapter"
 	saasdb "github.com/wjsoj/CPA-Claude/internal/saas/db"
+	"github.com/wjsoj/CPA-Claude/internal/server"
 )
 
 // runReconcileChargesCmd implements `<binary> reconcile-charges`.
@@ -146,10 +147,24 @@ func reconcileCharges(logDir, saasPath string, maxOverdraftUSD float64, from, to
 	ad := &adapter.Adapter{DB: sdb, MaxOverdraftUSD: maxOverdraftUSD}
 	ctx := context.Background()
 
+	// req.client_token holds the MASKED token, not the secret, so the secret
+	// has to be recovered before anything can be looked up. Masking is one-way;
+	// the way back is to mask every known token and match.
+	unmask, err := buildUnmasker(ctx, sdb)
+	if err != nil {
+		return fmt.Errorf("map masked tokens: %w", err)
+	}
+
 	settlements := make([]settlement, 0, len(groups))
 	for _, g := range groups {
 		s := settlement{dropped: g}
-		info, ok := ad.LookupCtx(ctx, g.ClientToken)
+		secret, why := unmask(g.ClientToken)
+		if why != "" {
+			s.Unresolved = why
+			settlements = append(settlements, s)
+			continue
+		}
+		info, ok := ad.LookupCtx(ctx, secret)
 		if !ok {
 			s.Unresolved = "token no longer resolves (deleted?)"
 			settlements = append(settlements, s)
@@ -171,6 +186,40 @@ func reconcileCharges(logDir, saasPath string, maxOverdraftUSD float64, from, to
 		return nil
 	}
 	return applySettlements(ctx, sdb, settlements, from, to, maxOverdraftUSD)
+}
+
+// buildUnmasker returns a function mapping a masked client_token back to its
+// secret.
+//
+// Ambiguity is reported rather than resolved. Two live tokens sharing a first-6
+// and last-4 is unlikely but not impossible, and picking either one would bill
+// a real customer for another customer's traffic — the one error this command
+// must never make. Such a group is surfaced for a human instead.
+func buildUnmasker(ctx context.Context, sdb *saasdb.DB) (func(masked string) (secret, why string), error) {
+	secrets, err := sdb.AllTokenSecrets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byMask := make(map[string]string, len(secrets))
+	ambiguous := make(map[string]bool)
+	for _, sec := range secrets {
+		m := server.MaskClientToken(sec)
+		if _, dup := byMask[m]; dup {
+			ambiguous[m] = true
+			continue
+		}
+		byMask[m] = sec
+	}
+	return func(masked string) (string, string) {
+		if ambiguous[masked] {
+			return "", "masked value matches more than one live token"
+		}
+		sec, ok := byMask[masked]
+		if !ok {
+			return "", "token no longer resolves (deleted?)"
+		}
+		return sec, ""
+	}, nil
 }
 
 // readDroppedCharges pulls the unbilled rows out of the request index.

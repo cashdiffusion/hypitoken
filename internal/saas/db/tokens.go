@@ -281,3 +281,28 @@ func GenerateToken() (string, error) {
 	}
 	return "sk-cpa-" + string(b), nil
 }
+
+// AllTokenSecrets returns every token secret in the store.
+//
+// For reverse-mapping the request log, whose client_token column holds a
+// masked value: masking is one-way, so the only way back is to mask each known
+// secret and compare. Callers must not log or render the result — it is a list
+// of live credentials, and it exists so a tool can resolve an identity in
+// memory, nothing else.
+func (db *DB) AllTokenSecrets(ctx context.Context) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT token FROM user_tokens`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
