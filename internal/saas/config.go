@@ -180,6 +180,35 @@ type Config struct {
 	// Empty (the default) means the SSO code endpoint is not mounted at all,
 	// which is the right posture for every deployment without a sibling site.
 	SSOReturnOrigins []string `yaml:"sso_return_origins,omitempty"`
+
+	// TopupReturnOrigins is the EXACT-match allowlist of origins a wallet
+	// top-up may send the buyer back to after a redirect-based payment
+	// (Alipay/WeChat via Stripe). Same shape as SSOReturnOrigins: one origin
+	// per entry, scheme://host[:port], no path.
+	//
+	// POST /api/v2/topup accepts an optional return_url so a top-up started
+	// inside the sibling HypiHub product lands back on HypiHub instead of
+	// here. HypiHub renders the Stripe Payment Element itself and never
+	// touches money — it proxies the intent request and watches the order —
+	// so the ONLY thing this key grants is "where may the browser be sent
+	// back to", and the only defence against that being an attacker's site is
+	// this list.
+	//
+	// DELIBERATELY A SEPARATE KEY from sso_return_origins rather than a reuse
+	// of it. The two grant different things: an SSO code IS the user's session
+	// for 120 seconds, while this is a redirect target on a money-in path.
+	// Folding them together would mean that shipping this binary silently
+	// widened an existing payment endpoint on every deployment that already
+	// had SSO configured — the opposite of "no config, no new behaviour".
+	// Operators who want both list the origin twice; that is the honest cost
+	// of the two capabilities being independently revocable.
+	//
+	// Exact string equality on the normalized origin — no prefix match, no
+	// suffix match, no wildcard subdomain, for exactly the reasons spelled out
+	// on SSOReturnOrigins. Empty (the default) means a request carrying
+	// return_url is REJECTED, so an unconfigured deployment behaves byte for
+	// byte as it does today.
+	TopupReturnOrigins []string `yaml:"topup_return_origins,omitempty"`
 }
 
 // OriginAllowlist is a parsed, normalized set of origins compared by exact
@@ -207,6 +236,14 @@ type OriginAllowlist struct {
 // that the path portion is being checked — it never is, so "https://x.com/safe"
 // in the config would silently authorize "https://x.com/anything".
 func NewOriginAllowlist(entries []string) (*OriginAllowlist, error) {
+	return NewNamedOriginAllowlist("saas.sso_return_origins", entries)
+}
+
+// NewNamedOriginAllowlist is NewOriginAllowlist with the config key spelled
+// out, so a second allowlist (saas.topup_return_origins) can fail at boot with
+// a message naming the line the operator actually has to fix. Same rules, same
+// normalization, same (nil, nil) meaning "the feature is off".
+func NewNamedOriginAllowlist(field string, entries []string) (*OriginAllowlist, error) {
 	a := &OriginAllowlist{}
 	for _, raw := range entries {
 		raw = strings.TrimSpace(raw)
@@ -218,12 +255,12 @@ func NewOriginAllowlist(entries []string) (*OriginAllowlist, error) {
 		// first — the operator who wrote "*.example.com" needs to be told why
 		// it is refused, not merely that it is.
 		if strings.Contains(raw, "*") {
-			return nil, fmt.Errorf("saas.sso_return_origins: %q: wildcards are not supported — "+
-				"a wildcard origin is an open redirect; list each origin in full", raw)
+			return nil, fmt.Errorf("%s: %q: wildcards are not supported — "+
+				"a wildcard origin is an open redirect; list each origin in full", field, raw)
 		}
 		origin, err := NormalizeOrigin(raw)
 		if err != nil {
-			return nil, fmt.Errorf("saas.sso_return_origins: %q: %w", raw, err)
+			return nil, fmt.Errorf("%s: %q: %w", field, raw, err)
 		}
 		if !slices.Contains(a.origins, origin) {
 			a.origins = append(a.origins, origin)

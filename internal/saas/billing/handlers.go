@@ -18,6 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/smartwalle/alipay/v3"
 
+	"github.com/wjsoj/CPA-Claude/internal/saas"
 	saasauth "github.com/wjsoj/CPA-Claude/internal/saas/auth"
 	"github.com/wjsoj/CPA-Claude/internal/saas/db"
 )
@@ -101,6 +102,13 @@ type Handler struct {
 	// SiteURL is the public app origin, used to default the Stripe
 	// redirect-return URL when the Stripe config doesn't set one.
 	SiteURL string
+
+	// TopupReturnOrigins is the exact-match allowlist a caller-supplied
+	// topup return_url is checked against (saas.topup_return_origins, parsed
+	// once at startup by TopupReturnOriginsFrom). nil — the default — rejects
+	// every return_url, which is how a deployment without the sibling product
+	// keeps today's behaviour exactly.
+	TopupReturnOrigins *saas.OriginAllowlist
 
 	// OrderTTL controls how long a "pending" order is honoured before the
 	// background sweeper marks it expired. After expiry, late Alipay
@@ -253,6 +261,17 @@ type topupReq struct {
 	// Element (card / Alipay / WeChat / crypto, charged 1:1 in USD); anything
 	// else (default) uses the configured QR Gateway (zpay / alipay / mock).
 	Provider string `json:"provider,omitempty"`
+	// ReturnURL is OPTIONAL and cross-site: where a redirect-based method
+	// (Alipay/WeChat) should send the buyer back to instead of this site's own
+	// /app/billing. It exists so a top-up started inside the sibling HypiHub
+	// product lands back on HypiHub.
+	//
+	// It is checked against saas.topup_return_origins by exact origin — see
+	// resolveTopupReturnURL in stripe_handlers.go. Absent (the normal case)
+	// the return URL is computed exactly as it always was. It grants nothing
+	// on the money side: the order, the amount, the webhook and the credit
+	// path are untouched by it.
+	ReturnURL string `json:"return_url,omitempty"`
 }
 
 func (h *Handler) topup(c *gin.Context) {
@@ -267,6 +286,21 @@ func (h *Handler) topup(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid amount"})
 		return
 	}
+	// Canonicalize to whole cents BEFORE the bounds check and before anything
+	// downstream reads the amount.
+	//
+	// Money has two decimal places and every rail this reaches already knows
+	// that: Stripe is billed minorUnits(usd) and the QR rail round2()s its CNY
+	// figure. Only the wallet credit used the caller's raw float, so a request
+	// for $1.004 was charged $1.00 (round(100.4) = 100 minor units) and
+	// credited $1.004 — and verifySessionForOrder's `amount_total >= credit`
+	// check passes on exactly that gap, because the gap is smaller than the
+	// unit it compares in. Half a cent per order is not a heist, but "credited
+	// more than charged" is not a property a wallet may have at all, and the
+	// 2026-08-18 audit's 1:1 reconciliation is only meaningful while the two
+	// numbers are the same number. Rounding here makes them one value that
+	// every rail, the order row and the ledger all share.
+	req.USD = round2(req.USD)
 	if req.USD < 1 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "min top-up is $1"})
 		return
@@ -274,6 +308,14 @@ func (h *Handler) topup(c *gin.Context) {
 	if req.USD > 1000 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "max top-up is $1000"})
 		return
+	}
+	// Optional cross-site return target. Validated here, with the rest of the
+	// request-shape checks and before anything is created, so a rejected
+	// return_url costs no order row and no gateway call. Empty when absent,
+	// and then every line below behaves exactly as it did before.
+	returnBase, ok := h.resolveTopupReturnURL(c, req.Provider, req.ReturnURL)
+	if !ok {
+		return // resolveTopupReturnURL already wrote the 400
 	}
 	// Per-user creation rate limit + max-pending guard. Prevents flooding
 	// the orders table or hammering Alipay's create-trade API.
@@ -305,7 +347,7 @@ func (h *Handler) topup(c *gin.Context) {
 	// cny_amount column is repurposed to hold the charged amount with rate=1
 	// so the existing admin dashboard sums stay coherent.
 	if strings.EqualFold(strings.TrimSpace(req.Provider), "stripe") {
-		h.topupStripe(c, u.ID, req.USD, out, u.Email)
+		h.topupStripe(c, u.ID, req.USD, out, u.Email, returnBase)
 		return
 	}
 

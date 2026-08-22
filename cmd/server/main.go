@@ -287,6 +287,19 @@ func main() {
 		log.Infof("payment gateway: %s", gwName)
 		billingH := billing.NewHandler(saasDB, rate, gateway, cfg.SaaS.SiteName)
 		billingH.SiteURL = cfg.SaaS.SiteURL
+		// Exact-origin allowlist for the optional cross-site top-up return_url
+		// (a top-up started in the sibling HypiHub must land back on HypiHub).
+		// Parsed ONCE here so a malformed origin is a boot-time fatal rather
+		// than a silently-shortened allowlist. nil when the key is unset, and
+		// then every return_url is rejected — today's behaviour exactly.
+		topupOrigins, err := billing.TopupReturnOriginsFrom(cfg.SaaS.TopupReturnOrigins)
+		if err != nil {
+			log.Fatalf("saas: %v", err)
+		}
+		billingH.TopupReturnOrigins = topupOrigins
+		if topupOrigins.Len() > 0 {
+			log.Infof("saas: cross-site top-up return_url enabled for %v", topupOrigins.Origins())
+		}
 		// Stripe runs alongside the QR gateway (not instead of it) so the
 		// embedded Payment Element — card / Alipay / WeChat / crypto, charged
 		// 1:1 in USD — and the legacy QR rail coexist.

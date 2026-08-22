@@ -257,6 +257,38 @@ saas:
   # sso_return_origins:
   #   - "https://hub.novadiffusion.com"
 
+  # 跨站充值回跳：允许 POST /api/v2/topup 的 return_url 指向的 origin 白名单
+  # （**精确比对**）。
+  #
+  # 姊妹站 HypiHub（汇枢）与本站共用同一个钱包和同一本账，充值页也做在它自己的
+  # 站内：浏览器把 /api/v2/topup 代理过来，本站创建 Stripe Checkout 并把
+  # client_secret 交回去，由 HypiHub 自己渲染 Payment Element。走支付宝/微信这类
+  # **需要跳转**的支付方式时，付完款浏览器要回到发起充值的那一页 —— 默认回的是本站
+  # /app/billing，配了这一项之后才允许回到 HypiHub。
+  #
+  # ⚠️ 这一项是本功能唯一的安全边界。return_url 来自浏览器（也就是可能来自攻击者），
+  #    带回去的是一条支付回执通道（?out=<订单号>）。因此这里只做「归一化 origin 的
+  #    精确字符串相等」，绝不做前缀匹配、后缀匹配或通配子域 —— 那些全是**开放重定向**：
+  #      - 前缀匹配 "https://hub.novadiffusion.com" 会放行
+  #        "https://hub.novadiffusion.com.evil.com"；
+  #      - 通配 "*.novadiffusion.com" 会放行攻击者能拿到 CNAME 的任意子域。
+  #    配置里写通配符会在**启动时直接 fatal**，不会被静默忽略。
+  #
+  # ⚠️ 钱只从本站进。HypiHub 没有 Stripe 密钥、没有 webhook、没有订单表、也没有任何
+  #    加钱的路径；它只是转发充值意图并渲染表单。结算与入账仍然只有本站这一条路径，
+  #    「webhook 与轮询抢跑」的去重是**进程内**判断，多一个入账进程就会真的重复入账。
+  #
+  # 每条只写 origin：scheme://host[:port]，不带 path / query / fragment。大小写与
+  # 默认端口会被归一化（https://x.com:443 == https://x.com），其余一律严格：http 与
+  # https 是两个 origin，不同端口是两个 origin，子域不继承，结尾多一个点也不相等。
+  #
+  # **与上面的 sso_return_origins 是两个独立的键，故意不复用**：那一项交接的是等价于
+  # 密码的会话码，这一项是支付路径上的回跳目标，两者授权的东西不同、应当能分别开关。
+  # 留空（默认）时，带 return_url 的充值请求一律 400，行为与今天逐字节一致。
+  topup_return_origins: []
+  # topup_return_origins:
+  #   - "https://hub.novadiffusion.com"
+
   # Maximum USD a user wallet may be driven negative by in-flight requests
   # (one large request, or many concurrent ones, can each pass the balance>0
   # check and then bill against a near-zero balance). Charges are clamped so the
