@@ -109,7 +109,12 @@ type Handler struct {
 	OrderTTL time.Duration
 
 	// MaxPendingPerUser caps in-flight pending orders per user to stop a
-	// hostile client from flooding the orders table with /topup spam.
+	// hostile client from flooding the orders table with /topup spam. Kept
+	// deliberately loose: a paying user comparison-shopping the checkout
+	// (switch amount, switch rail, reload a dead QR) legitimately leaves a
+	// trail of abandoned pending orders, and every one of them self-expires
+	// within OrderTTL. Blocking that user from paying costs far more than
+	// the handful of dead rows the cap saves.
 	MaxPendingPerUser int
 
 	mu sync.Mutex
@@ -124,7 +129,7 @@ func NewHandler(store *db.DB, rate *Rate, gw Gateway, site string) *Handler {
 		// so a stricter TTL avoids a "scan the QR you forgot about an hour
 		// ago" surprise where the order is still pending but the QR is dead.
 		OrderTTL:          15 * time.Minute,
-		MaxPendingPerUser: 5,
+		MaxPendingPerUser: 20,
 		createdAt:         make(map[int64][]time.Time),
 	}
 }
@@ -282,7 +287,7 @@ func (h *Handler) topup(c *gin.Context) {
 			"error":          "too many pending orders",
 			"pending_orders": pending,
 			"max_pending":    h.MaxPendingPerUser,
-			"hint":           "wait for existing orders to expire or close them via the Billing page",
+			"hint":           fmt.Sprintf("wait for existing orders to expire (%s) or pay one of them from the Billing page", h.OrderTTL),
 		})
 		return
 	}
@@ -291,6 +296,9 @@ func (h *Handler) topup(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// Only now does the attempt count against the sliding window — every
+	// path above rejected without reaching the gateway.
+	h.noteCreate(u.ID)
 
 	// Stripe rail: create a PaymentIntent and hand its client_secret to the
 	// browser. Charged 1:1 in the configured currency (USD). The order's
@@ -522,14 +530,47 @@ func parsePayResult(s string) PayResult {
 	return pr
 }
 
-// allowCreate gates per-user order creation: max 10 / hour. Returns
-// (true, 0) on allow, (false, retryAfterSec) on deny.
+// maxOrdersPerHour is the per-user ceiling on order creation. It exists to
+// stop a hostile client from hammering the gateway's create-trade API, NOT to
+// pace a real customer: abandoning a checkout and starting over (different
+// amount, different rail, expired QR) is normal behaviour, and every abandoned
+// order self-expires within OrderTTL. Set high enough that a human retrying
+// in earnest never hits it.
+const maxOrdersPerHour = 60
+
+// allowCreate reports whether the user may create another order under the
+// sliding 1h window, WITHOUT consuming a slot — call noteCreate once the
+// order actually reaches the gateway. Splitting the two matters: a request
+// rejected downstream (max-pending, bad params, gateway error) must not burn
+// rate budget, or a user who trips one limit gets locked out by the other.
+// Returns (true, 0) on allow, (false, retryAfterSec) on deny.
 func (h *Handler) allowCreate(userID int64) (bool, int) {
-	const maxPerHour = 10
 	now := time.Now()
-	cutoff := now.Add(-time.Hour)
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	kept := h.pruneLocked(userID, now)
+	if len(kept) >= maxOrdersPerHour {
+		retry := int(kept[0].Add(time.Hour).Sub(now).Seconds())
+		if retry < 1 {
+			retry = 1
+		}
+		return false, retry
+	}
+	return true, 0
+}
+
+// noteCreate consumes one slot in the sliding window.
+func (h *Handler) noteCreate(userID int64) {
+	now := time.Now()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.createdAt[userID] = append(h.pruneLocked(userID, now), now)
+}
+
+// pruneLocked drops timestamps that have aged out of the 1h window and stores
+// the survivors back. Caller holds h.mu.
+func (h *Handler) pruneLocked(userID int64, now time.Time) []time.Time {
+	cutoff := now.Add(-time.Hour)
 	stamps := h.createdAt[userID]
 	kept := stamps[:0]
 	for _, t := range stamps {
@@ -537,16 +578,8 @@ func (h *Handler) allowCreate(userID int64) (bool, int) {
 			kept = append(kept, t)
 		}
 	}
-	if len(kept) >= maxPerHour {
-		retry := int(kept[0].Add(time.Hour).Sub(now).Seconds())
-		if retry < 1 {
-			retry = 1
-		}
-		h.createdAt[userID] = kept
-		return false, retry
-	}
-	h.createdAt[userID] = append(kept, now)
-	return true, 0
+	h.createdAt[userID] = kept
+	return kept
 }
 
 // expiredOrderRetention is how long an expired/failed order lingers in the
