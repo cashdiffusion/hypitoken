@@ -319,3 +319,43 @@ server is running — that corrupts it further.`, siteName, source, observedAt, 
 </div>`, htmlEsc(siteName), htmlEsc(source), htmlEsc(observedAt), htmlEsc(detail))
 	return
 }
+
+// DatabaseRecoveredEmail builds the all-clear that follows a successful
+// self-heal, and is deliberately not just DatabaseAlertEmail with a different
+// word in it. The operator has already been paged by then; what they need next
+// is the two facts that decide whether they still have to get up — the file
+// was intact, and billing is running again — plus the one thing the process
+// cannot do for itself, which is find out who unlinked the database's files.
+func DatabaseRecoveredEmail(siteName, detail, observedAt string) (subject, html, text string) {
+	subject = fmt.Sprintf("[%s] RECOVERED: database self-healed", siteName)
+	text = fmt.Sprintf(`%s recovered the SaaS database automatically.
+
+Observed: %s
+Detail:   %s
+
+The connection pool was recycled and PRAGMA quick_check then passed, which
+means the database FILE was never damaged — the server was holding stale file
+handles. Billing writes have resumed. No recovery procedure is needed.
+
+This almost always means something outside the server unlinked the live
+saas.db-wal / saas.db-shm. The usual cause is the sqlite3 CLI being pointed at
+the live database: on exit it checkpoints and removes those files, and a READ-
+ONLY query does it too. Worth finding out what ran, because the process can
+recover from this but cannot prevent it.
+
+Charges attempted between the failure and this recovery were lost and can be
+reconciled from the request log with:
+  hypitoken reconcile-charges --from <t0> --to <t1>`, siteName, observedAt, detail)
+
+	html = fmt.Sprintf(`<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;line-height:1.6;color:#111">
+<p style="font-size:16px"><strong>%s recovered the SaaS database automatically.</strong></p>
+<table cellpadding="4" style="border-collapse:collapse">
+<tr><td><strong>Observed</strong></td><td>%s</td></tr>
+<tr><td><strong>Detail</strong></td><td><code>%s</code></td></tr>
+</table>
+<p>The connection pool was recycled and <code>PRAGMA quick_check</code> then passed: the database <strong>file was never damaged</strong>, the server was holding stale file handles. Billing writes have resumed and <strong>no recovery procedure is needed</strong>.</p>
+<p>This almost always means something outside the server unlinked the live <code>saas.db-wal</code> / <code>saas.db-shm</code> — usually the <code>sqlite3</code> CLI pointed at the live database, which removes them on exit <strong>even for a read-only query</strong>. Worth finding out what ran.</p>
+<p>Charges attempted during the outage were lost; reconcile them from the request log with <code>hypitoken reconcile-charges --from &lt;t0&gt; --to &lt;t1&gt;</code>.</p>
+</div>`, htmlEsc(siteName), htmlEsc(observedAt), htmlEsc(detail))
+	return
+}

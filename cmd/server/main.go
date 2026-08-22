@@ -67,6 +67,9 @@ func main() {
 		case "export-requests":
 			runExportRequestsCmd(os.Args[2:])
 			return
+		case "reconcile-charges":
+			runReconcileChargesCmd(os.Args[2:])
+			return
 		}
 	}
 
@@ -798,7 +801,12 @@ func integrityAlerter(mailer mail.Mailer, siteName, adminEmail string) func(saas
 		return nil
 	}
 	return func(a saasdb.IntegrityAlert) {
-		subject, html, text := mail.DatabaseAlertEmail(siteName, a.Source, a.Detail, a.At.Format(time.RFC3339))
+		var subject, html, text string
+		if a.Resolved {
+			subject, html, text = mail.DatabaseRecoveredEmail(siteName, a.Detail, a.At.Format(time.RFC3339))
+		} else {
+			subject, html, text = mail.DatabaseAlertEmail(siteName, a.Source, a.Detail, a.At.Format(time.RFC3339))
+		}
 		if err := mailer.Send(to, subject, html, text); err != nil {
 			log.Warnf("saas-db: could not mail integrity alert to %s: %v", to, err)
 		}

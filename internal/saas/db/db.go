@@ -14,6 +14,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Connection-pool sizes. Named because recycleConns (integrity.go) has to put
+// them back after temporarily driving MaxIdleConns to zero, and a self-heal
+// that silently resized the pool would be a worse bug than the one it fixes.
+const (
+	maxOpenConns = 8
+	maxIdleConns = 4
+)
+
 // DB wraps *sql.DB with helper methods grouped by domain (users, tokens, ...).
 type DB struct {
 	*sql.DB
@@ -23,6 +31,9 @@ type DB struct {
 	// the alert cooldown, and the operator-notification handler. See
 	// integrity.go.
 	corrupt corruptState
+
+	// recov throttles connection-pool self-heal attempts. See integrity.go.
+	recov recoverState
 }
 
 // Open opens (or creates) the SQLite file at path with WAL enabled and runs
@@ -65,8 +76,8 @@ func Open(path string) (*DB, error) {
 	}
 	// One connection is fine — WAL serializes writes and sql.DB handles
 	// pooling automatically. SQLite doesn't benefit from large pools.
-	sdb.SetMaxOpenConns(8)
-	sdb.SetMaxIdleConns(4)
+	sdb.SetMaxOpenConns(maxOpenConns)
+	sdb.SetMaxIdleConns(maxIdleConns)
 	if err := sdb.Ping(); err != nil {
 		return nil, err
 	}
