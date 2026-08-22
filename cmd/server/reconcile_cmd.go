@@ -129,7 +129,15 @@ func reconcileCharges(logDir, saasPath string, maxOverdraftUSD float64, from, to
 		return nil
 	}
 
-	sdb, err := saasdb.Open(saasPath)
+	// A dry run reports; it has no reason to hold a writable handle on a
+	// database the server is using. See OpenReadOnly — attaching read-write to
+	// a live SQLite file is the thing that caused the outage this command
+	// exists to repair, so the reporting path refuses to do it.
+	open := saasdb.OpenReadOnly
+	if apply {
+		open = saasdb.Open
+	}
+	sdb, err := open(saasPath)
 	if err != nil {
 		return fmt.Errorf("open saas db: %w", err)
 	}

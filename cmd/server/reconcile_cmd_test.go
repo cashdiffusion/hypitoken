@@ -321,3 +321,36 @@ func TestReconcileChargesSurfacesAMissingIndex(t *testing.T) {
 		t.Fatalf("error %q does not mention %q", err, want)
 	}
 }
+
+// TestDryRunDoesNotWriteTheSaaSDatabase is an operational guarantee, not a
+// nicety. A dry run is the thing an operator reaches for mid-incident, against
+// a database the server is actively using — and a second read-write attachment
+// to a live SQLite file is precisely what caused the 2026-08-22 outage. So the
+// reporting path must leave the file untouched, byte for byte.
+func TestDryRunDoesNotWriteTheSaaSDatabase(t *testing.T) {
+	dir := t.TempDir()
+	saasPath := filepath.Join(dir, "saas.db")
+	secret, _ := seedSaaS(t, saasPath, 100)
+
+	rdb := newRequestIndex(t, dir)
+	base := time.Now().Add(-time.Hour)
+	insertReq(t, rdb, base, secret, "openai", 5, 0, 0)
+
+	before, err := os.Stat(saasPath)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	if err := reconcileCharges(dir, saasPath, 0, base.Add(-time.Minute), base.Add(time.Minute), false); err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+
+	after, err := os.Stat(saasPath)
+	if err != nil {
+		t.Fatalf("stat after: %v", err)
+	}
+	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("dry run modified saas.db: size %d→%d, mtime %s→%s",
+			before.Size(), after.Size(), before.ModTime(), after.ModTime())
+	}
+}

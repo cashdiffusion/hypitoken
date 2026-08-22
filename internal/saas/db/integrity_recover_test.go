@@ -301,3 +301,43 @@ func TestSelfHealNotifiesWithResolved(t *testing.T) {
 		t.Fatal("no all-clear delivered after a successful heal")
 	}
 }
+
+// TestOpenReadOnlyRefusesWrites: the guarantee OpenReadOnly makes is the whole
+// reason reporting tools may point at a live production database, so it is
+// worth asserting rather than trusting to a DSN string staying correct.
+func TestOpenReadOnlyRefusesWrites(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "saas.db")
+	seed, err := Open(p)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	ro, err := OpenReadOnly(p)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	defer func() { _ = ro.Close() }()
+
+	ctx := context.Background()
+	// Reading is the point, so it must work.
+	var n int
+	if err := ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
+		t.Fatalf("read through a read-only handle: %v", err)
+	}
+	// Writing must not.
+	if _, err := ro.ExecContext(ctx, `INSERT INTO groups (name) VALUES ('should-not-land')`); err == nil {
+		t.Fatal("a write succeeded through OpenReadOnly")
+	}
+}
+
+// TestOpenReadOnlyRejectsAMissingFile stops a typo'd path from being reported
+// as an empty database, which for a reconciliation tool would read as
+// "nothing to repair".
+func TestOpenReadOnlyRejectsAMissingFile(t *testing.T) {
+	if _, err := OpenReadOnly(filepath.Join(t.TempDir(), "absent.db")); err == nil {
+		t.Fatal("OpenReadOnly invented a database that does not exist")
+	}
+}

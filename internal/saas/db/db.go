@@ -96,3 +96,38 @@ func Open(path string) (*DB, error) {
 }
 
 func (db *DB) Path() string { return db.path }
+
+// OpenReadOnly opens the database for inspection without any possibility of
+// modifying it, and without running migrations.
+//
+// The distinction matters more here than the usual read-only convenience. A
+// second process attached read-write to a live SQLite file is what caused the
+// 2026-08-22 outage: on close, such a connection may checkpoint and unlink the
+// -wal and -shm that the running server is still holding open. mode=ro cannot
+// checkpoint and cannot unlink, and query_only refuses writes at the statement
+// level, so a reader opened this way is inert with respect to the server.
+//
+// Use it for anything that only reports — reconciliation dry runs, audits,
+// one-off queries. Anything that must write still goes through Open, and
+// should run with the server stopped.
+//
+// Skipping migrate is not an oversight: a read-only handle could not apply one
+// anyway, and a reporting tool has no business changing the schema of the
+// database it was asked to look at.
+func OpenReadOnly(path string) (*DB, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(10000)", path)
+	sdb, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	sdb.SetMaxOpenConns(maxOpenConns)
+	sdb.SetMaxIdleConns(maxIdleConns)
+	if err := sdb.Ping(); err != nil {
+		_ = sdb.Close()
+		return nil, err
+	}
+	return &DB{DB: sdb, path: path}, nil
+}
