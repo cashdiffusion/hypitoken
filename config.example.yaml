@@ -240,9 +240,9 @@ saas:
   #
   # ⚠️ 因此这里是「归一化 origin 的精确字符串相等」，不做也永远不要改成前缀匹配、
   #    后缀匹配或通配子域 —— 那些全都是**开放重定向**：
-  #      - 前缀匹配 "https://hub.novadiffusion.com" 会放行
-  #        "https://hub.novadiffusion.com.evil.com"（把域名接在后面即可）；
-  #      - 通配 "*.novadiffusion.com" 会放行攻击者能拿到 CNAME 的任意子域。
+  #      - 前缀匹配 "https://apihub.hypit.ai" 会放行
+  #        "https://apihub.hypit.ai.evil.com"（把域名接在后面即可）；
+  #      - 通配 "*.hypit.ai" 会放行攻击者能拿到 CNAME 的任意子域。
   #    配置里写通配符会在**启动时直接 fatal**，不会被静默忽略。
   #
   # 每条只写 origin：scheme://host[:port]，不带 path / query / fragment，也不带
@@ -255,7 +255,7 @@ saas:
   # 由 service_tokens 单独控制。）
   sso_return_origins: []
   # sso_return_origins:
-  #   - "https://hub.novadiffusion.com"
+  #   - "https://apihub.hypit.ai"
 
   # 跨站充值回跳：允许 POST /api/v2/topup 的 return_url 指向的 origin 白名单
   # （**精确比对**）。
@@ -269,9 +269,9 @@ saas:
   # ⚠️ 这一项是本功能唯一的安全边界。return_url 来自浏览器（也就是可能来自攻击者），
   #    带回去的是一条支付回执通道（?out=<订单号>）。因此这里只做「归一化 origin 的
   #    精确字符串相等」，绝不做前缀匹配、后缀匹配或通配子域 —— 那些全是**开放重定向**：
-  #      - 前缀匹配 "https://hub.novadiffusion.com" 会放行
-  #        "https://hub.novadiffusion.com.evil.com"；
-  #      - 通配 "*.novadiffusion.com" 会放行攻击者能拿到 CNAME 的任意子域。
+  #      - 前缀匹配 "https://apihub.hypit.ai" 会放行
+  #        "https://apihub.hypit.ai.evil.com"；
+  #      - 通配 "*.hypit.ai" 会放行攻击者能拿到 CNAME 的任意子域。
   #    配置里写通配符会在**启动时直接 fatal**，不会被静默忽略。
   #
   # ⚠️ 钱只从本站进。HypiHub 没有 Stripe 密钥、没有 webhook、没有订单表、也没有任何
@@ -287,7 +287,7 @@ saas:
   # 留空（默认）时，带 return_url 的充值请求一律 400，行为与今天逐字节一致。
   topup_return_origins: []
   # topup_return_origins:
-  #   - "https://hub.novadiffusion.com"
+  #   - "https://apihub.hypit.ai"
 
   # Maximum USD a user wallet may be driven negative by in-flight requests
   # (one large request, or many concurrent ones, can each pass the balance>0
