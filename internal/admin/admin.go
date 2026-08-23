@@ -253,17 +253,22 @@ func (h *Handler) Register(r *gin.Engine) {
 // into a legacy /admin/api/* authorization. main.go wires it up after the
 // SaaS issuer is constructed; nil = SSO disabled (legacy token only).
 //
-// Returns (allowed, isAdmin):
+// Returns (allowed, isAdmin, err):
 //   - allowed=true means the caller is a logged-in SaaS user. The legacy
 //     admin gate accepts the request.
-//   - isAdmin reflects the user's SaaS role. For non-admins, mutation
-//     endpoints (POST/PATCH/DELETE) are still blocked so a regular user
-//     can read fleet stats but can't, say, delete an upstream credential.
+//   - isAdmin reflects the user's SaaS role *as stored*, not as claimed by
+//     the token. For non-admins, mutation endpoints (POST/PATCH/DELETE) are
+//     still blocked so a regular user can read fleet stats but can't, say,
+//     delete an upstream credential.
+//   - err != nil means the hook could not reach the store and therefore does
+//     not know the caller's role. This gate must fail closed on it (503) and
+//     must never treat "unknown" as "not an admin but allowed" — see
+//     saas/auth.LegacyAdminSSO for why the answer cannot come from the token.
 //
 // The hook is consulted only when the bearer token doesn't match the
 // configured AdminToken — so legacy clients with the operator password
 // keep working unchanged.
-var SSOAuth func(c *gin.Context) (allowed bool, isAdmin bool)
+var SSOAuth func(c *gin.Context) (allowed bool, isAdmin bool, err error)
 
 // adminAuth verifies the X-Admin-Token header (or Bearer token) against
 // ctxKeyPrivileged marks a request as coming from an operator (legacy admin
@@ -300,7 +305,16 @@ func (h *Handler) adminAuth() gin.HandlerFunc {
 		// detail (credential counts, real token labels) — see handleSummary
 		// and handleRequestsQuery.
 		if SSOAuth != nil {
-			if allowed, isAdmin := SSOAuth(c); allowed {
+			allowed, isAdmin, err := SSOAuth(c)
+			switch {
+			case err != nil:
+				// The hook could not establish the caller's role. Refuse
+				// rather than guess: a real operator retrying one request is
+				// cheap, admitting an unverified one is not.
+				log.Warnf("admin: SSO authorization unavailable: %v", err)
+				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "authorization backend unavailable"})
+				return
+			case allowed:
 				if isAdmin || c.Request.Method == http.MethodGet {
 					c.Set(ctxKeyPrivileged, isAdmin)
 					c.Next()

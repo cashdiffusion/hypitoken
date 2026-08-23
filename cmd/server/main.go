@@ -458,19 +458,10 @@ func main() {
 		// SSO bridge: a logged-in SaaS user can hit /admin/api/*
 		// with their JWT instead of the legacy operator token. GETs are
 		// allowed for any authenticated user (so the Overview / charts /
-		// Pricing tabs work for everyone signed in); mutations require
-		// role=admin and are still gated by the legacy handler.
-		admin.SSOAuth = func(c *gin.Context) (bool, bool) {
-			tok := strings.TrimSpace(c.GetHeader("Authorization"))
-			if !strings.HasPrefix(strings.ToLower(tok), "bearer ") {
-				return false, false
-			}
-			claims, err := issuer.Parse(strings.TrimSpace(tok[len("bearer "):]))
-			if err != nil {
-				return false, false
-			}
-			return true, claims.Role == "admin"
-		}
+		// Pricing tabs work for everyone signed in); mutations require the
+		// admin role *as recorded in saas.db* — the role claim inside the
+		// token is never consulted. See saas/auth.LegacyAdminSSO.
+		admin.SSOAuth = saasauth.LegacyAdminSSO(issuer, saasDB)
 		// Machine-to-machine routes for the sibling HypiHub gateway, which shares
 		// these user accounts and wallets over HTTP instead of opening saas.db.
 		// nil when saas.service_tokens is unset — then /api/v2/svc/* is never
