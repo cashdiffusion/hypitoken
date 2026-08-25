@@ -80,7 +80,7 @@ func TestCodexAPIKeyChatIsBridgedOntoResponses(t *testing.T) {
 	c, w := newCodexContext(t, "/v1/chat/completions", chatBody)
 
 	retry, done := s.doForwardCodex(c, cred, "/v1/chat/completions", chatBody, true,
-		"gpt-5.6-sol", "tok-abcdef123456", "client", time.Now(), 1)
+		"gpt-5.6-sol", "tok-abcdef123456", "client", "", time.Now(), 1)
 	if retry || !done {
 		t.Fatalf("bridged chat request should be served, got retry=%v done=%v", retry, done)
 	}
@@ -134,7 +134,7 @@ func TestCodexAPIKeyBridgedStreamBillsObservedUsage(t *testing.T) {
 	c, _ := newCodexContext(t, "/v1/chat/completions", chatBody)
 
 	s.doForwardCodex(c, cred, "/v1/chat/completions", chatBody, true,
-		"gpt-5.6-sol", "tok-abcdef123456", "client", time.Now(), 1)
+		"gpt-5.6-sol", "tok-abcdef123456", "client", "", time.Now(), 1)
 
 	// A credential that served accounted-for usage must be healthy, not cooled.
 	if _, _, _, consecutive := cred.HealthSnapshot(); consecutive != 0 {
@@ -161,7 +161,7 @@ func TestCodexAPIKeyBridgedNonStreamRendersChatCompletion(t *testing.T) {
 	c, w := newCodexContext(t, "/v1/chat/completions", body)
 
 	retry, done := s.doForwardCodex(c, cred, "/v1/chat/completions", body, false,
-		"gpt-5.6-sol", "tok-abcdef123456", "client", time.Now(), 1)
+		"gpt-5.6-sol", "tok-abcdef123456", "client", "", time.Now(), 1)
 	if retry || !done {
 		t.Fatalf("bridged non-stream request should be served, got retry=%v done=%v", retry, done)
 	}
@@ -201,7 +201,7 @@ func TestCodexAPIKeyResponsesPathIsNotRewritten(t *testing.T) {
 	c, w := newCodexContext(t, "/v1/responses", body)
 
 	s.doForwardCodex(c, cred, "/v1/responses", body, true,
-		"gpt-5.6-sol", "tok-abcdef123456", "client", time.Now(), 1)
+		"gpt-5.6-sol", "tok-abcdef123456", "client", "", time.Now(), 1)
 
 	if gotPath != "/v1/responses" {
 		t.Errorf("upstream path = %q, want /v1/responses", gotPath)
@@ -239,7 +239,7 @@ func TestCodexAPIKeyUntranslatableChatFallsBackVerbatim(t *testing.T) {
 	c, _ := newCodexContext(t, "/v1/chat/completions", body)
 
 	s.doForwardCodex(c, cred, "/v1/chat/completions", body, false,
-		"gpt-5.6-sol", "tok-abcdef123456", "client", time.Now(), 1)
+		"gpt-5.6-sol", "tok-abcdef123456", "client", "", time.Now(), 1)
 
 	if gotPath != "/v1/chat/completions" {
 		t.Errorf("upstream path = %q, want the verbatim /v1/chat/completions fallback", gotPath)
@@ -284,7 +284,7 @@ func TestCodexAPIKeyBridgedNonStreamWithoutUsageIsRetried(t *testing.T) {
 	c, w := newCodexContext(t, "/v1/chat/completions", body)
 
 	retry, done := s.doForwardCodex(c, cred, "/v1/chat/completions", body, false,
-		"gpt-5.6-sol", "tok-abcdef123456", "client", time.Now(), 1)
+		"gpt-5.6-sol", "tok-abcdef123456", "client", "", time.Now(), 1)
 
 	if !retry || done {
 		t.Fatalf("an unaccountable bridged turn must be retried on another credential; got retry=%v done=%v", retry, done)
@@ -336,7 +336,7 @@ func TestCodexAPIKeyBridgedAggregationClientCancelIsNotRetried(t *testing.T) {
 	}()
 
 	retry, done := s.doForwardCodex(c, cred, "/v1/chat/completions", body, false,
-		"gpt-5.6-sol", "tok-abcdef123456", "client", time.Now(), 1)
+		"gpt-5.6-sol", "tok-abcdef123456", "client", "", time.Now(), 1)
 
 	if retry || !done {
 		t.Fatalf("a client hang-up must end the exchange, not rotate credentials; got retry=%v done=%v", retry, done)

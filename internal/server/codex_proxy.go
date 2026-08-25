@@ -167,9 +167,9 @@ func (s *Server) fetchCodexAPIKeyModels(ctx context.Context, a *auth.Auth) ([]co
 // Only API-key credentials are handled here; OAuth credentials are
 // delegated to doForwardCodexOAuth (codex_oauth_proxy.go), a full
 // implementation that forwards to the ChatGPT Codex backend.
-func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, clientName string, start time.Time, attempts int) (retry, done bool) {
+func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, clientName, slotID string, start time.Time, attempts int) (retry, done bool) {
 	if a.Kind == auth.KindOAuth {
-		return s.doForwardCodexOAuth(c, a, path, body, stream, model, clientToken, clientName, start, attempts)
+		return s.doForwardCodexOAuth(c, a, path, body, stream, model, clientToken, clientName, slotID, start, attempts)
 	}
 
 	// API-key passthrough. We do not inject any Codex-CLI mimicry, do not

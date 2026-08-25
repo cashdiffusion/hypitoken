@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wjsoj/cc-core/auth"
 	"github.com/wjsoj/cc-core/mimicry"
 )
 
@@ -117,4 +118,42 @@ func codexPreviousResponseID(body []byte) string {
 // cuts the member out of the bytes.
 func removeCodexPreviousResponseID(body []byte) []byte {
 	return mimicry.RemoveCodexPreviousResponseID(body)
+}
+
+// codexUpstreamSessionID resolves the stable `session-id` this request should
+// present upstream.
+//
+// The backend places a conversation in its prompt cache by this header, so it
+// has to survive every turn of that conversation. It did not: the HTTP path
+// minted a fresh UUID per REQUEST, which was invisible for as long as cc-core
+// misspelled the header as `Session_id` (the backend ignores a name no client
+// sends) and became expensive the moment the spelling was corrected — Codex
+// cache hit rate fell from ~87% to ~45%, with a third of all turns arriving at
+// cache_read == 0 while carrying more than 10k of context.
+//
+// The anchor names one conversation on one credential:
+//
+//   - accountKey pins it to the credential, so a failover correctly starts a
+//     new upstream session rather than replaying one account's id on another.
+//   - clientToken separates tenants.
+//   - the conversation key separates concurrent conversations within a tenant.
+//     conversationAnchor reads the client's own prompt_cache_key first, which
+//     is exactly the id a real Codex client uses for both fields, so the two
+//     agree the way they do for a genuine client. slotID is the fallback for a
+//     body that names no conversation — coarser (a sessionless relay shares one
+//     fan-out bucket across several conversations, see relay_fanout.go), but
+//     still stable per turn, which is the property that matters here.
+//
+// Both anchor components below the account are downstream-supplied, which is
+// why neither is ever used as the session id itself: the id is the upstream
+// prompt-cache namespace, and a caller able to choose it could aim at another
+// tenant's cached prefix. Hashing them under an accountKey + clientToken prefix
+// confines each caller to its own keyspace. Same reasoning as the WS path's
+// anchor in handleCodexResponsesWS.
+func (s *Server) codexUpstreamSessionID(a *auth.Auth, clientToken, slotID string, body []byte) string {
+	conv, _ := conversationAnchor(body)
+	if conv == "" {
+		conv = slotID
+	}
+	return s.codexSessions.SessionID(a.AccountKey() + "|" + clientToken + "|" + conv)
 }
