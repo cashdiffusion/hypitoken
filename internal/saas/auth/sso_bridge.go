@@ -53,7 +53,9 @@ func LegacyAdminSSO(iss *Issuer, store *db.DB) func(c *gin.Context) (bool, bool,
 		}
 		claims, err := iss.Parse(strings.TrimSpace(raw[len("bearer "):]))
 		if err != nil {
-			return false, false, nil
+			// A token we cannot verify is an unauthenticated caller, not a
+			// server-side failure: answer 401, don't fail closed with 503.
+			return false, false, nil //nolint:nilerr // bad signature is a 401, not an error to propagate
 		}
 		u, err := store.GetUser(c.Request.Context(), claims.UserID)
 		if err != nil {

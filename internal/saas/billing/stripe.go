@@ -20,13 +20,12 @@ import (
 // side on the Handler (Handler.Stripe) rather than behind Gateway, and runs
 // *alongside* whichever QR gateway is configured.
 //
-// The session's single line item is priced in Currency (USD) and the wallet is
-// credited 1:1 in USD. Adaptive Pricing is enabled, so Stripe auto-converts the
-// presentment currency to the buyer's local currency at checkout — which is what
-// unlocks Alipay/WeChat/local rails on a non-US account. The buyer pays Stripe's
-// 2-4% conversion fee on the converted leg; we receive the full USD amount. We
-// moved off the raw PaymentIntents API because Adaptive Pricing is only
-// supported with Checkout Sessions + Elements, not with PaymentIntents.
+// The session's single line item is priced in Currency (USD), the buyer is
+// charged in USD, and the wallet is credited 1:1. Adaptive Pricing is off — see
+// CreateTopUpSession for the measurements behind that. We moved off the raw
+// PaymentIntents API when Adaptive Pricing was still in play (it only works with
+// Checkout Sessions + Elements); Checkout Sessions stayed because the poll +
+// webhook settlement paths are now built around them.
 type StripeGateway struct {
 	sc             *stripe.Client
 	publishableKey string
@@ -168,20 +167,37 @@ func (g *StripeGateway) VerifyPaidSession(sess *stripe.CheckoutSession, amount f
 }
 
 // CreateTopUpSession creates a custom-UI-mode Checkout Session for a wallet
-// top-up: one USD line item, Adaptive Pricing on (Stripe localizes the
-// presentment currency for the buyer, unlocking Alipay et al.), the customer's
-// email prefilled, and the order id / user id / usd credit stamped into metadata
-// so the webhook / poll path can map a settled session back to our order without
-// a side table. returnURL is where redirect-based methods (Alipay/WeChat) send
-// the browser back. Returns the session id + client_secret.
+// top-up: one USD line item, the customer's email prefilled, and the order id /
+// user id / usd credit stamped into metadata so the webhook / poll path can map
+// a settled session back to our order without a side table. returnURL is where
+// redirect-based methods (Alipay/WeChat) send the browser back. Returns the
+// session id + client_secret.
+//
+// Adaptive Pricing is deliberately OFF. It was originally enabled on the theory
+// that Alipay needs a local presentment currency to be eligible on our
+// Hong Kong account — it doesn't: 71 of the last 100 live charges settled as
+// alipay/USD with no presentment conversion at all. What Adaptive Pricing did
+// buy the buyer was a worse exchange rate. Measured against real settled
+// sessions, its USD→CNY rate was ~6.99 ($10.00 → ¥69.90, $5.00 → ¥34.96,
+// $20.00 → ¥139.85) while Alipay converting the same USD charge itself quotes
+// ~6.76 — a ~3.4% spread, matching the 2–4% conversion fee Stripe documents as
+// "you pay 0%, your customers pay 2–4%". Every basis point of that goes to
+// Stripe: amount_total stays USD either way, so we credit the same wallet
+// balance and receive the same settlement whichever currency the buyer picks.
+// Charging USD outright hands the conversion back to Alipay's own bank rate.
+//
+// Keep this in lockstep with the client: Stripe requires the Currency Selector
+// Element to be rendered whenever Adaptive Pricing is live on an Elements
+// integration, so "leave it on but hide the picker" is not an option — the
+// browser must drop adaptivePricing.allowed together with this flag.
 func (g *StripeGateway) CreateTopUpSession(ctx context.Context, outTradeNo string, usd float64, userID int64, email, returnURL, description string) (*StripeSession, error) {
 	params := &stripe.CheckoutSessionCreateParams{
 		Mode:   stripe.String(string(stripe.CheckoutSessionModePayment)),
 		UIMode: stripe.String(string(stripe.CheckoutSessionUIModeCustom)),
-		// Adaptive Pricing converts the USD price to the buyer's local currency,
-		// which is what makes Alipay/WeChat eligible on a non-US account.
+		// Set explicitly rather than relying on the account default, which can
+		// be flipped on from the Dashboard without touching this code.
 		AdaptivePricing: &stripe.CheckoutSessionCreateAdaptivePricingParams{
-			Enabled: stripe.Bool(true),
+			Enabled: stripe.Bool(false),
 		},
 		ReturnURL: stripe.String(returnURL),
 		LineItems: []*stripe.CheckoutSessionCreateLineItemParams{{

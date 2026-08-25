@@ -1,6 +1,5 @@
 import {
   CheckoutElementsProvider,
-  CurrencySelectorElement,
   PaymentElement,
   useCheckoutElements,
 } from "@stripe/react-stripe-js/checkout";
@@ -100,10 +99,10 @@ interface StripeTopUpProps {
   onConfirmed: () => void;
 }
 
-// StripeTopUp mounts the embedded Checkout Element (Checkout Sessions API with
-// Adaptive Pricing). Stripe owns the sensitive card / Alipay / WeChat input
-// inside its iframe; we own everything around it. The Currency Selector lets the
-// buyer pay in their localized currency, which is what unlocks Alipay et al.
+// StripeTopUp mounts the embedded Checkout Element (Checkout Sessions API).
+// Stripe owns the sensitive card / Alipay input inside its iframe; we own
+// everything around it. Everything is presented and charged in USD — see the
+// adaptivePricing note on the options below.
 export function StripeTopUp({ publishableKey, clientSecret, onConfirmed }: StripeTopUpProps) {
   const stripePromise = useMemo(() => getStripe(publishableKey), [publishableKey]);
   // Track the light/dark class on <html> so the Element re-themes live when the
@@ -123,12 +122,16 @@ export function StripeTopUp({ publishableKey, clientSecret, onConfirmed }: Strip
       stripe={stripePromise}
       options={{
         clientSecret,
-        // Mark our integration ready for Adaptive Pricing (we render the
-        // mandatory Currency Selector below). Stripe then localizes the
-        // presentment currency from the buyer's IP and unlocks local rails.
+        // No adaptivePricing.allowed: the session is created with Adaptive
+        // Pricing disabled server-side, so the buyer is always charged in USD
+        // and no Currency Selector is rendered. Alipay stays eligible on USD
+        // (most of our live Alipay volume already settles that way) and the
+        // buyer gets Alipay's own FX instead of Stripe's 2-4% conversion fee.
+        // These two must move together — Stripe requires the Currency Selector
+        // to be mounted whenever Adaptive Pricing is live on an Elements
+        // integration, so re-enabling one means re-enabling the other.
         // (The buyer's email is prefilled server-side via customer_email, so we
         // must NOT also pass defaultValues.email — that conflicts.)
-        adaptivePricing: { allowed: true },
         elementsOptions: { appearance, loader: "auto" },
       }}
     >
@@ -167,10 +170,9 @@ function CheckoutForm({ onConfirmed }: { onConfirmed: () => void }) {
   }
 
   const checkout = result.checkout;
-  // Preformatted total in whatever currency the buyer is being charged — USD by
-  // default, or the localized currency once Adaptive Pricing kicks in.
+  // Preformatted USD total — Adaptive Pricing is off, so this is the only
+  // currency the buyer ever sees.
   const payAmount = checkout.total?.total?.amount ?? "";
-  const hasCurrencyOptions = (checkout.currencyOptions?.length ?? 0) > 0;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,11 +207,6 @@ function CheckoutForm({ onConfirmed }: { onConfirmed: () => void }) {
               {t("billing.stripe.loadingElement")}
             </span>
           </div>
-        </div>
-      )}
-      {hasCurrencyOptions && (
-        <div className="rounded-md border border-border-strong bg-muted/30 p-2">
-          <CurrencySelectorElement />
         </div>
       )}
       <PaymentElement options={{ layout: "tabs" }} onReady={() => setReady(true)} />

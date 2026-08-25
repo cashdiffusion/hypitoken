@@ -552,7 +552,7 @@ export default {
       youPay: "You pay (USD)",
       usdNote: "Charged 1:1 in USD — no exchange-rate markup.",
       localizeNote:
-        "Wallet credited 1:1 in USD; at checkout Stripe localizes the payment currency to your region (e.g. CNY for Alipay), which may include a ~2-4% FX fee.",
+        "Charged in USD end to end and credited 1:1 to your wallet, with no FX markup from us. Pay by Alipay and Alipay converts to your local currency at its own rate.",
       pay: "Pay {{amount}}",
       processing: "Processing…",
       confirming: "Confirming payment…",
