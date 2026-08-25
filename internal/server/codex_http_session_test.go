@@ -216,6 +216,51 @@ func TestCodexHTTPSessionIDSeparatesTenants(t *testing.T) {
 	}
 }
 
+// metadata.user_id names the END USER in the OpenAI dialect, not the
+// conversation. Anchoring the upstream session on it merged every concurrent
+// thread of one user into a single upstream session, so the backend routed
+// several unrelated 200k-token conversations together and they evicted each
+// other from the account's prompt cache.
+func TestCodexHTTPSessionIDIgnoresOpenAIUserID(t *testing.T) {
+	spy := &codexHTTPSessionSpy{}
+	backend := spy.start(t)
+	cred := codexWSTestOAuth("codex-acct-1")
+	s := codexHTTPTestServer(backend.URL, cred)
+
+	// Two distinct conversations of ONE end user: same metadata.user_id, no
+	// prompt_cache_key, different opening messages.
+	for _, opening := range []string{"refactor the parser", "write release notes"} {
+		body, err := json.Marshal(map[string]any{
+			"model":    "gpt-5.6-sol",
+			"stream":   true,
+			"metadata": map[string]any{"user_id": "end-user-42"},
+			"input": []any{map[string]any{
+				"type": "message", "role": "user",
+				"content": []any{map[string]any{"type": "input_text", "text": opening}},
+			}},
+		})
+		if err != nil {
+			t.Fatalf("marshal body: %v", err)
+		}
+		gin.SetMode(gin.TestMode)
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
+		c.Set("client_token", "sk-tenant-one")
+		c.Set("client_name", "tester")
+		s.doForwardCodexOAuth(c, cred, "/v1/responses", body, true, "gpt-5.6-sol",
+			"sk-tenant-one", "tester", "slot-a", time.Now(), 1)
+	}
+
+	seen := spy.seen(t)
+	if len(seen) != 2 {
+		t.Fatalf("backend saw %d turns, want 2", len(seen))
+	}
+	if seen[0] == seen[1] {
+		t.Errorf("two conversations of one end user shared session-id %q — "+
+			"metadata.user_id is the user, not the conversation", seen[0])
+	}
+}
+
 // A body that names no conversation falls back to the scheduler slot, which is
 // still stable per turn.
 func TestCodexHTTPSessionIDFallsBackToSlot(t *testing.T) {

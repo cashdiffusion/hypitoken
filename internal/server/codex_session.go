@@ -136,13 +136,19 @@ func removeCodexPreviousResponseID(body []byte) []byte {
 //   - accountKey pins it to the credential, so a failover correctly starts a
 //     new upstream session rather than replaying one account's id on another.
 //   - clientToken separates tenants.
-//   - the conversation key separates concurrent conversations within a tenant.
-//     conversationAnchor reads the client's own prompt_cache_key first, which
-//     is exactly the id a real Codex client uses for both fields, so the two
-//     agree the way they do for a genuine client. slotID is the fallback for a
-//     body that names no conversation — coarser (a sessionless relay shares one
-//     fan-out bucket across several conversations, see relay_fanout.go), but
-//     still stable per turn, which is the property that matters here.
+//   - slotID separates the caller's concurrent windows. It is in the anchor
+//     unconditionally, not merely as a fallback: it is the one component that
+//     cannot collapse across conversations, so it bounds the damage when the
+//     body-derived key below degenerates.
+//   - the conversation key separates concurrent conversations within one window.
+//     codexConversationAnchor reads the client's own prompt_cache_key first,
+//     which is exactly the id a real Codex client uses for both fields, so the
+//     two agree the way they do for a genuine client. It deliberately does NOT
+//     read metadata.user_id — in the OpenAI dialect that names the end user, not
+//     the conversation, and anchoring on it merged all of one user's concurrent
+//     threads into a single upstream session. Empty for a response-chain
+//     continuation, which names no conversation of its own; the slot carries
+//     those.
 //
 // Both anchor components below the account are downstream-supplied, which is
 // why neither is ever used as the session id itself: the id is the upstream
@@ -151,9 +157,18 @@ func removeCodexPreviousResponseID(body []byte) []byte {
 // confines each caller to its own keyspace. Same reasoning as the WS path's
 // anchor in handleCodexResponsesWS.
 func (s *Server) codexUpstreamSessionID(a *auth.Auth, clientToken, slotID string, body []byte) string {
-	conv, _ := conversationAnchor(body)
-	if conv == "" {
-		conv = slotID
-	}
-	return s.codexSessions.SessionID(a.AccountKey() + "|" + clientToken + "|" + conv)
+	conv, src := codexConversationAnchor(body)
+	codexAnchorStats.record(src)
+	return s.codexSessions.SessionID(a.AccountKey() + "|" + clientToken + "|" + slotID + "|" + conv)
 }
+
+// codexAnchorStats reports which anchor actually names Codex conversations in
+// production, once a minute, the same way fanoutStats does for the scheduler.
+//
+// Nothing else can answer it. A session id is not recorded in the request log,
+// so a caller whose bodies degenerate to one anchor — every conversation merged
+// into one upstream session, evicting each other from the account's prompt
+// cache — is indistinguishable in the log from one that is simply cache-cold.
+// That ambiguity is what made the metadata.user_id collapse above cost a
+// production deploy to find rather than a log line to read.
+var codexAnchorStats = anchorStats{label: "codex session"}

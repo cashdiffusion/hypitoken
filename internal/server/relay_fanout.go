@@ -137,6 +137,30 @@ type anchorItem struct {
 // on, the account that produced it. Left anchorless, such a caller keeps the
 // single sticky slot it has always had.
 func conversationAnchor(body []byte) (string, anchorSource) {
+	return conversationAnchorOf(body, true)
+}
+
+// codexConversationAnchor is conversationAnchor without the metadata.user_id
+// branch, and it exists because that field means two different things.
+//
+// For real Claude Code it is per-CONVERSATION — cc-core writes a JSON object
+// there whose session_id rotates with the conversation — which is why the
+// shared path reads it. In the OpenAI dialect it is what its name says: a
+// stable identifier for the END USER, constant across every conversation they
+// ever open. Anchoring on it there collapses all of one user's concurrent
+// conversations onto a single anchor.
+//
+// For the fan-out buckets that collapse is survivable (it costs one of eight
+// scheduler slots). For the upstream session id it is not: the backend then
+// sees several unrelated 200k-token conversations claiming to be one session,
+// routes them together, and they evict each other. Observed in production as
+// one conversation reading 220928 tokens out of cache while another on the same
+// credential, of the same size, never read more than its 2816-token prefix.
+func codexConversationAnchor(body []byte) (string, anchorSource) {
+	return conversationAnchorOf(body, false)
+}
+
+func conversationAnchorOf(body []byte, allowAnthropicUserID bool) (string, anchorSource) {
 	if len(body) == 0 {
 		return "", anchorNone
 	}
@@ -147,12 +171,15 @@ func conversationAnchor(body []byte) (string, anchorSource) {
 	if p.PromptCacheKey != "" {
 		return p.PromptCacheKey, anchorCacheKey
 	}
-	for _, id := range []string{
+	ids := []string{
 		p.ClientMetadata.SessionID,
 		p.ClientMetadata.ThreadID,
 		p.ConversationID,
-		p.Metadata.UserID,
-	} {
+	}
+	if allowAnthropicUserID {
+		ids = append(ids, p.Metadata.UserID)
+	}
+	for _, id := range ids {
 		if id != "" {
 			return id, anchorMetadata
 		}
@@ -211,12 +238,16 @@ const (
 var anchorSourceNames = [...]string{"none", "prompt_cache_key", "client_metadata", "first_user_message", "response_chain(no session)"}
 
 type anchorStats struct {
+	// label names the caller in the log line, so two tallies of the same shape
+	// (the scheduler's buckets and the upstream session id) stay tellable apart.
+	label string
+
 	mu     sync.Mutex
 	counts [len(anchorSourceNames)]uint64
 	last   time.Time
 }
 
-var fanoutStats anchorStats
+var fanoutStats = anchorStats{label: "sessionless"}
 
 // record counts one classification and reports the running tallies at most
 // once a minute, so a busy proxy pays one log line rather than one per request.
@@ -246,6 +277,6 @@ func (s *anchorStats) record(src anchorSource) {
 		parts = append(parts, fmt.Sprintf("%s=%d", anchorSourceNames[i], n))
 	}
 	if total > 0 {
-		log.Infof("fanout: sessionless anchors over the last minute: %s", strings.Join(parts, " "))
+		log.Infof("fanout: %s anchors over the last minute: %s", s.label, strings.Join(parts, " "))
 	}
 }
