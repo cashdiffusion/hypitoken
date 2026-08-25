@@ -278,22 +278,22 @@ codex
 
 ## 六、可用模型
 
-OpenAI 侧当前已定价的模型 ID：
+OpenAI 侧提供的模型 ID：
 
 ```
-gpt-5.2  gpt-5.3-codex  gpt-5.3-codex-spark
-gpt-5.4  gpt-5.4-mini  gpt-5.5
 gpt-5.6-sol  gpt-5.6-terra  gpt-5.6-luna
-gpt-5  gpt-5-mini  gpt-5-nano  gpt-4o  gpt-4o-mini
+gpt-5.5  gpt-5.4  gpt-5.4-mini
 ```
+
+`gpt-5.6-sol` 是旗舰，`gpt-5.6-terra` 兼顾能力与成本，`gpt-5.6-luna` 面向高并发的成本敏感场景。
 
 `GET /v1/models` 返回的是**实际可用集合**（随上游套餐变化），控制台的模型列表为准：
 
 ```bash
-codex --model gpt-5.3-codex "帮我优化这段代码"
+codex --model gpt-5.6-sol "帮我优化这段代码"
 ```
 
-> 模型名可以带后缀并被正确识别计费，例如 `gpt-5.3-codex(high)`。
+> 模型名可以带后缀并被正确识别计费，例如 `gpt-5.6-sol(high)`。
 
 ## 七、在自动化 / Agent 中使用
 
@@ -304,7 +304,7 @@ codex --model gpt-5.3-codex "帮我优化这段代码"
 codex exec "把 README 里的安装步骤更新成 Node 22"
 
 # 指定模型
-codex exec --model gpt-5.3-codex "给所有导出函数补 JSDoc"
+codex exec --model gpt-5.6-sol "给所有导出函数补 JSDoc"
 ```
 
 配置照常从 `~/.codex/config.toml` + `~/.codex/auth.json` 读取；在 CI 里没有这两个文件时，直接给环境变量 `OPENAI_BASE_URL` 和 `OPENAI_API_KEY` 即可。

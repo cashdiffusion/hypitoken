@@ -278,22 +278,23 @@ write a Python script that lists every filename in the current directory
 
 ## 6. Available models
 
-OpenAI-side model IDs that currently have pricing:
+OpenAI-side model IDs on offer:
 
 ```
-gpt-5.2  gpt-5.3-codex  gpt-5.3-codex-spark
-gpt-5.4  gpt-5.4-mini  gpt-5.5
 gpt-5.6-sol  gpt-5.6-terra  gpt-5.6-luna
-gpt-5  gpt-5-mini  gpt-5-nano  gpt-4o  gpt-4o-mini
+gpt-5.5  gpt-5.4  gpt-5.4-mini
 ```
+
+`gpt-5.6-sol` is the flagship, `gpt-5.6-terra` balances capability against
+cost, and `gpt-5.6-luna` targets cost-sensitive, high-volume workloads.
 
 `GET /v1/models` returns the **live set** actually available (it moves with the upstream plan); the console's model list is authoritative.
 
 ```bash
-codex --model gpt-5.3-codex "optimise this code"
+codex --model gpt-5.6-sol "optimise this code"
 ```
 
-> Model names may carry a suffix and still bill correctly, e.g. `gpt-5.3-codex(high)`.
+> Model names may carry a suffix and still bill correctly, e.g. `gpt-5.6-sol(high)`.
 
 ## 7. Using it headlessly
 
@@ -304,7 +305,7 @@ codex --model gpt-5.3-codex "optimise this code"
 codex exec "update the install steps in README to Node 22"
 
 # pick a model
-codex exec --model gpt-5.3-codex "add JSDoc to every exported function"
+codex exec --model gpt-5.6-sol "add JSDoc to every exported function"
 ```
 
 Config still comes from `~/.codex/config.toml` + `~/.codex/auth.json`; in a CI box that has neither, just set `OPENAI_BASE_URL` and `OPENAI_API_KEY` as environment variables.
