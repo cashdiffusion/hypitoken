@@ -33,10 +33,27 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 // the gpt-5.6 tiers advertised no cache-write rate although the catalogue
 // charges 1.25x input for one.
 //
-// Nothing below may reintroduce a hardcoded RATE. Presentation metadata
-// (display name, tier label, ordering) is cosmetic and may live here, but every
-// model the catalogue prices is rendered whether or not it has an entry —
-// PRESENTATION is a lookup with a derived fallback, never an allowlist.
+// Nothing below may reintroduce a hardcoded RATE. That rule is absolute and is
+// what this comment originally protected.
+//
+// What DID change: this file used to render every model the catalogue priced,
+// on the reasoning that a model we bill for must appear on the price list. That
+// held only because the catalogue happened to contain exactly the models on
+// sale. It stopped holding on 2026-08-25, when cc-core added a price card for
+// every published OpenAI SKU — not to sell them, but because pricing.Lookup
+// falls back by trimming "-" segments, so a MISSING card silently bills at the
+// nearest shorter name (gpt-5.4-nano was billing at the gpt-5.4 card, 12.5x
+// over). Those defensive cards then surfaced here as a price list advertising
+// two dozen models nobody can buy.
+//
+// So the catalogue and the price list answer two different questions —
+// "what must never be mispriced" vs "what is on sale" — and SOLD below is the
+// second one. The original protection is kept as an assertion instead of an
+// emergent property: every id in SOLD must resolve to a real card
+// (assertSoldModelsArePriced), so the list can never advertise a price that is
+// actually a prefix-fallback guess. Adding a model to the shop means adding it
+// here; that is deliberate, and it is the only honest way to keep the two in
+// step now that they are no longer the same set.
 
 /** One `<provider>/<model>` entry as served by /api/v2/pricing. */
 interface PriceCard {
@@ -81,9 +98,6 @@ const PRESENTATION: Record<string, { display: string; tier: string }> = {
   "gpt-5.5": { display: "GPT-5.5", tier: "flagship" },
   "gpt-5.4": { display: "GPT-5.4", tier: "advanced" },
   "gpt-5.4-mini": { display: "GPT-5.4 mini", tier: "fast" },
-  "gpt-5.3-codex": { display: "GPT-5.3 Codex", tier: "coding" },
-  "gpt-5.3-codex-spark": { display: "GPT-5.3 Codex Spark", tier: "coding" },
-  "gpt-5.2": { display: "GPT-5.2", tier: "standard" },
 };
 
 // Dated snapshots (claude-sonnet-5-20260901) resolve to the same card as their
@@ -91,11 +105,28 @@ const PRESENTATION: Record<string, { display: string; tier: string }> = {
 // one model twice at one price. Keep the base, drop the snapshot.
 const DATED_SUFFIX = /-\d{8}$/;
 
-// Which OpenAI ids are Codex subscription tiers rather than BYOK API models.
-// The catalogue prices gpt-5 / gpt-5-mini / gpt-5-nano / gpt-4o* too, but those
-// are only reachable with a customer's own key and are not sold here. Every
-// tier shipped so far is gpt-5.<minor>; anything else is treated as BYOK.
-const CODEX_TIER = /^gpt-5\.\d/;
+// The OpenAI models actually on sale, in display order — index 0 is the
+// flagship and gets the featured card.
+//
+// This replaced a /^gpt-5\.\d/ pattern that tried to INFER the sold set from
+// the id ("every tier shipped so far is gpt-5.<minor>"). The inference was
+// wrong the moment the catalogue gained defensive cards: gpt-5.5-pro,
+// gpt-5.4-nano, gpt-5.4-pro, gpt-5.2-pro, gpt-5.1 and gpt-5.6-cyber all match
+// that pattern and none of them are sold. A shop's inventory is not derivable
+// from a naming convention.
+//
+// Order is explicit rather than sorted by price because sol and gpt-5.5 carry
+// the same $5.00 input rate, so a price sort put gpt-5.5 in the flagship slot
+// on an alphabetical tiebreak. sol is the flagship; say so rather than hoping
+// the sort agrees.
+const SOLD_OPENAI = [
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+] as const;
 
 /** Title-case a catalogue id when PRESENTATION has no entry for it. */
 function deriveDisplay(model: string): string {
@@ -107,39 +138,78 @@ function deriveDisplay(model: string): string {
     .replace(/^Gpt/, "GPT");
 }
 
+/** Build one row from a catalogue id + its card. */
+function rowFrom(name: string, card: PriceCard): ModelRow {
+  const meta = PRESENTATION[name];
+  return {
+    name,
+    display: meta?.display ?? deriveDisplay(name),
+    // "standard" is the neutral label for a model shipped after this file was
+    // last touched — it still gets listed, just without a curated tier.
+    tier: meta?.tier ?? "standard",
+    input: card.input_per_1m,
+    output: card.output_per_1m,
+    // 0 means the catalogue has no rate for that axis (OpenAI cards carry no
+    // cache-write until the 5.6 line); render it as "—" rather than "$0".
+    cacheWrite: card.cache_create_per_1m > 0 ? card.cache_create_per_1m : null,
+    cacheRead: card.cache_read_per_1m > 0 ? card.cache_read_per_1m : null,
+  };
+}
+
 /**
  * Turn the catalogue into the rows for one provider tab.
  *
- * Ordering is by input rate descending, so the priciest model is index 0 and
- * gets the featured card — that ranking follows the data instead of a
- * hand-maintained list that can fall out of step with it.
+ * The two providers select differently on purpose. Anthropic still lists every
+ * model the catalogue prices, ordered by input rate descending — there, the
+ * priced set and the sold set are still the same. OpenAI lists SOLD_OPENAI in
+ * its declared order, because there the catalogue also holds defensive cards
+ * for SKUs that are priced-but-not-sold (see the comment above SOLD_OPENAI).
  */
 function rowsFor(cat: Catalogue | null, provider: "anthropic" | "openai"): ModelRow[] {
   if (!cat?.models) return [];
+
+  if (provider === "openai") {
+    const rows: ModelRow[] = [];
+    for (const name of SOLD_OPENAI) {
+      const card = cat.models[`openai/${name}`];
+      // A sold model with no card would render a prefix-fallback guess as if it
+      // were a published rate. Drop the row instead — a missing price is
+      // visible, a wrong one is not. assertSoldModelsArePriced surfaces it in
+      // development so it does not merely vanish from the page.
+      if (!card) continue;
+      rows.push(rowFrom(name, card));
+    }
+    return rows;
+  }
+
   const rows: ModelRow[] = [];
   for (const [key, card] of Object.entries(cat.models)) {
     const slash = key.indexOf("/");
     if (slash < 0 || key.slice(0, slash) !== provider) continue;
     const name = key.slice(slash + 1);
     if (DATED_SUFFIX.test(name)) continue;
-    if (provider === "openai" && !CODEX_TIER.test(name)) continue;
-    const meta = PRESENTATION[name];
-    rows.push({
-      name,
-      display: meta?.display ?? deriveDisplay(name),
-      // "standard" is the neutral label for a model shipped after this file was
-      // last touched — it still gets listed, just without a curated tier.
-      tier: meta?.tier ?? "standard",
-      input: card.input_per_1m,
-      output: card.output_per_1m,
-      // 0 means the catalogue has no rate for that axis (OpenAI cards carry no
-      // cache-write until the 5.6 line); render it as "—" rather than "$0".
-      cacheWrite: card.cache_create_per_1m > 0 ? card.cache_create_per_1m : null,
-      cacheRead: card.cache_read_per_1m > 0 ? card.cache_read_per_1m : null,
-    });
+    rows.push(rowFrom(name, card));
   }
   rows.sort((a, b) => b.input - a.input || a.name.localeCompare(b.name));
   return rows;
+}
+
+/**
+ * Dev-only: a model in SOLD_OPENAI with no catalogue card is a shop entry the
+ * billing path cannot price. rowsFor drops it so the page never shows a
+ * fallback guess as a published rate; this makes that drop loud instead of
+ * silent, which is the whole reason the assertion exists.
+ */
+function assertSoldModelsArePriced(cat: Catalogue | null): void {
+  if (!import.meta.env.DEV || !cat?.models) return;
+  const missing = SOLD_OPENAI.filter((m) => !cat.models[`openai/${m}`]);
+  if (missing.length > 0) {
+    console.error(
+      `pricing: SOLD_OPENAI lists ${missing.join(", ")} but the catalogue prices ` +
+        `no such model — these rows are hidden. Add the card in cc-core ` +
+        `pricing/pricing.go or remove them from SOLD_OPENAI.`,
+    );
+  }
 }
 
 // Format a USD/M-token rate: up to 3 decimals, trailing zeros trimmed ($5, $2.4, $0.075).
@@ -771,7 +841,10 @@ export default function PricingPage({ embedded }: { embedded?: boolean }) {
   }, []);
 
   const claudeRows = useMemo(() => rowsFor(catalogue, "anthropic"), [catalogue]);
-  const codexRows = useMemo(() => rowsFor(catalogue, "openai"), [catalogue]);
+  const codexRows = useMemo(() => {
+    assertSoldModelsArePriced(catalogue);
+    return rowsFor(catalogue, "openai");
+  }, [catalogue]);
 
   // The default group's multipliers drive the "official vs ours" framing on the
   // model bento. Fall back to 1× (no discount) until groups load.
