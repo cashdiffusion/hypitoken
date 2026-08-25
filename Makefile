@@ -7,6 +7,18 @@ BIN := bin/hypitoken
 
 GOLANGCI := $(shell command -v golangci-lint 2>/dev/null || echo $(shell go env GOPATH)/bin/golangci-lint)
 
+# Pin the Go toolchain to the one CI builds and releases with. go.mod's `go`
+# line is only a MINIMUM, so a newer system Go silently wins over it — and
+# newer is not automatically safe here. Go 1.27 moved HTTP/2 into the standard
+# library, which switches golang.org/x/net/http2 into its delegating shim; that
+# shim's newUserClientConn forgets to init the wrapped transport, so cc-core's
+# uTLS path (which calls http2.Transport.NewClientConn directly, never
+# RoundTrip) dereferences a nil *http.Transport and panics on the first OAuth
+# token refresh. A go1.27 build of this repo passes every test and crash-loops
+# in production. Bump this line only together with the CI go-version.
+GOTOOLCHAIN ?= go1.25.6
+export GOTOOLCHAIN
+
 .PHONY: all build web web-install web-dev generate tidy clean help \
         lint lint-go lint-web fmt fmt-go fmt-web
 
@@ -14,7 +26,7 @@ all: build
 
 help:
 	@echo "Targets:"
-	@echo "  make build        — build admin SPA and Go binary (default)"
+	@echo "  make build        — build admin SPA and Go binary (default, Go $(GOTOOLCHAIN))"
 	@echo "  make web          — build admin SPA only (bun run build)"
 	@echo "  make web-dev      — run Vite dev server with API proxy to :8317"
 	@echo "  make web-install  — install frontend deps"
@@ -38,6 +50,7 @@ web-dev:
 build: web
 	mkdir -p bin
 	go build -o $(BIN) $(GO_MAIN)
+	@go version -m $(BIN) | head -1
 
 generate:
 	go generate ./...
