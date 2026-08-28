@@ -284,22 +284,11 @@ export default function ConsolePage() {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Usage KPIs + a single service-health verb — sourced from the redacted
-  // aggregate the backend computes, never from per-credential rows. We
-  // intentionally surface usage (the bridge users care about) and a coarse
-  // health badge, but no credential / OAuth / API-key counts.
+  // A single coarse service-health verb is the only platform-wide value this
+  // page prints. The fleet's 24h request count and token totals used to sit
+  // beside it; they are our call volume, so they are neither rendered here nor
+  // sent to a non-operator any more (handleSummary drops usage_totals).
   const health = data?.service_health;
-  const tot = data?.usage_totals?.total;
-  const h24 = data?.usage_totals?.sum_24h;
-  const req24 = h24?.requests || 0;
-  const in24 = h24?.input_tokens || 0;
-  const out24 = h24?.output_tokens || 0;
-  const totalTokens = tot
-    ? (tot.input_tokens || 0) +
-      (tot.output_tokens || 0) +
-      (tot.cache_read_tokens || 0) +
-      (tot.cache_create_tokens || 0)
-    : 0;
 
   return (
     <div className="space-y-8">
@@ -389,43 +378,19 @@ export default function ConsolePage() {
 
       {view === "platform" ? (
         <>
-          {/* Platform KPI strip — a single coarse service-health badge plus
-              usage metrics. Deliberately no credential / OAuth / API-key
-              counts: fleet pool size is operator-internal and not exposed.
-              fmtCompact keeps 9–10-digit token totals inside the tile. */}
-          <RevealStagger className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+          {/* Platform KPI strip — only the coarse service-health badge. The
+              request / token tiles that used to sit here published our daily
+              call volume to every signed-in customer; magnitudes are gone from
+              this tab entirely, shapes only (see dashboard-board.tsx). */}
+          <RevealStagger className="grid gap-3 grid-cols-1 sm:max-w-xs">
             <RevealItem className="flex">
               <HealthCell health={health} />
             </RevealItem>
-            <RevealItem className="flex">
-              <MetricCell label={t("console.metrics.requests24h")} value={fmtCompact(req24)} />
-            </RevealItem>
-            <RevealItem className="flex">
-              <MetricCell
-                label={t("console.metrics.tokensIn24h")}
-                value={fmtCompact(in24)}
-                unit={t("console.metrics.tok")}
-              />
-            </RevealItem>
-            <RevealItem className="flex">
-              <MetricCell
-                label={t("console.metrics.tokensOut24h")}
-                value={fmtCompact(out24)}
-                unit={t("console.metrics.tok")}
-              />
-            </RevealItem>
-            <RevealItem className="flex">
-              <MetricCell
-                label={t("console.metrics.tokensTotal")}
-                value={fmtCompact(totalTokens)}
-                unit={t("console.metrics.tok")}
-              />
-            </RevealItem>
           </RevealStagger>
 
-          {/* The original Overview panel — charts + fleet health. */}
+          {/* The overview panel — relative-scale charts, no axes, no totals. */}
           <Reveal>
-            <OverviewPanel summary={data} pricing={data?.pricing} refreshTick={refreshTick} />
+            <OverviewPanel summary={data} refreshTick={refreshTick} />
           </Reveal>
         </>
       ) : (

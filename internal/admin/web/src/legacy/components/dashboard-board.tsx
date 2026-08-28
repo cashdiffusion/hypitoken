@@ -1,4 +1,4 @@
-import { Info } from "lucide-react";
+import { EyeOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   Area,
@@ -12,7 +12,6 @@ import {
   Pie,
   PieChart,
   XAxis,
-  YAxis,
 } from "recharts";
 import {
   type ChartConfig,
@@ -22,16 +21,22 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import {
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-  Tooltip as UITooltip,
-} from "@/components/ui/tooltip";
-import type { HourBucket, Pricing, PricingEntry, RequestAgg } from "@/legacy/lib/types";
-import { cn, fmtInt } from "@/legacy/lib/utils";
+import type { HourBucket, RequestAgg } from "@/legacy/lib/types";
+import { cn } from "@/legacy/lib/utils";
 
 const DAYS = 14;
+
+// This board is the platform-wide tab of /app/console, which every signed-in
+// customer can open. Fleet request volume and fleet revenue are the business
+// itself, so nothing here prints a magnitude: no axis ticks, no tooltips, no
+// running totals in the section headers, no per-model or per-client ranking.
+// What stays is the SHAPE of the curves plus a cache hit rate, which is a
+// ratio of a hidden total and therefore reveals nothing about size.
+//
+// The backend enforces the same rule independently (see admin/public_redact.go
+// — a non-operator receives series normalized to an arbitrary ceiling), so
+// opening devtools on this page yields shapes too. Do not reintroduce a
+// <YAxis>, a <ChartTooltip>, or a header total on this component.
 
 // ----- shared chart configs -----
 //
@@ -61,12 +66,6 @@ const buildConfigs: ConfigBuilder = (t) => ({
       theme: { light: "oklch(0.55 0.18 25)", dark: "oklch(0.68 0.2 25)" },
     },
   },
-  costConfig: {
-    cost_usd: {
-      label: t("legacy.chartLegendCost"),
-      theme: { light: "oklch(0.38 0.09 215)", dark: "oklch(0.82 0.16 145)" },
-    },
-  },
   reqConfig: {
     requests: {
       label: t("legacy.chartLegendReq"),
@@ -89,18 +88,6 @@ const buildConfigs: ConfigBuilder = (t) => ({
     cacheW: {
       label: t("legacy.chartLegendCacheW"),
       theme: { light: "oklch(0.6 0.2 15)", dark: "oklch(0.72 0.2 15)" },
-    },
-  },
-  weekConfig: {
-    cost_usd: {
-      label: t("legacy.chartLegendCost"),
-      theme: { light: "oklch(0.45 0.13 260)", dark: "oklch(0.78 0.16 260)" },
-    },
-  },
-  monthConfig: {
-    cost_usd: {
-      label: t("legacy.chartLegendCost"),
-      theme: { light: "oklch(0.5 0.12 175)", dark: "oklch(0.8 0.15 175)" },
     },
   },
   healthConfig: {
@@ -130,41 +117,10 @@ function pad(n: number) {
 }
 const fmtDay = (d: string) => d.slice(5).replace("-", "/");
 
-function fmtTokensCompact(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return "—";
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(Math.round(n));
-}
-
-function isoWeekInfo(d: Date): { year: number; week: number; monday: string } {
-  const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const day = dt.getUTCDay() || 7;
-  dt.setUTCDate(dt.getUTCDate() + 4 - day);
-  const year = dt.getUTCFullYear();
-  const yearStart = new Date(Date.UTC(year, 0, 1));
-  const week = Math.ceil(((dt.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  const mon = new Date(dt);
-  mon.setUTCDate(mon.getUTCDate() - 3);
-  return {
-    year,
-    week,
-    monday: `${mon.getUTCFullYear()}-${pad(mon.getUTCMonth() + 1)}-${pad(mon.getUTCDate())}`,
-  };
-}
-
-function parseIsoDay(s: string): Date {
-  const [y, m, d] = s.split("-").map((p) => Number(p));
-  return new Date(Date.UTC(y, (m || 1) - 1, d || 1));
-}
-
 // ----- types -----
 
 export interface DashboardRequestsSlim {
   summary: RequestAgg;
-  by_client: Record<string, RequestAgg>;
-  by_model: Record<string, RequestAgg>;
   by_day: Record<string, RequestAgg>;
 }
 
@@ -178,131 +134,39 @@ export interface DashboardPool {
 
 export interface DashboardBoardProps {
   pool: DashboardPool | null;
-  pricing?: Pricing;
   reqData: DashboardRequestsSlim | null;
   lifetimeData: DashboardRequestsSlim | null;
   hourly: HourBucket[] | null;
   busy?: boolean;
   /**
-   * Public/non-operator view. Hides the credential-pool breakdown entirely
-   * and labels Top clients as deterministic pseudonyms (the backend has
-   * already anonymized those keys). Defaults to false so the operator panel
-   * renders the full pool pie and real client labels.
+   * Public/non-operator view. Hides the credential-pool breakdown entirely —
+   * pool size and composition are fleet-internal. Defaults to false so an
+   * operator opening the same page still sees the pool pie.
    */
   publicView?: boolean;
-  /**
-   * Fleet-wide sum of what users actually paid us in USD (post per-group
-   * multiplier). When provided, the "Saved" tile compares no-cache @
-   * Anthropic-official-rate against this number rather than the upstream
-   * cost — i.e. shows the savings from caching AND our discount combined.
-   */
-  userPaidUSD?: number | null;
 }
 
 // ----- component -----
 
 export function DashboardBoard({
   pool,
-  pricing,
   reqData,
   lifetimeData,
   hourly,
   busy = false,
   publicView = false,
-  userPaidUSD = null,
 }: DashboardBoardProps) {
   const { t } = useTranslation();
-  const {
-    tokenConfig,
-    costConfig,
-    reqConfig,
-    hourlyConfig,
-    weekConfig,
-    monthConfig,
-    healthConfig,
-  } = buildConfigs(t);
-  const lookupPrice = (model: string): PricingEntry | null => {
-    if (!pricing) return null;
-    const m = (model || "").toLowerCase().trim();
-    const models = pricing.models || {};
-    if (m && models[m]) return models[m];
-    if (m) {
-      for (let i = m.lastIndexOf("-"); i > 0; i = m.lastIndexOf("-", i - 1)) {
-        const p = models[m.slice(0, i)];
-        if (p) return p;
-      }
-    }
-    return pricing.default || null;
-  };
+  const { tokenConfig, reqConfig, hourlyConfig, healthConfig } = buildConfigs(t);
 
-  const cacheStats = (() => {
+  // Lifetime cache hit rate. A ratio of counters we never print, so it stays
+  // safe to show — and it is the one platform number customers actually act
+  // on, since cache reads are what makes their bill small.
+  const hitRate = (() => {
     if (!lifetimeData) return null;
     const s = lifetimeData.summary;
-    const input = s.input_tokens || 0;
-    const cacheRead = s.cache_read_tokens || 0;
-    const cacheCreate = s.cache_create_tokens || 0;
-    const denom = input + cacheRead + cacheCreate;
-    const hitRate = denom > 0 ? cacheRead / denom : 0;
-    // What users actually paid us — the request_log emits cost_usd
-    // POST-multiplier (see internal/server/proxy.go forward()), which is
-    // the same value wallet_tx records on Charge(). Use this as the truth
-    // for "users paid us"; the userPaidUSD prop from /wallet-totals is
-    // only a sanity-check fallback.
-    const usersPaid = s.cost_usd || 0;
-    // Compute two reference points at OFFICIAL Anthropic rates from the
-    // catalog (no multiplier, no SaaS discount):
-    //   noCacheCost          — pretend caching never happened (input + cache
-    //                          slots all priced as fresh input)
-    //   officialWithCache    — real token mix priced with cache discount
-    //                          (input_per_1m for input, cache_read_per_1m
-    //                          for cache reads, cache_create_per_1m for
-    //                          cache writes, output_per_1m for output)
-    let noCacheCost = 0;
-    let officialWithCache = 0;
-    if (pricing) {
-      for (const [name, a] of Object.entries(lifetimeData.by_model)) {
-        const p = lookupPrice(name);
-        if (!p) continue;
-        const ain = a.input_tokens || 0;
-        const acr = a.cache_read_tokens || 0;
-        const acw = a.cache_create_tokens || 0;
-        const aout = a.output_tokens || 0;
-        noCacheCost += ((ain + acr + acw) * p.input_per_1m) / 1e6;
-        noCacheCost += (aout * p.output_per_1m) / 1e6;
-        officialWithCache += (ain * p.input_per_1m) / 1e6;
-        officialWithCache += (acr * (p.cache_read_per_1m || p.input_per_1m * 0.1)) / 1e6;
-        officialWithCache += (acw * (p.cache_create_per_1m || p.input_per_1m * 1.25)) / 1e6;
-        officialWithCache += (aout * p.output_per_1m) / 1e6;
-      }
-    }
-    const output = s.output_tokens || 0;
-    const totalTokens = input + output + cacheRead + cacheCreate;
-    // tokensPerDollar uses what the user actually paid — that's the
-    // honest "tokens per buck" from the user's perspective.
-    const tokensPerDollar = usersPaid > 0 ? totalTokens / usersPaid : 0;
-    // Saved by us = official no-cache − user actually paid (covers BOTH
-    // the caching benefit AND the multiplier discount).
-    const savedByUs = Math.max(0, noCacheCost - usersPaid);
-    // Cross-check: server-side wallet_tx aggregate. Should match usersPaid
-    // for SaaS-only fleets; deviation hints at admin-token traffic that
-    // bypassed the wallet ledger.
-    const userPaidCrossCheck =
-      typeof userPaidUSD === "number" && userPaidUSD > 0 ? userPaidUSD : null;
-    return {
-      hitRate,
-      usersPaid,
-      noCacheCost,
-      officialWithCache,
-      userPaidCrossCheck,
-      savedByUs,
-      input,
-      output,
-      cacheRead,
-      cacheCreate,
-      totalTokens,
-      tokensPerDollar,
-      hasPricing: !!pricing,
-    };
+    const denom = (s.input_tokens || 0) + (s.cache_read_tokens || 0) + (s.cache_create_tokens || 0);
+    return denom > 0 ? (s.cache_read_tokens || 0) / denom : 0;
   })();
 
   // 14-day token throughput stacked area — derived from reqData.by_day so
@@ -341,27 +205,6 @@ export function DashboardBoard({
     return Array.from(seed.values());
   })();
 
-  const costSeries = (() => {
-    const today = new Date();
-    const seed = new Map<string, { day: string; cost_usd: number; requests: number }>();
-    for (let i = DAYS - 1; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-      seed.set(key, { day: key, cost_usd: 0, requests: 0 });
-    }
-    if (reqData) {
-      for (const [k, v] of Object.entries(reqData.by_day)) {
-        const slot = seed.get(k);
-        if (slot) {
-          slot.cost_usd = v.cost_usd;
-          slot.requests = v.count;
-        }
-      }
-    }
-    return Array.from(seed.values());
-  })();
-
   const hourlySeries = (() => {
     const out: {
       hour: string;
@@ -370,7 +213,6 @@ export function DashboardBoard({
       output: number;
       cacheR: number;
       cacheW: number;
-      cost_usd: number;
       requests: number;
     }[] = [];
     if (!hourly) return out;
@@ -384,58 +226,10 @@ export function DashboardBoard({
         output: b.output_tokens || 0,
         cacheR: b.cache_read_tokens || 0,
         cacheW: b.cache_create_tokens || 0,
-        cost_usd: b.cost_usd || 0,
         requests: b.count || 0,
       });
     }
     return out;
-  })();
-
-  const weekSeries = (() => {
-    if (!lifetimeData)
-      return [] as {
-        key: string;
-        label: string;
-        monday: string;
-        cost_usd: number;
-        requests: number;
-      }[];
-    const bucket = new Map<
-      string,
-      { label: string; monday: string; cost_usd: number; requests: number }
-    >();
-    for (const [day, agg] of Object.entries(lifetimeData.by_day)) {
-      const info = isoWeekInfo(parseIsoDay(day));
-      const key = `${info.year}-W${pad(info.week)}`;
-      const cur = bucket.get(key) ?? {
-        label: `W${info.week} · ${info.monday.slice(5)}`,
-        monday: info.monday,
-        cost_usd: 0,
-        requests: 0,
-      };
-      cur.cost_usd += agg.cost_usd || 0;
-      cur.requests += agg.count || 0;
-      bucket.set(key, cur);
-    }
-    return Array.from(bucket.entries())
-      .map(([key, v]) => ({ key, ...v }))
-      .sort((a, b) => a.monday.localeCompare(b.monday));
-  })();
-
-  const monthSeries = (() => {
-    if (!lifetimeData)
-      return [] as { key: string; label: string; cost_usd: number; requests: number }[];
-    const bucket = new Map<string, { cost_usd: number; requests: number }>();
-    for (const [day, agg] of Object.entries(lifetimeData.by_day)) {
-      const key = day.slice(0, 7);
-      const cur = bucket.get(key) ?? { cost_usd: 0, requests: 0 };
-      cur.cost_usd += agg.cost_usd || 0;
-      cur.requests += agg.count || 0;
-      bucket.set(key, cur);
-    }
-    return Array.from(bucket.entries())
-      .map(([key, v]) => ({ key, label: key, ...v }))
-      .sort((a, b) => a.key.localeCompare(b.key));
   })();
 
   const health = (() => {
@@ -456,18 +250,18 @@ export function DashboardBoard({
     );
   }
 
-  // Totals used to decide whether each chart has anything to draw.
+  // Totals used only to decide whether each chart has anything to draw. They
+  // are never rendered — see the file header.
   const trendTotal = trend.reduce((s, x) => s + x.input + x.output + x.cacheR + x.cacheW, 0);
   const hourlyTotal = hourlySeries.reduce(
     (s, x) => s + x.input + x.output + x.cacheR + x.cacheW,
     0,
   );
-  const costTotal = costSeries.reduce((s, x) => s + x.cost_usd, 0);
-  const reqTotal = costSeries.reduce((s, x) => s + x.requests, 0);
+  const reqTotal = trend.reduce((s, x) => s + x.requests, 0);
 
   return (
     <div className="space-y-8">
-      {/* Lifetime cache efficiency */}
+      {/* Lifetime cache efficiency + the notice explaining the missing axes */}
       <section>
         <div className="flex items-baseline justify-between mb-3 gap-4">
           <div>
@@ -484,63 +278,14 @@ export function DashboardBoard({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
           <CacheCard
             label={t("legacy.cacheHitRate")}
-            value={cacheStats ? `${(cacheStats.hitRate * 100).toFixed(2)}%` : busy ? "…" : "—"}
-            ratio={cacheStats?.hitRate ?? 0}
-            foot={
-              cacheStats ? (
-                <span className="mono tabular">
-                  cacheR {fmtInt(cacheStats.cacheRead)} / (input {fmtInt(cacheStats.input)} + cacheR{" "}
-                  {fmtInt(cacheStats.cacheRead)} + cacheW {fmtInt(cacheStats.cacheCreate)})
-                </span>
-              ) : null
-            }
+            value={hitRate != null ? `${(hitRate * 100).toFixed(2)}%` : busy ? "…" : "—"}
+            ratio={hitRate ?? 0}
           />
-          <CacheCard
-            label={t("legacy.savedByUs")}
-            value={
-              cacheStats?.hasPricing
-                ? `$${cacheStats.savedByUs.toFixed(2)}`
-                : cacheStats && !cacheStats.hasPricing
-                  ? t("legacy.pricingUnavailable")
-                  : busy
-                    ? "…"
-                    : "—"
-            }
-            foot={
-              cacheStats?.hasPricing ? (
-                <span className="mono tabular text-[10px] leading-relaxed block">
-                  {t("legacy.noCacheOfficial", { n: cacheStats.noCacheCost.toFixed(2) })}
-                  <br />
-                  {t("legacy.withCacheOfficial", { n: cacheStats.officialWithCache.toFixed(2) })}
-                  <br />
-                  {t("legacy.actualPaid", { n: cacheStats.usersPaid.toFixed(2) })}
-                </span>
-              ) : null
-            }
-          />
-          <CacheCard
-            label={t("legacy.tokensPerDollar")}
-            value={
-              cacheStats && cacheStats.tokensPerDollar > 0
-                ? fmtTokensCompact(cacheStats.tokensPerDollar)
-                : cacheStats
-                  ? "—"
-                  : busy
-                    ? "…"
-                    : "—"
-            }
-            foot={
-              cacheStats && cacheStats.tokensPerDollar > 0 ? (
-                <span className="mono tabular">
-                  {fmtInt(cacheStats.totalTokens)} tok / ${cacheStats.usersPaid.toFixed(2)}
-                </span>
-              ) : null
-            }
-          />
+          <RelativeOnlyNotice />
         </div>
       </section>
 
-      {/* Token throughput — 14d area */}
+      {/* Token throughput — 14d shape, no scale */}
       <section>
         <div className="flex items-baseline justify-between mb-3 gap-4">
           <div>
@@ -550,9 +295,7 @@ export function DashboardBoard({
               <span className="text-muted-foreground">{t("legacy.byType")}</span>
             </h3>
           </div>
-          <span className="eyebrow tabular opacity-70 hidden sm:inline">
-            {fmtInt(trendTotal)} tok
-          </span>
+          <span className="eyebrow opacity-70 hidden sm:inline">{t("legacy.relativeScale")}</span>
         </div>
         <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
           {trendTotal === 0 ? (
@@ -566,7 +309,7 @@ export function DashboardBoard({
               config={tokenConfig}
               className="h-[240px] md:h-[280px] aspect-auto w-full"
             >
-              <AreaChart data={trend} margin={{ top: 10, right: 12, left: -8, bottom: 0 }}>
+              <AreaChart data={trend} margin={{ top: 10, right: 12, left: 4, bottom: 0 }}>
                 <defs>
                   {(["input", "output", "cacheR", "cacheW"] as const).map((k) => (
                     <linearGradient key={k} id={`grad-${k}`} x1="0" y1="0" x2="0" y2="1">
@@ -584,30 +327,6 @@ export function DashboardBoard({
                   tickFormatter={fmtDay}
                   minTickGap={16}
                 />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  width={56}
-                  tickFormatter={(v: number) =>
-                    v >= 1_000_000
-                      ? `${(v / 1_000_000).toFixed(1)}M`
-                      : v >= 1000
-                        ? `${Math.round(v / 1000)}k`
-                        : String(v)
-                  }
-                />
-                <ChartTooltip
-                  cursor={{ stroke: "var(--border)" }}
-                  content={
-                    <ChartTooltipContent
-                      indicator="dot"
-                      labelFormatter={(v) => `Day · ${v}`}
-                      valueFormatter={(v) =>
-                        typeof v === "number" ? `${v.toLocaleString()} tok` : String(v)
-                      }
-                    />
-                  }
-                />
                 <ChartLegend content={<ChartLegendContent />} />
                 {(["cacheW", "cacheR", "output", "input"] as const).map((k) => (
                   <Area
@@ -618,6 +337,8 @@ export function DashboardBoard({
                     stroke={`var(--color-${k})`}
                     fill={`url(#grad-${k})`}
                     strokeWidth={1.5}
+                    isAnimationActive={false}
+                    activeDot={false}
                   />
                 ))}
               </AreaChart>
@@ -626,7 +347,7 @@ export function DashboardBoard({
         </div>
       </section>
 
-      {/* 24h hourly pulse */}
+      {/* 24h hourly pulse — shape only */}
       <section>
         <div className="flex items-baseline justify-between mb-3 gap-4">
           <div>
@@ -636,10 +357,7 @@ export function DashboardBoard({
               <span className="text-muted-foreground">{t("legacy.rhythm")}</span>
             </h3>
           </div>
-          <span className="eyebrow tabular opacity-70 hidden sm:inline">
-            {fmtInt(hourlyTotal)} tok · {fmtInt(hourlySeries.reduce((s, x) => s + x.requests, 0))}{" "}
-            req
-          </span>
+          <span className="eyebrow opacity-70 hidden sm:inline">{t("legacy.relativeScale")}</span>
         </div>
         <div className="relative overflow-hidden rounded-md border border-border-strong bg-gradient-to-br from-card via-card to-muted/30 p-4 md:p-5">
           <div
@@ -660,7 +378,7 @@ export function DashboardBoard({
             >
               <BarChart
                 data={hourlySeries}
-                margin={{ top: 10, right: 8, left: -8, bottom: 0 }}
+                margin={{ top: 10, right: 8, left: 4, bottom: 0 }}
                 barCategoryGap={2}
               >
                 <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.6} />
@@ -672,30 +390,6 @@ export function DashboardBoard({
                   minTickGap={24}
                   fontSize={11}
                 />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  width={56}
-                  tickFormatter={(v: number) =>
-                    v >= 1_000_000
-                      ? `${(v / 1_000_000).toFixed(1)}M`
-                      : v >= 1000
-                        ? `${Math.round(v / 1000)}k`
-                        : String(v)
-                  }
-                />
-                <ChartTooltip
-                  cursor={{ fill: "var(--muted)", opacity: 0.4 }}
-                  content={
-                    <ChartTooltipContent
-                      indicator="dot"
-                      labelFormatter={(v) => `${v}`}
-                      valueFormatter={(v) =>
-                        typeof v === "number" ? `${v.toLocaleString()} tok` : String(v)
-                      }
-                    />
-                  }
-                />
                 <ChartLegend content={<ChartLegendContent />} />
                 {(["input", "output", "cacheR", "cacheW"] as const).map((k, i, arr) => (
                   <Bar
@@ -704,6 +398,7 @@ export function DashboardBoard({
                     stackId="h"
                     fill={`var(--color-${k})`}
                     radius={i === arr.length - 1 ? [3, 3, 0, 0] : 0}
+                    isAnimationActive={false}
                   />
                 ))}
               </BarChart>
@@ -712,73 +407,26 @@ export function DashboardBoard({
         </div>
       </section>
 
-      {/* Two-up: cost + requests */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5">
-        <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
-          <div className="flex items-baseline justify-between mb-3 gap-2">
-            <div>
-              <div className="eyebrow mb-1">{t("legacy.dailyCost")}</div>
-              <h3 className="font-display text-xl tracking-tight">
-                {t("legacy.spend")}{" "}
-                <span className="text-muted-foreground">· {t("legacy.spend14d")}</span>
-              </h3>
-            </div>
-            <span className="eyebrow tabular opacity-70">${costTotal.toFixed(2)}</span>
-          </div>
-          {costTotal === 0 ? (
-            <ChartEmpty className="h-[220px] w-full" label="no spend in the last 14 days" />
-          ) : (
-            <ChartContainer
-              config={costConfig}
-              className={cn("h-[220px] aspect-auto w-full", busy && "opacity-70")}
-            >
-              <BarChart data={costSeries} margin={{ top: 8, right: 4, left: -12, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="day"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  tickFormatter={fmtDay}
-                  minTickGap={20}
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  width={48}
-                  tickFormatter={(v: number) => `$${v < 1 ? v.toFixed(2) : Math.round(v)}`}
-                />
-                <ChartTooltip
-                  cursor={{ fill: "var(--muted)", opacity: 0.5 }}
-                  content={
-                    <ChartTooltipContent
-                      indicator="dot"
-                      labelFormatter={(v) => `Day · ${v}`}
-                      valueFormatter={(v) =>
-                        typeof v === "number" ? `$${v.toFixed(4)}` : String(v)
-                      }
-                    />
-                  }
-                />
-                <Bar dataKey="cost_usd" fill="var(--color-cost_usd)" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
+      {/* Request trend + (operator only) pool health */}
+      <section className={cn("grid grid-cols-1 gap-4 md:gap-5", !publicView && "lg:grid-cols-3")}>
+        <div
+          className={cn(
+            "bg-card border border-border-strong rounded-md p-4 md:p-5",
+            !publicView && "lg:col-span-2",
           )}
-        </div>
-
-        <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
+        >
           <div className="flex items-baseline justify-between mb-3 gap-2">
             <div>
               <div className="eyebrow mb-1">{t("legacy.dailyReq")}</div>
               <h3 className="font-display text-xl tracking-tight">{t("legacy.traffic14d")}</h3>
             </div>
-            <span className="eyebrow tabular opacity-70">{fmtInt(reqTotal)} req</span>
+            <span className="eyebrow opacity-70">{t("legacy.relativeScale")}</span>
           </div>
           {reqTotal === 0 ? (
             <ChartEmpty className="h-[220px] w-full" label="no requests in the last 14 days" />
           ) : (
             <ChartContainer config={reqConfig} className="h-[220px] aspect-auto w-full">
-              <LineChart data={costSeries} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+              <LineChart data={trend} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis
                   dataKey="day"
@@ -787,26 +435,6 @@ export function DashboardBoard({
                   tickMargin={8}
                   tickFormatter={fmtDay}
                   minTickGap={20}
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  width={48}
-                  tickFormatter={(v: number) =>
-                    v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v))
-                  }
-                />
-                <ChartTooltip
-                  cursor={{ stroke: "var(--border)" }}
-                  content={
-                    <ChartTooltipContent
-                      indicator="dot"
-                      labelFormatter={(v) => `Day · ${v}`}
-                      valueFormatter={(v) =>
-                        typeof v === "number" ? `${v.toLocaleString()} req` : String(v)
-                      }
-                    />
-                  }
                 />
                 <Line
                   type="monotone"
@@ -814,25 +442,18 @@ export function DashboardBoard({
                   stroke="var(--color-requests)"
                   strokeWidth={2}
                   dot={{ r: 3, strokeWidth: 0, fill: "var(--color-requests)" }}
-                  activeDot={{ r: 5 }}
+                  activeDot={false}
+                  isAnimationActive={false}
                 />
               </LineChart>
             </ChartContainer>
           )}
         </div>
-      </section>
 
-      {/* Health mix (operator only) + top models + top clients. The pool
-          breakdown is omitted in the public view so credential-pool size /
-          composition never leaks; the grid drops to two columns there. */}
-      <section
-        className={cn(
-          "grid grid-cols-1 gap-4 md:gap-5",
-          publicView ? "md:grid-cols-2" : "md:grid-cols-2 lg:grid-cols-3",
-        )}
-      >
+        {/* Pool composition is operator-only: credential count and health mix
+            tell a reader how much upstream capacity we hold. */}
         {!publicView && (
-          <div className="bg-card border border-border-strong rounded-md p-4 md:p-5 md:col-span-2 lg:col-span-1">
+          <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
             <div className="mb-4">
               <div className="eyebrow mb-1">{t("legacy.poolHealth")}</div>
               <h3 className="font-display text-xl tracking-tight">
@@ -867,178 +488,6 @@ export function DashboardBoard({
             )}
           </div>
         )}
-
-        <TopList
-          title={t("legacy.topModels")}
-          sub={t("legacy.topModelsBy")}
-          rows={
-            reqData
-              ? Object.entries(reqData.by_model)
-                  .sort(([, a], [, b]) => b.cost_usd - a.cost_usd)
-                  .slice(0, 6)
-                  .map(([k, v]) => ({
-                    k,
-                    v: v.cost_usd,
-                    meta: `${fmtInt(v.count)} req`,
-                    fmt: "cost" as const,
-                  }))
-              : []
-          }
-        />
-
-        <TopList
-          title={t("legacy.topClients")}
-          sub={t("legacy.topModelsBy")}
-          // This board is console-only and its by_client keys are always
-          // anonymized server-side (the /console fetch passes anon=1), so the
-          // pseudonym hint applies for operators too — not just publicView.
-          titleAdornment={<PseudonymHint />}
-          rows={
-            reqData
-              ? Object.entries(reqData.by_client)
-                  .sort(([, a], [, b]) => b.cost_usd - a.cost_usd)
-                  .slice(0, 6)
-                  .map(([k, v]) => ({
-                    k: k || "(unnamed)",
-                    v: v.cost_usd,
-                    meta: `${fmtInt(v.count)} req`,
-                    fmt: "cost" as const,
-                  }))
-              : []
-          }
-        />
-      </section>
-
-      {/* Lifetime billing-week + calendar-month spend */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5">
-        <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
-          <div className="flex items-baseline justify-between mb-3 gap-2">
-            <div>
-              <div className="eyebrow mb-1">{t("legacy.billingWeek")}</div>
-              <h3 className="font-display text-xl tracking-tight">
-                {t("legacy.weekly")}{" "}
-                <span className="text-muted-foreground">{t("legacy.spend")}</span>
-              </h3>
-            </div>
-            <span className="eyebrow tabular opacity-70">
-              ${weekSeries.reduce((s, x) => s + x.cost_usd, 0).toFixed(2)} · {weekSeries.length}w
-            </span>
-          </div>
-          {weekSeries.length === 0 ? (
-            <ChartEmpty
-              className="h-[240px] w-full"
-              label="no weekly history yet"
-              hint="aggregates by ISO week (Mon → Sun)"
-            />
-          ) : (
-            <ChartContainer config={weekConfig} className="h-[240px] aspect-auto w-full">
-              <BarChart data={weekSeries} margin={{ top: 8, right: 4, left: -10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="grad-week" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--color-cost_usd)" stopOpacity={0.95} />
-                    <stop offset="95%" stopColor="var(--color-cost_usd)" stopOpacity={0.45} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  minTickGap={24}
-                  fontSize={11}
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  width={52}
-                  tickFormatter={(v: number) => (v < 1 ? `$${v.toFixed(2)}` : `$${Math.round(v)}`)}
-                />
-                <ChartTooltip
-                  cursor={{ fill: "var(--muted)", opacity: 0.5 }}
-                  content={
-                    <ChartTooltipContent
-                      indicator="dot"
-                      labelFormatter={(v, p) => {
-                        const row = p?.[0]?.payload as { monday?: string } | undefined;
-                        return row?.monday ? `Week of ${row.monday}` : String(v);
-                      }}
-                      valueFormatter={(v) =>
-                        typeof v === "number" ? `$${v.toFixed(2)}` : String(v)
-                      }
-                    />
-                  }
-                />
-                <Bar dataKey="cost_usd" fill="url(#grad-week)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
-          )}
-        </div>
-
-        <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
-          <div className="flex items-baseline justify-between mb-3 gap-2">
-            <div>
-              <div className="eyebrow mb-1">{t("legacy.calendarMonth")}</div>
-              <h3 className="font-display text-xl tracking-tight">
-                {t("legacy.monthly")}{" "}
-                <span className="text-muted-foreground">{t("legacy.spend")}</span>
-              </h3>
-            </div>
-            <span className="eyebrow tabular opacity-70">
-              ${monthSeries.reduce((s, x) => s + x.cost_usd, 0).toFixed(2)} · {monthSeries.length}mo
-            </span>
-          </div>
-          {monthSeries.length === 0 ? (
-            <ChartEmpty className="h-[240px] w-full" label="no monthly history yet" />
-          ) : (
-            <ChartContainer config={monthConfig} className="h-[240px] aspect-auto w-full">
-              <AreaChart data={monthSeries} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="grad-month" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--color-cost_usd)" stopOpacity={0.55} />
-                    <stop offset="95%" stopColor="var(--color-cost_usd)" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  minTickGap={24}
-                  fontSize={11}
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  width={52}
-                  tickFormatter={(v: number) => (v < 1 ? `$${v.toFixed(2)}` : `$${Math.round(v)}`)}
-                />
-                <ChartTooltip
-                  cursor={{ stroke: "var(--border)" }}
-                  content={
-                    <ChartTooltipContent
-                      indicator="dot"
-                      labelFormatter={(v) => `Month · ${v}`}
-                      valueFormatter={(v) =>
-                        typeof v === "number" ? `$${v.toFixed(2)}` : String(v)
-                      }
-                    />
-                  }
-                />
-                <Area
-                  type="monotone"
-                  dataKey="cost_usd"
-                  stroke="var(--color-cost_usd)"
-                  strokeWidth={2}
-                  fill="url(#grad-month)"
-                  dot={{ r: 3, strokeWidth: 0, fill: "var(--color-cost_usd)" }}
-                  activeDot={{ r: 5 }}
-                />
-              </AreaChart>
-            </ChartContainer>
-          )}
-        </div>
       </section>
     </div>
   );
@@ -1065,6 +514,23 @@ function ChartEmpty({
     >
       <span className="eyebrow opacity-70">{label}</span>
       {hint && <span className="text-[11px] text-muted-foreground mono">{hint}</span>}
+    </div>
+  );
+}
+
+// RelativeOnlyNotice tells the reader the axes are missing on purpose, so an
+// unlabelled chart reads as a policy rather than as a rendering bug.
+function RelativeOnlyNotice() {
+  const { t } = useTranslation();
+  return (
+    <div className="md:col-span-2 flex items-start gap-3 rounded-md border border-border-strong bg-muted/20 p-5">
+      <EyeOff className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
+      <div>
+        <div className="eyebrow mb-1.5">{t("legacy.relativeOnlyTitle")}</div>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {t("legacy.relativeOnlyBody")}
+        </p>
+      </div>
     </div>
   );
 }
@@ -1100,83 +566,5 @@ function CacheCard({
       )}
       {foot && <div className="mt-2 text-[11px] text-muted-foreground">{foot}</div>}
     </div>
-  );
-}
-
-function TopList({
-  title,
-  sub,
-  rows,
-  titleAdornment,
-}: {
-  title: string;
-  sub: string;
-  rows: { k: string; v: number; meta: string; fmt: "cost" | "int" }[];
-  titleAdornment?: React.ReactNode;
-}) {
-  const max = Math.max(1e-9, ...rows.map((r) => r.v));
-  return (
-    <div className="bg-card border border-border-strong rounded-md p-4 md:p-5">
-      <div className="mb-3">
-        <div className="eyebrow mb-1 flex items-center gap-1.5">
-          <span>{title}</span>
-          {titleAdornment}
-        </div>
-        <h3 className="font-display text-xl tracking-tight">
-          <span className="text-muted-foreground">{sub}</span>
-        </h3>
-      </div>
-      {rows.length === 0 ? (
-        <ChartEmpty className="h-[180px] w-full" label="no entries to rank" />
-      ) : (
-        <ul className="space-y-2.5">
-          {rows.map((r) => (
-            <li key={r.k} className="group">
-              <div className="flex items-baseline justify-between gap-3 text-sm mb-1">
-                <span className="mono text-xs truncate flex-1" title={r.k}>
-                  {r.k}
-                </span>
-                <span className="mono tabular font-medium shrink-0">
-                  {r.fmt === "cost" ? `$${r.v.toFixed(4)}` : fmtInt(r.v)}
-                </span>
-                <span className="eyebrow opacity-60 tabular shrink-0">{r.meta}</span>
-              </div>
-              <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary/70 group-hover:bg-primary transition-all"
-                  style={{ width: `${Math.round((r.v / max) * 100)}%` }}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-// Small badge shown next to "Top clients" on the public status page to
-// clarify that names like "Alice/Bob" are stable pseudonyms, not real
-// customer identities. Hover reveals the fuller explanation.
-function PseudonymHint() {
-  return (
-    <TooltipProvider delayDuration={150}>
-      <UITooltip>
-        <TooltipTrigger asChild>
-          <span
-            role="img"
-            className="inline-flex items-center gap-0.5 rounded-sm border border-border/60 bg-muted/40 px-1 py-0.5 text-[9px] font-medium tracking-wider uppercase text-muted-foreground cursor-help"
-            aria-label="Pseudonyms"
-          >
-            <Info className="h-2.5 w-2.5" />
-            pseudonym
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-[260px] text-xs leading-relaxed">
-          Client names shown here (Alice / Bob / …) are deterministic pseudonyms, not real user
-          identities. Real token labels are never exposed on the public page.
-        </TooltipContent>
-      </UITooltip>
-    </TooltipProvider>
   );
 }

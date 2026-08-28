@@ -682,7 +682,6 @@ func (h *Handler) handleSummary(c *gin.Context) {
 		"active_window_minutes": h.cfg.ActiveWindowMinutes,
 		"current_week":          currentWeek,
 		"service_health":        health,
-		"usage_totals":          gin.H{"total": totals.Total, "sum_24h": totals.Sum24h},
 		"pricing": gin.H{
 			"default":           h.pricing.Default(),
 			"provider_defaults": h.pricing.ProviderDefaults(),
@@ -690,13 +689,16 @@ func (h *Handler) handleSummary(c *gin.Context) {
 		},
 	}
 	// Operators get the full fleet detail; ordinary signed-in users do not —
-	// the per-credential rows (their count, oauth/api split) and real client
-	// token labels are fleet-internal and must not leak to the public console.
+	// the per-credential rows (their count, oauth/api split), the real client
+	// token labels, and the fleet usage totals are all fleet-internal. The
+	// totals in particular are the platform's 24h request and token volume:
+	// a single number that tells any customer how big we are.
 	if c.GetBool(ctxKeyPrivileged) {
 		out["auth_dir"] = h.cfg.AuthDir
 		out["default_proxy_url"] = h.cfg.DefaultProxyURL
 		out["auths"] = rows
 		out["clients"] = clientRows
+		out["usage_totals"] = gin.H{"total": totals.Total, "sum_24h": totals.Sum24h}
 	} else {
 		out["auths"] = []authRow{}
 		out["clients"] = []clientRow{}
@@ -1446,6 +1448,11 @@ func (h *Handler) handleRequestsHourly(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// The 24h pulse is on the customer-visible console. Non-operators get the
+	// curve's shape, never the hourly volume behind it.
+	if !c.GetBool(ctxKeyPrivileged) {
+		buckets = redactPublicHourly(buckets)
+	}
 	c.JSON(http.StatusOK, gin.H{"buckets": buckets})
 }
 
@@ -1515,22 +1522,25 @@ func (h *Handler) handleRequestsQuery(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// anon=1 forces the anonymized projection even for an operator. The
-	// /console overview passes it so client identities (real token labels or
-	// masked sk-… tokens) NEVER reach the browser there — the console mirrors
-	// the public-status/cpa-claude pseudonym scheme. Real labels stay on the
-	// /admin management surface (its requests/credentials tabs omit anon).
-	if c.GetBool(ctxKeyPrivileged) && c.Query("anon") != "1" {
-		h.remapDisplayNames(res.Entries)
-		res.ByClient = h.remapByClient(res.ByClient)
-	} else {
-		// Ordinary signed-in users — and the operator's own /console overview
-		// (anon=1) — see only anonymized aggregates: the raw per-request
-		// ledger and real client labels stay operator-only. ByClient keys are
-		// still masked tokens here (pre-remap), so the pseudonym map keys off
-		// a stable identifier.
+	switch {
+	case !c.GetBool(ctxKeyPrivileged):
+		// Ordinary signed-in users. Anonymizing identities is not enough here:
+		// the aggregates themselves are the fleet's daily request volume and
+		// revenue, which are not customer-facing facts. Ship shapes only —
+		// see public_redact.go.
+		redactPublicResult(res)
+	case c.Query("anon") == "1":
+		// anon=1 forces the anonymized projection even for an operator. The
+		// /console overview passes it so client identities (real token labels
+		// or masked sk-… tokens) NEVER reach the browser there — the console
+		// mirrors the public-status/cpa-claude pseudonym scheme. Aggregates
+		// stay real: this branch is the operator looking at their own fleet.
 		res.Entries = nil
 		res.ByClient = anonymizeByClient(res.ByClient)
+	default:
+		// Operator on the /admin management surface: real labels, real rows.
+		h.remapDisplayNames(res.Entries)
+		res.ByClient = h.remapByClient(res.ByClient)
 	}
 	c.JSON(http.StatusOK, res)
 }

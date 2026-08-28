@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/legacy/lib/api";
-import type { HourBucket, HourlyResp, Pricing, RequestsResp, Summary } from "@/legacy/lib/types";
+import type { HourBucket, HourlyResp, RequestsResp, Summary } from "@/legacy/lib/types";
 import { DashboardBoard, type DashboardPool, type DashboardRequestsSlim } from "./dashboard-board";
 
 interface Props {
   summary: Summary | null;
-  pricing?: Pricing;
   refreshTick: number;
 }
 
@@ -14,14 +13,17 @@ function pad(n: number) {
   return String(n).padStart(2, "0");
 }
 
-// Admin wrapper. Fans out to the three admin API endpoints that feed the
-// dashboard, synthesizes a DashboardPool from summary.auths, and delegates
-// rendering to the shared DashboardBoard.
-export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
+// Console wrapper. Fans out to the request-log endpoints that feed the
+// platform tab, synthesizes a DashboardPool from summary.auths, and delegates
+// rendering to DashboardBoard.
+//
+// Only shape-bearing endpoints are fetched. The old "saved by us" card pulled
+// /api/v2/admin/wallet-totals — fleet lifetime revenue — and is gone along
+// with the card; don't re-add the fetch for a value nothing renders.
+export function OverviewPanel({ summary, refreshTick }: Props) {
   const [reqData, setReqData] = useState<RequestsResp | null>(null);
   const [lifetimeData, setLifetimeData] = useState<RequestsResp | null>(null);
   const [hourly, setHourly] = useState<HourBucket[] | null>(null);
-  const [userPaid, setUserPaid] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -32,23 +34,17 @@ export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
       fromD.setDate(today.getDate() - (DAYS - 1));
       const from = `${fromD.getFullYear()}-${pad(fromD.getMonth() + 1)}-${pad(fromD.getDate())}`;
       const to = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-      const [d, all, hr, walletTotals] = await Promise.all([
+      const [d, all, hr] = await Promise.all([
         // anon=1: the console must never expose real client identities (token
-        // labels or masked sk-… tokens). The backend returns pseudonymized
-        // by_client aggregates (Alice/Bob/…) even for operators here. Real
-        // labels live on the /admin management page only.
+        // labels or masked sk-… tokens). For non-operator callers the backend
+        // goes further and normalizes every series — see admin/public_redact.go.
         api<RequestsResp>(`/admin/api/requests?limit=1&from=${from}&to=${to}&anon=1`),
         api<RequestsResp>(`/admin/api/requests?limit=1&anon=1`),
         api<HourlyResp>(`/admin/api/requests/hourly?hours=24`),
-        // Fleet wallet totals — sum across all SaaS users of charges
-        // post-multiplier. Powers the "Saved by us" card. SaaS-only
-        // endpoint; tolerate failure on non-SaaS deploys.
-        api<{ user_paid_usd: number }>(`/api/v2/admin/wallet-totals`).catch(() => null),
       ]);
       setReqData(d);
       setLifetimeData(all);
       setHourly(hr.buckets || []);
-      setUserPaid(walletTotals ? walletTotals.user_paid_usd : null);
     } catch {
       // ignore
     } finally {
@@ -62,9 +58,7 @@ export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
 
   // Non-operator callers receive a redacted summary with no `auths` rows
   // (see handleSummary). Treat that as the public view: hide the credential
-  // pool breakdown and label the top-clients list as pseudonymous (the
-  // backend already anonymized those keys). Operators viewing this page get
-  // the full rows and the real pool pie.
+  // pool breakdown. Operators viewing this page get the real pool pie.
   const publicView = (summary?.auths?.length ?? 0) === 0;
 
   const pool: DashboardPool | null =
@@ -85,20 +79,18 @@ export function OverviewPanel({ summary, pricing, refreshTick }: Props) {
         })()
       : null;
 
+  // by_client / by_model are deliberately not forwarded: the board no longer
+  // ranks clients or models, and the backend nulls both for non-operators.
   const slim = (r: RequestsResp | null): DashboardRequestsSlim | null =>
-    r
-      ? { summary: r.summary, by_client: r.by_client, by_model: r.by_model, by_day: r.by_day }
-      : null;
+    r ? { summary: r.summary, by_day: r.by_day } : null;
 
   return (
     <DashboardBoard
       pool={pool}
-      pricing={pricing}
       reqData={slim(reqData)}
       lifetimeData={slim(lifetimeData)}
       hourly={hourly}
       busy={busy}
-      userPaidUSD={userPaid}
       publicView={publicView}
     />
   );

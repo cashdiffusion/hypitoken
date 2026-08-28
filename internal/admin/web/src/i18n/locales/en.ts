@@ -1547,6 +1547,10 @@ export default {
     cacheTitleB: "caching",
     sinceFirst: "since first request",
     cacheHitRate: "Cache hit rate",
+    relativeScale: "relative scale",
+    relativeOnlyTitle: "Relative trends only",
+    relativeOnlyBody:
+      "Platform-wide charts show the shape of each trend without axis ticks or absolute values. The cache hit rate is a ratio and carries no scale. For your own request counts, tokens and spend, switch to the Personal tab.",
     savedByUs: "Saved",
     savedByCaching: "Saved by caching",
     tokensPerDollar: "Tokens per $",

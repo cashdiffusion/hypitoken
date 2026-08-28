@@ -1506,6 +1506,10 @@ export default {
     cacheTitleB: "缓存",
     sinceFirst: "自首次请求起",
     cacheHitRate: "缓存命中率",
+    relativeScale: "相对刻度",
+    relativeOnlyTitle: "仅展示相对走势",
+    relativeOnlyBody:
+      "全平台图表只呈现走势形状，不含纵轴刻度与具体数值。缓存命中率是比例，不涉及规模。你自己的请求数、Token 与消费明细请切换到「个人」标签。",
     savedByUs: "已节省",
     savedByCaching: "缓存节省",
     tokensPerDollar: "Tokens / $",
