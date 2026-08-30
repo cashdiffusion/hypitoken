@@ -336,10 +336,19 @@ saas:
     publishable_key: ""     # pk_(test|live)_… (public, handed to the browser)
     webhook_secret: ""      # whsec_… or @/path/to/file (optional)
     # Line-item currency for the Checkout Session; the wallet is credited 1:1 in
-    # this currency. Keep "usd": Adaptive Pricing localizes the presentment
-    # currency per buyer at checkout (which unlocks Alipay/WeChat on a non-US
-    # account), and the buyer pays Stripe's 2-4% conversion fee on the converted leg.
+    # this currency. Keep "usd" — Adaptive Pricing is off, so the buyer is
+    # charged in this currency outright and Alipay does its own FX at its bank
+    # rate instead of Stripe's 2-4% conversion fee.
     currency: "usd"
+    # Pin the exact rails offered at checkout, in order. Leave unset for dynamic
+    # payment methods, where Stripe.js decides per buyer which of the account's
+    # enabled rails to render from IP + browser signals — that filter silently
+    # drops the Alipay tab for a buyer whose network doesn't geolocate to China,
+    # and no API parameter overrides it. Listing them turns the filter off; the
+    # first entry is the preselected tab. Mutually exclusive with
+    # payment_method_configuration (this wins).
+    payment_method_types: ["alipay", "card"]
+    # payment_method_configuration: ""  # pmc_… (ignored when the list above is set)
     # return_url: ""        # redirect-method return; default <site_url>/app/billing
 
   # Live USD/CNY rate source. Default is the public fawazahmed0

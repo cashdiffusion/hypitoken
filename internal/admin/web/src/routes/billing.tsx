@@ -455,7 +455,13 @@ function StatusPill({ status }: { status: string }) {
 }
 
 type ProvidersInfo = {
-  stripe: { enabled: boolean; publishable_key?: string; currency?: string };
+  stripe: {
+    enabled: boolean;
+    publishable_key?: string;
+    currency?: string;
+    /** Rails pinned server-side, in order. Null = dynamic payment methods. */
+    payment_method_types?: string[] | null;
+  };
   qr: { enabled: boolean };
 };
 
@@ -478,9 +484,10 @@ function TopUpDialog({
   const [polling, setPolling] = useState(false);
   const [paid, setPaid] = useState(false);
 
-  // Stripe is the only top-up rail (USD wallet; Adaptive Pricing localizes the
-  // buyer's currency at checkout so Alipay et al. work). The legacy QR/Z-Pay
-  // rail is no longer surfaced in the UI.
+  // Stripe is the only top-up rail (USD wallet, charged 1:1 — no Adaptive
+  // Pricing). The legacy QR/Z-Pay rail is no longer surfaced in the UI.
+  // providers also carries the pinned rail order, which the Checkout Element
+  // needs so its tabs match the session (Alipay first).
   const [providers, setProviders] = useState<ProvidersInfo | null>(null);
 
   useEffect(() => {
@@ -650,6 +657,7 @@ function TopUpDialog({
                 <StripeTopUp
                   publishableKey={order.publishable_key}
                   clientSecret={order.client_secret}
+                  paymentMethodOrder={providers?.stripe?.payment_method_types ?? undefined}
                   onConfirmed={() => pollOrder(order.out_trade_no)}
                 />
               )}

@@ -93,6 +93,9 @@ interface StripeTopUpProps {
   publishableKey: string;
   /** Checkout Session client_secret from the backend topup response. */
   clientSecret: string;
+  /** Rails to render, in order, from /billing/providers — the first one is the
+   *  preselected tab. Undefined leaves the ordering to Stripe. */
+  paymentMethodOrder?: string[];
   /** called once Checkout reports the session is settling/settled (in-page
    *  methods like cards) — the parent then polls the backend order until paid.
    *  Redirect methods (Alipay/WeChat) navigate away and resume via return_url. */
@@ -103,7 +106,12 @@ interface StripeTopUpProps {
 // Stripe owns the sensitive card / Alipay input inside its iframe; we own
 // everything around it. Everything is presented and charged in USD — see the
 // adaptivePricing note on the options below.
-export function StripeTopUp({ publishableKey, clientSecret, onConfirmed }: StripeTopUpProps) {
+export function StripeTopUp({
+  publishableKey,
+  clientSecret,
+  paymentMethodOrder,
+  onConfirmed,
+}: StripeTopUpProps) {
   const stripePromise = useMemo(() => getStripe(publishableKey), [publishableKey]);
   // Track the light/dark class on <html> so the Element re-themes live when the
   // user flips the theme toggle while the dialog is open.
@@ -135,12 +143,18 @@ export function StripeTopUp({ publishableKey, clientSecret, onConfirmed }: Strip
         elementsOptions: { appearance, loader: "auto" },
       }}
     >
-      <CheckoutForm onConfirmed={onConfirmed} />
+      <CheckoutForm onConfirmed={onConfirmed} paymentMethodOrder={paymentMethodOrder} />
     </CheckoutElementsProvider>
   );
 }
 
-function CheckoutForm({ onConfirmed }: { onConfirmed: () => void }) {
+function CheckoutForm({
+  onConfirmed,
+  paymentMethodOrder,
+}: {
+  onConfirmed: () => void;
+  paymentMethodOrder?: string[];
+}) {
   const { t } = useTranslation();
   const result = useCheckoutElements();
   const [busy, setBusy] = useState(false);
@@ -209,7 +223,14 @@ function CheckoutForm({ onConfirmed }: { onConfirmed: () => void }) {
           </div>
         </div>
       )}
-      <PaymentElement options={{ layout: "tabs" }} onReady={() => setReady(true)} />
+      {/* paymentMethodOrder mirrors the session's pinned payment_method_types,
+          so the tabs render in the order we configured and the first one —
+          Alipay — is the preselected rail. Without it Stripe reorders by its
+          own per-buyer relevance model. */}
+      <PaymentElement
+        options={{ layout: "tabs", paymentMethodOrder }}
+        onReady={() => setReady(true)}
+      />
       {err && <p className="text-sm text-destructive">{err}</p>}
       <Button
         type="submit"

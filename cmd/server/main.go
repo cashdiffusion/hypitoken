@@ -750,6 +750,7 @@ func buildStripeGateway(s saas.Config) (*billing.StripeGateway, error) {
 		WebhookSecret:              whsec,
 		Currency:                   sc.Currency,
 		PaymentMethodConfiguration: sc.PaymentMethodConfiguration,
+		PaymentMethodTypes:         sc.PaymentMethodTypes,
 		ReturnURL:                  returnURL,
 	})
 }

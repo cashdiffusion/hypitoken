@@ -33,7 +33,11 @@ type StripeGateway struct {
 	currency       string
 	// pmcID optionally pins a payment_method_configuration (pmc_…). Empty =
 	// rely on the account's default automatic payment methods.
-	pmcID     string
+	pmcID string
+	// pmTypes pins the exact rails offered at checkout (lowercased, deduped).
+	// Empty = dynamic payment methods. See StripeConfig.PaymentMethodTypes for
+	// why we pin them.
+	pmTypes   []string
 	returnURL string
 }
 
@@ -45,6 +49,7 @@ type StripeParams struct {
 	WebhookSecret              string
 	Currency                   string
 	PaymentMethodConfiguration string
+	PaymentMethodTypes         []string
 	ReturnURL                  string
 }
 
@@ -63,14 +68,55 @@ func NewStripeGateway(p StripeParams) (*StripeGateway, error) {
 		webhookSecret:  strings.TrimSpace(p.WebhookSecret),
 		currency:       cur,
 		pmcID:          strings.TrimSpace(p.PaymentMethodConfiguration),
+		pmTypes:        normalizePaymentMethodTypes(p.PaymentMethodTypes),
 		returnURL:      strings.TrimSpace(p.ReturnURL),
 	}, nil
+}
+
+// normalizePaymentMethodTypes lowercases, trims and dedupes the configured
+// rails while preserving order — the order is meaningful, since it becomes the
+// Payment Element's tab order and therefore which rail is preselected.
+func normalizePaymentMethodTypes(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	for _, v := range in {
+		v = strings.ToLower(strings.TrimSpace(v))
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// applyPaymentMethodSelection pins the checkout rails. An explicit list wins
+// over a payment_method_configuration — Stripe rejects both on one session.
+func (g *StripeGateway) applyPaymentMethodSelection(params *stripe.CheckoutSessionCreateParams) {
+	if len(g.pmTypes) > 0 {
+		params.PaymentMethodTypes = stripe.StringSlice(g.pmTypes)
+		return
+	}
+	if g.pmcID != "" {
+		params.PaymentMethodConfiguration = stripe.String(g.pmcID)
+	}
 }
 
 func (g *StripeGateway) PublishableKey() string { return g.publishableKey }
 func (g *StripeGateway) Currency() string       { return g.currency }
 func (g *StripeGateway) ReturnURL() string      { return g.returnURL }
-func (g *StripeGateway) HasWebhookSecret() bool { return g.webhookSecret != "" }
+
+// PaymentMethodTypes reports the pinned rails (nil when dynamic). The browser
+// needs the same list to set the Payment Element's paymentMethodOrder, so the
+// tab order it renders matches the order configured here.
+func (g *StripeGateway) PaymentMethodTypes() []string { return g.pmTypes }
+func (g *StripeGateway) HasWebhookSecret() bool       { return g.webhookSecret != "" }
 
 // minorUnits converts a major-unit amount (e.g. dollars) to the integer minor
 // unit Stripe expects (cents). The line item is always priced in USD (a
@@ -146,9 +192,7 @@ func (g *StripeGateway) CreateHostedCheckout(ctx context.Context, outTradeNo str
 	if email != "" {
 		params.CustomerEmail = stripe.String(email)
 	}
-	if g.pmcID != "" {
-		params.PaymentMethodConfiguration = stripe.String(g.pmcID)
-	}
+	g.applyPaymentMethodSelection(params)
 	sess, err := g.sc.V1CheckoutSessions.Create(ctx, params)
 	if err != nil {
 		return nil, err
@@ -190,6 +234,13 @@ func (g *StripeGateway) VerifyPaidSession(sess *stripe.CheckoutSession, amount f
 // Element to be rendered whenever Adaptive Pricing is live on an Elements
 // integration, so "leave it on but hide the picker" is not an option — the
 // browser must drop adaptivePricing.allowed together with this flag.
+//
+// The rails come from stripe.payment_method_types when configured. Leaving it
+// unset means dynamic payment methods, where Stripe.js decides per buyer which
+// of the eligible rails to actually render from IP + browser signals — a
+// customer whose network doesn't geolocate to China loses the Alipay tab even
+// though the session offers it, and no API parameter overrides that. Pinning
+// the list turns the filter off and fixes the tab order too.
 func (g *StripeGateway) CreateTopUpSession(ctx context.Context, outTradeNo string, usd float64, userID int64, email, returnURL, description string) (*StripeSession, error) {
 	params := &stripe.CheckoutSessionCreateParams{
 		Mode:   stripe.String(string(stripe.CheckoutSessionModePayment)),
@@ -219,6 +270,7 @@ func (g *StripeGateway) CreateTopUpSession(ctx context.Context, outTradeNo strin
 	if email != "" {
 		params.CustomerEmail = stripe.String(email)
 	}
+	g.applyPaymentMethodSelection(params)
 
 	sess, err := g.sc.V1CheckoutSessions.Create(ctx, params)
 	if err != nil {

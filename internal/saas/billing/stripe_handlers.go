@@ -28,6 +28,11 @@ func (h *Handler) providers(c *gin.Context) {
 			"enabled":         true,
 			"publishable_key": h.Stripe.PublishableKey(),
 			"currency":        h.Stripe.Currency(),
+			// The rails pinned server-side, in order. The browser feeds this
+			// straight to the Payment Element's paymentMethodOrder so the tab
+			// order (and therefore the preselected rail) matches the session.
+			// Null when we're on dynamic payment methods.
+			"payment_method_types": h.Stripe.PaymentMethodTypes(),
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{

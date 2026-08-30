@@ -18,7 +18,7 @@ Pick a preset or enter a custom amount — **from $1** to get started.
 
 ### 3. Pay
 
-Pay with **Alipay / WeChat** or **card**. After scanning the code or following the prompts, your balance updates automatically — no need to contact support.
+**Alipay** is preselected; you can switch to **card**. Follow the prompts to pay and your balance updates automatically — no need to contact support.
 
 > **What happens when the balance runs out?** API requests return `402 Payment Required` and the client shows "request failed." Enable the low-balance alert in the console to avoid interruptions.
 

@@ -448,6 +448,17 @@ type StripeConfig struct {
 	// dashboard configuration via automatic_payment_methods.
 	PaymentMethodConfiguration string `yaml:"payment_method_configuration,omitempty"`
 
+	// PaymentMethodTypes pins the exact rails offered at checkout, e.g.
+	// ["alipay", "card"]. Empty = dynamic payment methods, where Stripe.js
+	// picks which of the account's enabled rails to render per buyer from IP
+	// and browser signals — that filter is what silently drops the Alipay tab
+	// for a buyer whose network doesn't geolocate to China, and there is no
+	// API parameter to override it. Listing the rails explicitly turns the
+	// filter off: every buyer gets exactly these, in this order (which is also
+	// the Payment Element's tab order, so the first entry is preselected).
+	// Mutually exclusive with PaymentMethodConfiguration — this wins.
+	PaymentMethodTypes []string `yaml:"payment_method_types,omitempty"`
+
 	// ReturnURL is where redirect-based methods (Alipay/WeChat/crypto) send
 	// the browser back after authorization. Empty = SiteURL + "/app/billing".
 	ReturnURL string `yaml:"return_url,omitempty"`
