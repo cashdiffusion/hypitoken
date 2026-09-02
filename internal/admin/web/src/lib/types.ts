@@ -276,6 +276,42 @@ export interface CredentialUsage {
   total_cost_usd: number;
 }
 
+/** AllotmentSpend mirrors cc-core quotaestimate.Spend: catalogue-price USD
+ * plus tokens for one span of the ledger. weighted_tokens uses the same
+ * 1/1.25/0.1/5 weighting as the load balancer, in input-equivalent tokens. */
+export interface AllotmentSpend {
+  cost_usd: number;
+  weighted_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_create_tokens: number;
+  requests: number;
+}
+
+/** AllotmentEstimate mirrors cc-core quotaestimate.Estimate. The window's
+ * start is resets_at − length (Anthropic's windows are fixed, not rolling);
+ * observed is the ledger spend from that start to now — or to the 429 under
+ * basis "quota_hit", where it is a measured 100% and full_window == observed. */
+export interface AllotmentEstimate {
+  window: "five_hour" | "seven_day" | string;
+  window_hours: number;
+  window_start: string;
+  window_resets_at: string;
+  /** fraction; exactly 1 under quota_hit */
+  utilization: number;
+  basis: "quota_hit" | "utilization" | "observed_only";
+  confidence: "high" | "medium" | "low";
+  observed_from: string;
+  observed_to: string;
+  observed_hours: number;
+  observed: AllotmentSpend;
+  full_window?: AllotmentSpend;
+  remaining?: AllotmentSpend;
+  quota_hit_at?: string;
+  spend_error?: string;
+}
+
 // Credential mirrors the Go authRow struct served by
 // /api/v2/admin/credentials. Time fields arrive as RFC3339 strings.
 export interface Credential {
@@ -312,6 +348,10 @@ export interface Credential {
   client_cancel_reason?: string;
   model_map?: Record<string, string>;
   usage?: CredentialUsage;
+  /** Rejection-anchored weekly allotment: what the 7-day window was worth
+   * the last time this process saw it fill. Anthropic OAuth only; absent
+   * until a weekly usage-limit 429 has been observed since start-up. */
+  weekly_allotment?: AllotmentEstimate;
   codex_rate_limits?: Record<string, string>;
   codex_rate_limits_at?: string;
   /** Last actively-probed chatgpt.com/backend-api/wham/usage snapshot. Shape

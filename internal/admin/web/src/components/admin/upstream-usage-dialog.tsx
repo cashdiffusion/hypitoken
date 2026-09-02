@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiPost } from "@/lib/api";
-import { cn, errMsg } from "@/lib/utils";
+import type { AllotmentEstimate } from "@/lib/types";
+import { cn, errMsg, fmtCompact, fmtHours, fmtUSD } from "@/lib/utils";
 
 // ---- Anthropic shape (api.anthropic.com/api/oauth/usage) ----
 interface UsageWindow {
@@ -41,6 +42,8 @@ interface AnthropicResponse {
       }>;
     };
   };
+  // Server-side estimate of what each window is worth (cc-core/quotaestimate).
+  allotment_estimates?: AllotmentEstimate[];
   profile?: {
     body?: {
       account?: {
@@ -448,11 +451,111 @@ function AnthropicUsageBody({
         </div>
       )}
 
+      <AllotmentEstimates list={data?.allotment_estimates} />
+
       {!data && !err && busy && (
         <div className="text-center py-6 text-sm text-muted-foreground">
           {t("legacy.upstreamUsage.querying")}
         </div>
       )}
+    </div>
+  );
+}
+
+const CONFIDENCE_CLASS: Record<AllotmentEstimate["confidence"], string> = {
+  high: "text-success",
+  medium: "text-warning",
+  low: "text-muted-foreground",
+};
+
+/* AllotmentEstimates — what each reported window is worth in our own ledger's
+ * units. The upstream says how full a window is and when it reopens, never
+ * what 100% is; the server derives it from the request log (window start =
+ * reset − length, spend since ÷ utilization), and a usage-limit 429 makes it
+ * a direct measurement. */
+function AllotmentEstimates({ list }: { list?: AllotmentEstimate[] }) {
+  const { t } = useTranslation();
+  if (!list?.length) return null;
+  const windowLabel = (w: string) =>
+    w === "five_hour"
+      ? t("legacy.upstreamUsage.allotment.window5h")
+      : w === "seven_day"
+        ? t("legacy.upstreamUsage.allotment.window7d")
+        : w;
+  const basisLabel = (b: AllotmentEstimate["basis"]) =>
+    b === "quota_hit"
+      ? t("legacy.upstreamUsage.allotment.basisQuotaHit")
+      : b === "utilization"
+        ? t("legacy.upstreamUsage.allotment.basisUtilization")
+        : t("legacy.upstreamUsage.allotment.basisObserved");
+  return (
+    <div className="space-y-2 border-t border-border/60 pt-3">
+      <div className="text-xs font-medium">{t("legacy.upstreamUsage.allotment.title")}</div>
+      <div className="space-y-2">
+        {list.map((e) => {
+          const full = e.full_window;
+          const rem = e.remaining;
+          const windowFull = e.basis === "quota_hit" || e.utilization >= 1;
+          return (
+            <div key={e.window} className="rounded border border-border/60 px-3 py-2 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{windowLabel(e.window)}</span>
+                  <span className={cn("font-mono text-[10px]", CONFIDENCE_CLASS[e.confidence])}>
+                    {basisLabel(e.basis)} ·{" "}
+                    {t(`legacy.upstreamUsage.allotment.conf.${e.confidence}`)}
+                  </span>
+                </div>
+                <div className="font-mono tabular-nums">
+                  {full ? (
+                    <>
+                      <span className="text-muted-foreground">
+                        {t("legacy.upstreamUsage.allotment.full")}{" "}
+                      </span>
+                      <span className="font-semibold">{fmtUSD(full.cost_usd)}</span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {fmtCompact(full.weighted_tokens)}{" "}
+                        {t("legacy.upstreamUsage.allotment.wtok")}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </div>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] text-muted-foreground tabular-nums">
+                <span>
+                  {t("legacy.upstreamUsage.allotment.observed")} {fmtUSD(e.observed.cost_usd)} ·{" "}
+                  {fmtCompact(e.observed.weighted_tokens)}{" "}
+                  {t("legacy.upstreamUsage.allotment.wtok")}
+                  {" · "}
+                  {t("legacy.upstreamUsage.allotment.over", {
+                    hours: fmtHours(e.observed_hours),
+                    pct: Math.round(e.utilization * 100),
+                  })}
+                  {e.quota_hit_at ? ` · 429 ${new Date(e.quota_hit_at).toLocaleString()}` : ""}
+                </span>
+                <span>
+                  {windowFull && full
+                    ? t("legacy.upstreamUsage.allotment.windowFull")
+                    : rem
+                      ? `${t("legacy.upstreamUsage.allotment.remaining")} ${fmtUSD(rem.cost_usd)}`
+                      : ""}
+                </span>
+              </div>
+              {e.spend_error && (
+                <div className="mt-1 text-[11px] text-destructive">
+                  {t("legacy.upstreamUsage.allotment.spendError", { err: e.spend_error })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="text-[11px] leading-snug text-muted-foreground">
+        {t("legacy.upstreamUsage.allotment.note")}
+      </div>
     </div>
   );
 }

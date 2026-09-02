@@ -1062,6 +1062,9 @@ export default {
         h24: "24h I/O",
         lifetime: "Total cost",
         lastUsed: "Last used",
+        weeklyAllotment: "Weekly allotment (measured at 429)",
+        weeklyAllotmentHint:
+          "Filled {{at}} · {{hours}} after the window opened · catalogue price, proxy traffic only",
       },
       actions: {
         detail: "Details",
@@ -1656,6 +1659,23 @@ export default {
       proBadge: "pro",
       httpError: "HTTP {{status}}: {{message}}",
       upstreamError: "Upstream error",
+      allotment: {
+        title: "Allotment estimate · catalogue price",
+        window5h: "5-hour window",
+        window7d: "7-day window",
+        basisQuotaHit: "measured at 429",
+        basisUtilization: "scaled from utilization",
+        basisObserved: "observed only",
+        conf: { high: "high confidence", medium: "medium confidence", low: "low confidence" },
+        full: "full window ≈",
+        observed: "observed",
+        remaining: "remaining ≈",
+        windowFull: "window full",
+        over: "over {{hours}} · {{pct}}% used",
+        wtok: "wtok",
+        spendError: "ledger read failed: {{err}}",
+        note: "From our own request log: spend since the window opened (reset − length) ÷ the reported utilization. A usage-limit 429 makes it a direct measurement. Counts only traffic through this proxy — a floor if the account is also used elsewhere.",
+      },
     },
   },
 

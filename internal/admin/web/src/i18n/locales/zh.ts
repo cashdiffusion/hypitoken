@@ -1036,6 +1036,9 @@ export default {
         h24: "24H 进/出",
         lifetime: "累计花费",
         lastUsed: "最近使用",
+        weeklyAllotment: "周额度（429 实测）",
+        weeklyAllotmentHint:
+          "{{at}} 满额 · 从窗口开启起跑了 {{hours}} · 按目录价、仅计经本代理的流量",
       },
       actions: {
         detail: "详情",
@@ -1615,6 +1618,23 @@ export default {
       proBadge: "pro",
       httpError: "HTTP {{status}}: {{message}}",
       upstreamError: "上游返回错误",
+      allotment: {
+        title: "额度估算 · 按目录价",
+        window5h: "5 小时窗口",
+        window7d: "7 天窗口",
+        basisQuotaHit: "429 实测",
+        basisUtilization: "按使用率放大",
+        basisObserved: "仅观测",
+        conf: { high: "高置信", medium: "中置信", low: "低置信" },
+        full: "整窗 ≈",
+        observed: "已观测",
+        remaining: "剩余 ≈",
+        windowFull: "窗口已满",
+        over: "{{hours}} 内 · 使用率 {{pct}}%",
+        wtok: "wtok",
+        spendError: "账本读取失败：{{err}}",
+        note: "来自本代理自己的请求账本：窗口起点（重置时刻 − 窗口长度）至今的消费 ÷ 上游上报的使用率。被 429 拒绝那一刻即为 100% 的直接测量。只统计经过本代理的流量——若该账号还在别处使用，此值是下限。",
+      },
     },
   },
 

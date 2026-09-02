@@ -83,3 +83,13 @@ export async function copyToClipboard(text: string): Promise<void> {
   document.execCommand("copy");
   document.body.removeChild(ta);
 }
+
+/** fmtHours renders a span in hours as "45m" / "7.5h" / "2d 12h". */
+export const fmtHours = (h: number | null | undefined): string => {
+  if (h == null || !Number.isFinite(h)) return "—";
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 48) return `${h < 10 ? h.toFixed(1) : Math.round(h)}h`;
+  const d = Math.floor(h / 24);
+  const r = Math.round(h - d * 24);
+  return r ? `${d}d ${r}h` : `${d}d`;
+};

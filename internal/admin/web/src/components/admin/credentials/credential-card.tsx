@@ -16,7 +16,7 @@ import { SpotlightCard } from "@/components/landing/interactions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Credential } from "@/lib/types";
-import { cn, fmtInt, fmtUSD } from "@/lib/utils";
+import { cn, fmtCompact, fmtHours, fmtInt, fmtUSD } from "@/lib/utils";
 import { credStatus, Expiry, StatusDot } from "./credential-status";
 
 export type CardAction = "refresh" | "clear-quota" | "clear-failure" | "toggle";
@@ -321,6 +321,32 @@ export const CredentialCard = memo(function CredentialCard({
         </div>
       </div>
 
+      {c.weekly_allotment?.full_window && (
+        <div className="border-b border-border/60 bg-muted/30 px-5 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="eyebrow truncate !tracking-[0.09em]">
+              {t("admin.creds.usage.weeklyAllotment")}
+            </div>
+            <div className="mono text-sm tabular-nums">
+              <span className="font-semibold">
+                ≈ {fmtUSD(c.weekly_allotment.full_window.cost_usd)}
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                {" "}
+                · {fmtCompact(c.weekly_allotment.full_window.weighted_tokens)} wtok
+              </span>
+            </div>
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            {t("admin.creds.usage.weeklyAllotmentHint", {
+              at: c.weekly_allotment.quota_hit_at
+                ? new Date(c.weekly_allotment.quota_hit_at).toLocaleString()
+                : "—",
+              hours: fmtHours(c.weekly_allotment.observed_hours),
+            })}
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-1.5 px-5 py-3">
         <Button
           size="sm"
