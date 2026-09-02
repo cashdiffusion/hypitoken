@@ -83,6 +83,9 @@ interface CodexAdditionalRateLimit {
 }
 
 interface CodexUsageResponse {
+  // Server-side estimate of what each wham/usage window is worth
+  // (cc-core/quotaestimate).
+  allotment_estimates?: AllotmentEstimate[];
   usage?: {
     user_id?: string;
     account_id?: string;
@@ -476,12 +479,21 @@ const CONFIDENCE_CLASS: Record<AllotmentEstimate["confidence"], string> = {
 function AllotmentEstimates({ list }: { list?: AllotmentEstimate[] }) {
   const { t } = useTranslation();
   if (!list?.length) return null;
-  const windowLabel = (w: string) =>
-    w === "five_hour"
-      ? t("legacy.upstreamUsage.allotment.window5h")
-      : w === "seven_day"
-        ? t("legacy.upstreamUsage.allotment.window7d")
-        : w;
+  // Codex names windows by role and states each one's length; show both.
+  const windowLabel = (e: AllotmentEstimate) => {
+    switch (e.window) {
+      case "five_hour":
+        return t("legacy.upstreamUsage.allotment.window5h");
+      case "seven_day":
+        return t("legacy.upstreamUsage.allotment.window7d");
+      case "primary":
+        return `${t("legacy.upstreamUsage.allotment.windowPrimary")} · ${fmtHours(e.window_hours)}`;
+      case "secondary":
+        return `${t("legacy.upstreamUsage.allotment.windowSecondary")} · ${fmtHours(e.window_hours)}`;
+      default:
+        return e.window;
+    }
+  };
   const basisLabel = (b: AllotmentEstimate["basis"]) =>
     b === "quota_hit"
       ? t("legacy.upstreamUsage.allotment.basisQuotaHit")
@@ -500,7 +512,7 @@ function AllotmentEstimates({ list }: { list?: AllotmentEstimate[] }) {
             <div key={e.window} className="rounded border border-border/60 px-3 py-2 text-xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium">{windowLabel(e.window)}</span>
+                  <span className="font-medium">{windowLabel(e)}</span>
                   <span className={cn("font-mono text-[10px]", CONFIDENCE_CLASS[e.confidence])}>
                     {basisLabel(e.basis)} ·{" "}
                     {t(`legacy.upstreamUsage.allotment.conf.${e.confidence}`)}
@@ -686,6 +698,8 @@ function CodexUsageBody({
           </table>
         </div>
       )}
+
+      <AllotmentEstimates list={data?.allotment_estimates} />
 
       {u && (
         <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-2">

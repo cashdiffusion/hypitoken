@@ -345,6 +345,33 @@ export const CredentialCard = memo(function CredentialCard({
               hours: fmtHours(c.weekly_allotment.observed_hours),
             })}
           </div>
+          {(() => {
+            const cur = c.weekly_allotment?.quota_hit_at;
+            const earlier = (c.weekly_allotment_history || [])
+              .filter((m) => m.hit_at !== cur)
+              .slice(0, 4);
+            if (!earlier.length) return null;
+            return (
+              <div className="mt-1 space-y-0.5">
+                {earlier.map((m) => (
+                  <div
+                    key={m.hit_at}
+                    className="mono flex justify-between gap-2 text-[11px] text-muted-foreground tabular-nums"
+                  >
+                    <span>
+                      {t("admin.creds.usage.weeklyHistoryRow", {
+                        at: new Date(m.hit_at).toLocaleDateString(),
+                      })}
+                    </span>
+                    <span>
+                      ≈ {fmtUSD(m.spend.cost_usd)} · {fmtCompact(m.spend.weighted_tokens)} wtok ·{" "}
+                      {fmtHours(m.observed_hours)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-1.5 px-5 py-3">

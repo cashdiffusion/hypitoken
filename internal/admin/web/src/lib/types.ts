@@ -289,6 +289,19 @@ export interface AllotmentSpend {
   requests: number;
 }
 
+/** AllotmentMeasurement mirrors cc-core quotaestimate.Measurement: one window
+ * that ran to 100%, with the spend that filled it. */
+export interface AllotmentMeasurement {
+  window: string;
+  window_hours: number;
+  window_start: string;
+  reset_at: string;
+  hit_at: string;
+  observed_hours: number;
+  spend: AllotmentSpend;
+  recorded_at: string;
+}
+
 /** AllotmentEstimate mirrors cc-core quotaestimate.Estimate. The window's
  * start is resets_at − length (Anthropic's windows are fixed, not rolling);
  * observed is the ledger spend from that start to now — or to the 429 under
@@ -352,6 +365,12 @@ export interface Credential {
    * the last time this process saw it fill. Anthropic OAuth only; absent
    * until a weekly usage-limit 429 has been observed since start-up. */
   weekly_allotment?: AllotmentEstimate;
+  /** The last few settled full-window measurements, newest first, persisted
+   * across restarts. Compare consecutive entries to see an allotment shrink. */
+  weekly_allotment_history?: AllotmentMeasurement[];
+  /** Qualifies quota_exceeded: true when the window actually filled, false
+   * when this is the pool's own throttle pause after a generic 429/401/403. */
+  quota_usage_limit?: boolean;
   codex_rate_limits?: Record<string, string>;
   codex_rate_limits_at?: string;
   /** Last actively-probed chatgpt.com/backend-api/wham/usage snapshot. Shape

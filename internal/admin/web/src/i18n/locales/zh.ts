@@ -1039,6 +1039,7 @@ export default {
         weeklyAllotment: "周额度（429 实测）",
         weeklyAllotmentHint:
           "{{at}} 满额 · 从窗口开启起跑了 {{hours}} · 按目录价、仅计经本代理的流量",
+        weeklyHistoryRow: "{{at}} 满额",
       },
       actions: {
         detail: "详情",
@@ -1622,6 +1623,8 @@ export default {
         title: "额度估算 · 按目录价",
         window5h: "5 小时窗口",
         window7d: "7 天窗口",
+        windowPrimary: "主窗口",
+        windowSecondary: "次窗口",
         basisQuotaHit: "429 实测",
         basisUtilization: "按使用率放大",
         basisObserved: "仅观测",

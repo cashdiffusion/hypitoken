@@ -1065,6 +1065,7 @@ export default {
         weeklyAllotment: "Weekly allotment (measured at 429)",
         weeklyAllotmentHint:
           "Filled {{at}} · {{hours}} after the window opened · catalogue price, proxy traffic only",
+        weeklyHistoryRow: "filled {{at}}",
       },
       actions: {
         detail: "Details",
@@ -1663,6 +1664,8 @@ export default {
         title: "Allotment estimate · catalogue price",
         window5h: "5-hour window",
         window7d: "7-day window",
+        windowPrimary: "primary window",
+        windowSecondary: "secondary window",
         basisQuotaHit: "measured at 429",
         basisUtilization: "scaled from utilization",
         basisObserved: "observed only",

@@ -174,6 +174,14 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		if resetAt.IsZero() {
 			resetAt = parseRetryAfter(resp.Header)
 		}
+		// A usage_limit_reached body is the window filling: record it as the
+		// measurement cc-core/quotaestimate anchors on ("what was this
+		// account's last full window worth"). Per-request throttling
+		// ({"detail":"Rate limit exceeded"}) and capacity bodies carry no
+		// reset of their own and are not a measurement of anything.
+		if resp.StatusCode == http.StatusTooManyRequests && !resetAt.IsZero() && isCodexUsageLimitBody(errBody) {
+			a.MarkUsageLimitReached(resetAt)
+		}
 		s.pool.ReportUpstreamError(a, resp.StatusCode, resetAt)
 		log.Warnf("codex oauth: credential %s received %d: %s", a.ID, resp.StatusCode, truncate(errBody, 240))
 		return true, false
@@ -909,6 +917,21 @@ func parseCodexResetAt(body []byte) time.Time {
 		return time.Now().Add(time.Duration(wrap.Error.ResetsInSeconds) * time.Second)
 	}
 	return time.Time{}
+}
+
+// isCodexUsageLimitBody reports whether a 429 body is ChatGPT's
+// usage_limit_reached — the account's window filled — as opposed to the
+// per-request "Rate limit exceeded" throttle or a capacity rejection.
+func isCodexUsageLimitBody(body []byte) bool {
+	var wrap struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &wrap); err != nil {
+		return false
+	}
+	return wrap.Error.Type == "usage_limit_reached"
 }
 
 // lineReader is a tiny buffered reader that preserves the original

@@ -87,6 +87,13 @@ type Handler struct {
 	// polled; without this every poll would be one ledger query per
 	// credential for a constant.
 	hitCache quotaestimate.HitCache
+	// quotaHistoryOnce / quotaHistory: the last few settled full-window
+	// measurements per credential, persisted next to the state file so
+	// "what did the last N full weeks cost" survives restarts. Opened
+	// lazily on first use; an unreadable file degrades to in-memory with a
+	// log line rather than taking the admin API down.
+	quotaHistoryOnce sync.Once
+	quotaHistory     *quotaestimate.History
 }
 
 type reqCacheEntry struct {
@@ -391,6 +398,15 @@ type authRow struct {
 	// seen since this process started — the live probe (anthropic-usage)
 	// covers the no-rejection case. See cc-core/quotaestimate.
 	WeeklyAllotment *quotaestimate.Estimate `json:"weekly_allotment,omitempty"`
+	// WeeklyAllotmentHistory is the last few settled full-window
+	// measurements (newest first), persisted across restarts — the record an
+	// operator compares to decide whether an account's allotment shrank.
+	WeeklyAllotmentHistory []quotaestimate.Measurement `json:"weekly_allotment_history,omitempty"`
+	// QuotaUsageLimit qualifies QuotaExceeded: true when the window actually
+	// filled (usage-limit rejection with the upstream's reset), false when it
+	// is the pool's own throttle pause after a generic 429/401/403. Both park
+	// the credential; only the former is "quota exhausted" to a human.
+	QuotaUsageLimit bool `json:"quota_usage_limit"`
 	// CodexRateLimits holds the latest x-codex-* response headers from
 	// chatgpt.com — primary/secondary window used-percent, resets etc.
 	// Empty for non-OAuth / non-Codex credentials or until first call.
@@ -603,6 +619,8 @@ func (h *Handler) buildAuthRows() []authRow {
 			ModelMap:               st.Auth.ModelMap,
 			Usage:                  u,
 			WeeklyAllotment:        h.weeklyAllotment(st.Auth, provider, kind),
+			WeeklyAllotmentHistory: h.quotaHist().For(st.Auth.ID),
+			QuotaUsageLimit:        st.Auth.QuotaUsageLimit,
 			// st.Auth is already a full auth.Snapshot() taken by Pool.Status(),
 			// Codex fields included. This used to call live.Snapshot() four
 			// more times per row — four extra credential-lock acquisitions and
@@ -1360,17 +1378,43 @@ func (h *Handler) handleAnthropicUsage(c *gin.Context) {
 }
 
 // weeklyAllotment returns the rejection-anchored weekly estimate for an
-// Anthropic OAuth credential list row, nil for everything else. The
+// OAuth credential list row (Anthropic usage-limit 429 or ChatGPT
+// usage_limit_reached), nil for everything else. The
 // estimate is a constant once the rejection is ten minutes old, so it is
 // served from hitCache; the live utilization-based estimate is deliberately
 // NOT computed here — it needs an upstream probe per credential, which the
 // list must never do on a poll.
 func (h *Handler) weeklyAllotment(info auth.AuthInfo, provider, kind string) *quotaestimate.Estimate {
-	if kind != "oauth" || provider != auth.ProviderAnthropic || info.LastQuotaHit.At.IsZero() {
+	if kind != "oauth" || info.LastQuotaHit.At.IsZero() {
 		return nil
 	}
-	return h.hitCache.Weekly(info.ID, info.LastQuotaHit,
-		quotaestimate.RequestLogSpend(h.cfg.LogDir, info.ID), time.Now())
+	_ = provider // both OAuth providers record usage-limit hits the same way
+	now := time.Now()
+	est := h.hitCache.Weekly(info.ID, info.LastQuotaHit,
+		quotaestimate.RequestLogSpend(h.cfg.LogDir, info.ID), now)
+	// Once the ledger has settled (in-flight requests at the time of the 429
+	// have finished logging), the measurement is final: keep it.
+	if est != nil && est.QuotaHitAt != nil && now.Sub(*est.QuotaHitAt) >= 10*time.Minute {
+		if _, err := h.quotaHist().Record(info.ID, *est, now); err != nil {
+			log.Warnf("quota history: record %s: %v", info.ID, err)
+		}
+	}
+	return est
+}
+
+// quotaHist returns the persisted measurement history, opening it on first
+// use at <state_file dir>/quota_history.json.
+func (h *Handler) quotaHist() *quotaestimate.History {
+	h.quotaHistoryOnce.Do(func() {
+		path := filepath.Join(filepath.Dir(h.cfg.StateFile), "quota_history.json")
+		hist, err := quotaestimate.OpenHistory(path, 0)
+		if err != nil {
+			log.Warnf("quota history: open %s: %v (keeping measurements in memory only)", path, err)
+			hist = &quotaestimate.History{}
+		}
+		h.quotaHistory = hist
+	})
+	return h.quotaHistory
 }
 
 // handleCodexUsage actively probes chatgpt.com/backend-api/wham/usage for an
@@ -1396,7 +1440,12 @@ func (h *Handler) handleCodexUsage(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"usage": info})
+	// Allotment estimates for the reported windows — see handleAnthropicUsage;
+	c.JSON(http.StatusOK, gin.H{
+		"usage": info,
+		"allotment_estimates": quotaestimate.ForCodexCredential(info, a.Snapshot().LastQuotaHit,
+			quotaestimate.RequestLogSpend(h.cfg.LogDir, a.ID), time.Now()),
+	})
 }
 
 // handleCodexSubscription probes the chatgpt.com billing endpoints
