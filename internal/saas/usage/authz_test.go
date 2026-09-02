@@ -20,13 +20,23 @@ func TestTeamRoutesRequireWorkspaceAdmin(t *testing.T) {
 	ctx := context.Background()
 	d := testDB(t)
 
-	wsA, err := d.CreateEnterpriseWorkspace(ctx, "acme", 100, 0, 0, 0, 0, 0)
+	wsA, err := d.CreateEnterpriseWorkspace(ctx, "acme", 0, 0, 0, 0, 0)
 	if err != nil {
 		t.Fatalf("ws a: %v", err)
 	}
-	wsB, err := d.CreateEnterpriseWorkspace(ctx, "globex", 100, 0, 0, 0, 0, 0)
+	// Funded directly: the test wants a balance, not a ledger entry, and
+	// the constructor no longer mints one.
+	if _, err := d.ExecContext(ctx, `UPDATE workspaces SET balance_usd = ? WHERE id = ?`, 100, wsA.ID); err != nil {
+		t.Fatalf("fund workspace: %v", err)
+	}
+	wsB, err := d.CreateEnterpriseWorkspace(ctx, "globex", 0, 0, 0, 0, 0)
 	if err != nil {
 		t.Fatalf("ws b: %v", err)
+	}
+	// Funded directly: the test wants a balance, not a ledger entry, and
+	// the constructor no longer mints one.
+	if _, err := d.ExecContext(ctx, `UPDATE workspaces SET balance_usd = ? WHERE id = ?`, 100, wsB.ID); err != nil {
+		t.Fatalf("fund workspace: %v", err)
 	}
 
 	boss, err := d.CreateUser(ctx, "boss@acme.com", "h", "user", 1, true)

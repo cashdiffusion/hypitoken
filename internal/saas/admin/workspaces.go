@@ -75,7 +75,7 @@ func (h *Handler) createWorkspace(c *gin.Context) {
 	// Create with 0 balance, then book the initial grant as a ledger adjustment
 	// so the provisioning shows up in the audit trail. Multipliers are per-
 	// workspace (0 = standard default rate).
-	ws, err := h.DB.CreateEnterpriseWorkspace(ctx, req.Name, 0, req.DailyUSDCap, req.MonthlyUSDCap, req.ClaudeMultiplier, req.CodexMultiplier, op.ID)
+	ws, err := h.DB.CreateEnterpriseWorkspace(ctx, req.Name, req.DailyUSDCap, req.MonthlyUSDCap, req.ClaudeMultiplier, req.CodexMultiplier, op.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -118,12 +118,18 @@ func (db *DB) CreatePersonalWorkspace(ctx context.Context, userID int64, email s
 // CreateEnterpriseWorkspace provisions a shared enterprise workspace (platform
 // admin only). createdBy is the operator's user id. claudeMult/codexMult are the
 // per-workspace billing multipliers (0 = standard default).
-func (db *DB) CreateEnterpriseWorkspace(ctx context.Context, name string, balanceUSD, dailyCap, monthlyCap, claudeMult, codexMult float64, createdBy int64) (*Workspace, error) {
+//
+// It always opens at $0. It used to take an opening balance and write it
+// straight into the row — the one place in the codebase that moved money
+// without a wallet_tx line, and the origin of a $50 workspace with no ledger
+// behind it. Funding goes through AdjustWorkspaceBalance so the audit trail is
+// complete from the first cent.
+func (db *DB) CreateEnterpriseWorkspace(ctx context.Context, name string, dailyCap, monthlyCap, claudeMult, codexMult float64, createdBy int64) (*Workspace, error) {
 	now := time.Now().Unix()
 	res, err := db.ExecContext(ctx,
 		`INSERT INTO workspaces (name, type, balance_usd, daily_usd_cap, monthly_usd_cap, claude_multiplier, codex_multiplier, created_by, created_at, updated_at)
-		 VALUES (?, 'enterprise', ?, ?, ?, ?, ?, ?, ?, ?)`,
-		strings.TrimSpace(name), balanceUSD, dailyCap, monthlyCap, claudeMult, codexMult, createdBy, now, now)
+		 VALUES (?, 'enterprise', 0, ?, ?, ?, ?, ?, ?, ?)`,
+		strings.TrimSpace(name), dailyCap, monthlyCap, claudeMult, codexMult, createdBy, now, now)
 	if err != nil {
 		return nil, err
 	}

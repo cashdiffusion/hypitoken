@@ -31,9 +31,14 @@ func itoa(n int64) string {
 
 func seedEnterprise(t *testing.T, d *DB, name string) int64 {
 	t.Helper()
-	ws, err := d.CreateEnterpriseWorkspace(context.Background(), name, 1000, 0, 0, 0, 0, 0)
+	ws, err := d.CreateEnterpriseWorkspace(context.Background(), name, 0, 0, 0, 0, 0)
 	if err != nil {
 		t.Fatalf("create enterprise ws: %v", err)
+	}
+	// Funded directly: the test wants a balance, not a ledger entry, and
+	// the constructor no longer mints one.
+	if _, err := d.ExecContext(context.Background(), `UPDATE workspaces SET balance_usd = ? WHERE id = ?`, 1000, ws.ID); err != nil {
+		t.Fatalf("fund workspace: %v", err)
 	}
 	return ws.ID
 }

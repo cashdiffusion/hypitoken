@@ -38,6 +38,11 @@ var ErrIdemConflict = errors.New("idempotency key already used for a different m
 // in one call. HTTP callers should reject well below this.
 const maxIdemAmountUSD = 1000.0
 
+// MaxIdemAmountUSD is maxIdemAmountUSD for callers outside this package, so
+// an in-process biller can tell when a movement is too large for the
+// idempotent path and must fall back to the unbounded one.
+const MaxIdemAmountUSD = maxIdemAmountUSD
+
 // IdemChargeReq is one idempotent wallet movement. AmountUSD is always POSITIVE
 // and states the magnitude; the direction comes from which function is called
 // (ChargeWorkspaceIdem debits, CreditWorkspaceIdem credits).

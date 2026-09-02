@@ -103,9 +103,28 @@ type PreCheckError struct {
 //
 // PreCheck deliberately does NOT use this: it is a read on the way in, it fails
 // open, and if the caller is gone there is nothing left to authorize.
+//
+// The context also carries the charge's idempotency key (ChargeIdemKey). The
+// wallet had none on the live path: a debit that failed after committing —
+// SQLITE_BUSY on the way out, a lost connection — could only be retried by
+// re-debiting, so nothing retried, and every transient write error became a
+// dropped charge. With a key, the adapter can retry and a replay is free.
 func chargeCtx(c *gin.Context) context.Context {
+	return chargeCtxSlot(c, "main")
+}
+
+// chargeCtxSlot is chargeCtx for a request that settles more than one charge:
+// the advisor sub-call bills a second model, a Codex WebSocket bills every
+// turn. Each slot must be its own key or a replay of one would swallow the
+// others, so callers name the slot ("advisor:<model>", "turn:<n>") and the
+// key is charge:<request id>:<slot>.
+func chargeCtxSlot(c *gin.Context, slot string) context.Context {
 	if c == nil || c.Request == nil {
 		return context.Background()
 	}
-	return context.WithoutCancel(c.Request.Context())
+	ctx := context.WithoutCancel(c.Request.Context())
+	if base := chargeBaseID(c); base != "" && slot != "" {
+		ctx = context.WithValue(ctx, chargeKeyCtxKey{}, "charge:"+base+":"+slot)
+	}
+	return ctx
 }

@@ -1017,6 +1017,7 @@ recoveredFromSignature:
 	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
+	var billingErr string
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
 		// Priced on the model we actually bought upstream (see billingModelFor);
 		// every label below stays on the client-facing name.
@@ -1026,6 +1027,10 @@ recoveredFromSignature:
 			billed, err := s.saas.Charge(chargeCtx(c), info, auth.NormalizeProvider(a.Provider), model, counts, costUSD)
 			if err != nil {
 				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
+				// Nobody was debited, so the row must not carry the official
+				// price as revenue; the marker is what makes the drop findable.
+				billedUSD = 0
+				billingErr = billingDropped(err)
 			} else {
 				billedUSD = billed
 				userID = info.UserID
@@ -1078,7 +1083,7 @@ recoveredFromSignature:
 		Stream:        stream,
 		Path:          path,
 		Attempts:      attempts,
-		Error:         terminalError,
+		Error:         joinLogError(terminalError, billingErr),
 		UserID:        userID,
 		Multiplier:    multiplier,
 		ClaudeAudit:   claudeAudit,
@@ -1392,6 +1397,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
+	var billingErr string
 	if resp.StatusCode < 400 {
 		ledger := counts
 		ledger.Requests = 1
@@ -1407,6 +1413,11 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 				billed, err := s.saas.Charge(chargeCtx(c), info, auth.NormalizeProvider(a.Provider), model, counts, costUSD)
 				if err != nil {
 					log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
+					// Nobody was debited, so the row must not carry the
+					// official price as revenue; the marker is what makes the
+					// drop findable.
+					billedUSD = 0
+					billingErr = billingDropped(err)
 				} else {
 					billedUSD = billed
 					userID = info.UserID
@@ -1450,7 +1461,7 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		Attempts:      attempts,
 		UserID:        userID,
 		Multiplier:    multiplier,
-		Error:         errField,
+		Error:         joinLogError(errField, billingErr),
 	})
 	return false, true, nil
 }
@@ -1821,12 +1832,6 @@ func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientTo
 	provider := auth.NormalizeProvider(a.Provider)
 	var total float64
 	info, hasSaaS := saasInfoFrom(c)
-	var subUserID int64
-	var subMultiplier float64
-	if hasSaaS && s.saas != nil {
-		subUserID = info.UserID
-		subMultiplier = s.saas.MultiplierFor(info, provider)
-	}
 	for subModel, sc := range sub.Snapshot() {
 		// Sub-calls bump the auth's daily/hourly bucket and WeightedTotal so
 		// the credential bears the full opus load. Requests stays 0: the
@@ -1835,11 +1840,25 @@ func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientTo
 		official := s.pricing.Cost(provider, subModel, sc)
 		// Advisor cost goes through the same Charge funnel as the parent
 		// request so the wallet ledger and the request log agree on what
-		// the user actually paid for the sub-call.
+		// the user actually paid for the sub-call. Same failure contract as
+		// the parent, too: this used to swallow the error and stamp the row
+		// with the user and multiplier anyway, which made a dropped advisor
+		// charge look billed — and, because user_id was set, invisible to
+		// reconcile-charges forever.
 		billed := official
+		var subUserID int64
+		var subMultiplier float64
+		var billingErr string
 		if hasSaaS && s.saas != nil {
-			if b, err := s.saas.Charge(chargeCtx(c), info, provider, subModel, sc, official); err == nil {
+			b, err := s.saas.Charge(chargeCtxSlot(c, "advisor:"+subModel), info, provider, subModel, sc, official)
+			if err != nil {
+				log.Warnf("saas: advisor charge failed for token=%d user=%d model=%s: %v", info.TokenID, info.UserID, subModel, err)
+				billed = 0
+				billingErr = billingDropped(err)
+			} else {
 				billed = b
+				subUserID = info.UserID
+				subMultiplier = s.saas.MultiplierFor(info, provider)
 			}
 		}
 		total += billed
@@ -1864,6 +1883,7 @@ func (s *Server) recordSubUsage(c *gin.Context, a *auth.Auth, authKind, clientTo
 			Path:       path + "#advisor:" + subModel,
 			UserID:     subUserID,
 			Multiplier: subMultiplier,
+			Error:      billingErr,
 		})
 	}
 	return total

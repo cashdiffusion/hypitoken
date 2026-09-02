@@ -33,9 +33,14 @@ func exportFixture(t *testing.T, keyName string, tags []string) ([]byte, *db.Use
 	ctx := context.Background()
 	d := testDB(t)
 
-	ws, err := d.CreateEnterpriseWorkspace(ctx, "acme", 1000, 0, 0, 0, 0, 0)
+	ws, err := d.CreateEnterpriseWorkspace(ctx, "acme", 0, 0, 0, 0, 0)
 	if err != nil {
 		t.Fatalf("workspace: %v", err)
+	}
+	// Funded directly: the test wants a balance, not a ledger entry, and
+	// the constructor no longer mints one.
+	if _, err := d.ExecContext(ctx, `UPDATE workspaces SET balance_usd = ? WHERE id = ?`, 1000, ws.ID); err != nil {
+		t.Fatalf("fund workspace: %v", err)
 	}
 	u, err := d.CreateUser(ctx, "member@acme.com", "hash", "user", 1, true)
 	if err != nil {
@@ -170,9 +175,14 @@ func TestExportPreV15CountsAreBlankNotZero(t *testing.T) {
 	ctx := context.Background()
 	d := testDB(t)
 
-	ws, err := d.CreateEnterpriseWorkspace(ctx, "acme", 1000, 0, 0, 0, 0, 0)
+	ws, err := d.CreateEnterpriseWorkspace(ctx, "acme", 0, 0, 0, 0, 0)
 	if err != nil {
 		t.Fatalf("workspace: %v", err)
+	}
+	// Funded directly: the test wants a balance, not a ledger entry, and
+	// the constructor no longer mints one.
+	if _, err := d.ExecContext(ctx, `UPDATE workspaces SET balance_usd = ? WHERE id = ?`, 1000, ws.ID); err != nil {
+		t.Fatalf("fund workspace: %v", err)
 	}
 	u, err := d.CreateUser(ctx, "old@acme.com", "hash", "user", 1, true)
 	if err != nil {

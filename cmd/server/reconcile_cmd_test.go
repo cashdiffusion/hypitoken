@@ -36,6 +36,7 @@ func newRequestIndex(t *testing.T, dir string) *sql.DB {
 		ts              INTEGER NOT NULL,
 		client_token    TEXT    NOT NULL DEFAULT '',
 		provider        TEXT    NOT NULL DEFAULT '',
+		model           TEXT    NOT NULL DEFAULT '',
 		input           INTEGER NOT NULL DEFAULT 0,
 		output          INTEGER NOT NULL DEFAULT 0,
 		cache_read      INTEGER NOT NULL DEFAULT 0,
@@ -65,8 +66,8 @@ func insertReq(t *testing.T, rdb *sql.DB, ts time.Time, token, provider string, 
 		mult = testCodexMultiplier
 	}
 	if _, err := rdb.Exec(
-		`INSERT INTO req (ts, client_token, provider, input, output, cost_usd, billed_usd, multiplier, attempt_only, user_id)
-		 VALUES (?, ?, ?, 100, 20, ?, ?, ?, ?, ?)`,
+		`INSERT INTO req (ts, client_token, provider, model, input, output, cost_usd, billed_usd, multiplier, attempt_only, user_id)
+		 VALUES (?, ?, ?, 'test-model', 100, 20, ?, ?, ?, ?, ?)`,
 		ts.UnixNano(), server.MaskClientToken(token), provider, cost, cost, mult, attemptOnly, userID); err != nil {
 		t.Fatalf("insert req: %v", err)
 	}
@@ -444,7 +445,11 @@ func TestDryRunReportsAnAlreadySettledWindow(t *testing.T) {
 	}
 	defer func() { _ = d.Close() }()
 
-	key := idemKeyFor(from, to, 1, "openai")
+	// The key is the row's own, not the window's — see droppedRow.idemKey.
+	key := droppedRow{
+		TS: base.UnixNano(), ClientToken: server.MaskClientToken(secret), Provider: "openai",
+		Model: "test-model", CostUSD: 6, Input: 100, Output: 20,
+	}.idemKey()
 	settled, err := d.SettledIdemKeys(context.Background(), []string{key})
 	if err != nil {
 		t.Fatalf("settled keys: %v", err)
@@ -493,5 +498,67 @@ func TestSettledIdemKeysIgnoresUnrelatedRows(t *testing.T) {
 		t.Fatalf("empty key: %v", err)
 	} else if len(got) != 0 {
 		t.Fatalf("an empty idem_key matched %d row(s)", len(got))
+	}
+}
+
+// TestReconcileChargesOverlappingWindowsDoNotDoubleBill is the bug the per-row
+// key fixes. The idempotency key used to name the window, so a second run over
+// a window that merely overlapped the first — the natural thing to type when
+// widening a repair — minted new keys for the shared rows and billed them
+// again. A row must settle exactly once no matter how many windows cover it.
+func TestReconcileChargesOverlappingWindowsDoNotDoubleBill(t *testing.T) {
+	dir := t.TempDir()
+	saasPath := filepath.Join(dir, "saas.db")
+	secret, wsID := seedSaaS(t, saasPath, 100)
+
+	rdb := newRequestIndex(t, dir)
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+
+	insertReq(t, rdb, base.Add(1*time.Minute), secret, "openai", 4, 0, 0) // window A only
+	insertReq(t, rdb, base.Add(3*time.Minute), secret, "openai", 6, 0, 0) // in both windows
+	insertReq(t, rdb, base.Add(7*time.Minute), secret, "openai", 2, 0, 0) // window B only
+
+	if err := reconcileCharges(dir, saasPath, 0, base, base.Add(5*time.Minute), true); err != nil {
+		t.Fatalf("apply A: %v", err)
+	}
+	if err := reconcileCharges(dir, saasPath, 0, base.Add(2*time.Minute), base.Add(10*time.Minute), true); err != nil {
+		t.Fatalf("apply B: %v", err)
+	}
+	want := 100 - (4+6+2)*testCodexMultiplier
+	if got := balanceOf(t, saasPath, wsID); (got-want) > 1e-9 || (want-got) > 1e-9 {
+		t.Fatalf("balance = %v, want %v — the row shared by both windows was billed more than once", got, want)
+	}
+}
+
+// TestReconcileChargesClampsToTheFloor: the index cannot show a dropped charge
+// before reconcileFloor (those rows are a ledger backfill), so a window that
+// starts earlier is moved up rather than reporting the period as clean.
+func TestReconcileChargesClampsToTheFloor(t *testing.T) {
+	dir := t.TempDir()
+	saasPath := filepath.Join(dir, "saas.db")
+	secret, wsID := seedSaaS(t, saasPath, 100)
+
+	rdb := newRequestIndex(t, dir)
+	// A "dropped" row before the floor — in production such a row cannot
+	// exist, but a test index is not production; it must be ignored.
+	insertReq(t, rdb, reconcileFloor.Add(-time.Hour), secret, "openai", 50, 0, 0)
+	// And one just after, which is genuine.
+	insertReq(t, rdb, reconcileFloor.Add(time.Minute), secret, "openai", 2, 0, 0)
+
+	from := reconcileFloor.Add(-24 * time.Hour)
+	if err := reconcileCharges(dir, saasPath, 0, from, reconcileFloor.Add(time.Hour), true); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	want := 100 - 2*testCodexMultiplier
+	if got := balanceOf(t, saasPath, wsID); (got-want) > 1e-9 || (want-got) > 1e-9 {
+		t.Fatalf("balance = %v, want %v — a pre-floor row was settled", got, want)
+	}
+
+	// A window entirely before the floor must do nothing at all.
+	if err := reconcileCharges(dir, saasPath, 0, from, reconcileFloor.Add(-time.Minute), true); err != nil {
+		t.Fatalf("pre-floor window: %v", err)
+	}
+	if got := balanceOf(t, saasPath, wsID); (got-want) > 1e-9 || (want-got) > 1e-9 {
+		t.Fatalf("balance moved on a pre-floor window: %v", got)
 	}
 }

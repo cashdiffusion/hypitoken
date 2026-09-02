@@ -5,8 +5,10 @@ package adapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -53,7 +55,40 @@ type Adapter struct {
 	// bonus the first time an invited user actually spends. Optional / nil-safe;
 	// invoked fire-and-forget off the request goroutine.
 	Referral ReferralReleaser
+
+	// AlertDrop, when set, is told about charges the wallet could not record.
+	// A dropped charge is a request we paid upstream for and billed nobody;
+	// six days of them in August 2026 went unnoticed because the only signal
+	// was a Warnf in the journal. Called at most once per
+	// chargeDropAlertCooldown, off the billing goroutine.
+	AlertDrop func(detail string)
+
+	drops chargeDropStats
 }
+
+// chargeDropStats counts charges that could not be written since process
+// start. It is the operator-facing signal for a wallet that is not accepting
+// debits; the request log keeps the per-row record reconcile-charges reads.
+type chargeDropStats struct {
+	mu        sync.Mutex
+	count     int64
+	official  float64
+	lastErr   string
+	lastAt    time.Time
+	lastAlert time.Time
+}
+
+// chargeDropAlertCooldown bounds how often AlertDrop fires. An outage drops
+// every charge for its duration; one page with a running count beats one per
+// request.
+const chargeDropAlertCooldown = 10 * time.Minute
+
+// chargeRetryBackoff is the pause before each retry of a failed idempotent
+// debit. Three tries over about a second cover the failures that clear on
+// their own — a busy writer, a connection the pool is recycling — without
+// holding a request goroutine through a real outage, which the request log
+// and reconcile-charges cover instead.
+var chargeRetryBackoff = []time.Duration{50 * time.Millisecond, 200 * time.Millisecond, 800 * time.Millisecond}
 
 // ReferralReleaser releases a deferred inviter reward when an invited user first
 // spends. *saas/referral.Service satisfies it; kept an interface so the adapter
@@ -274,16 +309,9 @@ func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provide
 	// ones. The clamped amount is what we record, so the request log and the
 	// wallet ledger stay in lockstep. The charge is attributed to info.UserID
 	// (the member who triggered it) for per-member usage/audit.
-	_, charged, err := a.DB.ChargeWorkspaceWithFloor(ctx, info.WorkspaceID, info.UserID, db.TxKindCharge, billed, ref, "", a.MaxOverdraftUSD,
-		db.ChargeMeta{
-			TokenID:           info.TokenID,
-			Model:             model,
-			InputTokens:       counts.InputTokens,
-			OutputTokens:      counts.OutputTokens,
-			CacheReadTokens:   counts.CacheReadTokens,
-			CacheCreateTokens: counts.CacheCreateTokens,
-		})
+	charged, err := a.debit(ctx, info, model, billed, ref, counts)
 	if err != nil {
+		a.noteChargeDrop(err, info, provider, model, officialCostUSD)
 		return 0, err
 	}
 	if charged < billed {
@@ -299,6 +327,101 @@ func (a *Adapter) Charge(ctx context.Context, info server.SaaSTokenInfo, provide
 		go a.Referral.ReleaseInviterReward(context.WithoutCancel(ctx), info.UserID)
 	}
 	return billed, nil
+}
+
+// debit moves billed USD out of the workspace, idempotently when the context
+// names the charge and with a short retry on failure.
+//
+// The live path used to call ChargeWorkspaceWithFloor once and give up: with
+// no key there was no way to tell "the debit did not happen" from "it happened
+// and the ack was lost", so a retry could double-bill and therefore nothing
+// retried — every SQLITE_BUSY was a dropped charge. server.ChargeIdemKey
+// closes that gap: the key is minted per request (and per slot within it), the
+// v22 unique index makes a replay return the original row, and a retry is
+// safe. Callers without a key (the CLI, tests) still get the old single-shot
+// path, as does a movement over the idempotent ceiling.
+func (a *Adapter) debit(ctx context.Context, info server.SaaSTokenInfo, model string, billed float64, ref string, counts usage.Counts) (float64, error) {
+	meta := db.ChargeMeta{
+		TokenID:           info.TokenID,
+		Model:             model,
+		InputTokens:       counts.InputTokens,
+		OutputTokens:      counts.OutputTokens,
+		CacheReadTokens:   counts.CacheReadTokens,
+		CacheCreateTokens: counts.CacheCreateTokens,
+	}
+	key := server.ChargeIdemKey(ctx)
+	if key == "" || billed > db.MaxIdemAmountUSD {
+		_, charged, err := a.DB.ChargeWorkspaceWithFloor(ctx, info.WorkspaceID, info.UserID, db.TxKindCharge, billed, ref, "", a.MaxOverdraftUSD, meta)
+		return charged, err
+	}
+	req := db.IdemChargeReq{
+		IdempotencyKey:  key,
+		WorkspaceID:     info.WorkspaceID,
+		UserID:          info.UserID,
+		AmountUSD:       billed,
+		Ref:             ref,
+		MaxOverdraftUSD: a.MaxOverdraftUSD,
+		Meta:            meta,
+	}
+	var lastErr error
+	for attempt := 0; attempt <= len(chargeRetryBackoff); attempt++ {
+		if attempt > 0 {
+			// ctx is detached from the request (chargeCtx), so this is the
+			// backoff and nothing else can cut it short.
+			time.Sleep(chargeRetryBackoff[attempt-1])
+		}
+		res, err := a.DB.ChargeWorkspaceIdem(ctx, req)
+		if err == nil {
+			if res.Replayed {
+				log.Infof("saas: charge %s replayed after a lost ack — $%.6f already on the ledger", key, res.ChargedUSD)
+			}
+			return res.ChargedUSD, nil
+		}
+		lastErr = err
+		// Only the deterministic refusals are final: a workspace that does not
+		// exist, or a key already spent on a different movement. Everything
+		// else — busy, locked, an I/O error the pool is about to heal — is
+		// worth another go.
+		if errors.Is(err, db.ErrNotFound) || errors.Is(err, db.ErrIdemConflict) {
+			break
+		}
+		log.Warnf("saas: charge %s attempt %d/%d failed: %v", key, attempt+1, len(chargeRetryBackoff)+1, err)
+	}
+	return 0, lastErr
+}
+
+// noteChargeDrop records a charge that could not be written and, subject to
+// the cooldown, raises AlertDrop with the running count.
+func (a *Adapter) noteChargeDrop(err error, info server.SaaSTokenInfo, provider, model string, officialUSD float64) {
+	now := time.Now()
+	a.drops.mu.Lock()
+	a.drops.count++
+	a.drops.official += officialUSD
+	a.drops.lastErr = err.Error()
+	a.drops.lastAt = now
+	fire := a.AlertDrop != nil && now.Sub(a.drops.lastAlert) >= chargeDropAlertCooldown
+	count, official := a.drops.count, a.drops.official
+	if fire {
+		a.drops.lastAlert = now
+	}
+	a.drops.mu.Unlock()
+	if !fire {
+		return
+	}
+	detail := fmt.Sprintf("%d wallet charge(s) could not be written since process start (official value $%.2f). "+
+		"Latest: workspace %d user %d %s/%s official $%.6f — %v. "+
+		"Each is on the request log with 'billing dropped'; recover with `hypitoken reconcile-charges`.",
+		count, official, info.WorkspaceID, info.UserID, provider, model, officialUSD, err)
+	go a.AlertDrop(detail)
+}
+
+// ChargeDrops reports the dropped-charge tally since process start: how many,
+// their official value, and the most recent error and time. Zero count means
+// the wallet has accepted every debit it was asked for.
+func (a *Adapter) ChargeDrops() (count int64, officialUSD float64, lastErr string, lastAt time.Time) {
+	a.drops.mu.Lock()
+	defer a.drops.mu.Unlock()
+	return a.drops.count, a.drops.official, a.drops.lastErr, a.drops.lastAt
 }
 
 // totalTokens sums all billable token axes for one request (input + output +

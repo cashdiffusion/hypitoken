@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type User struct {
@@ -34,8 +36,21 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	var u User
 	var ev, dis int
 	var createdAt, updatedAt int64
-	if err := row.Scan(&u.ID, &u.Email, &u.PWHash, &u.Role, &u.BalanceUSD, &u.GroupID, &ev, &dis, &createdAt, &updatedAt, &u.PersonalWorkspaceID); err != nil {
+	var bal sql.NullFloat64
+	if err := row.Scan(&u.ID, &u.Email, &u.PWHash, &u.Role, &bal, &u.GroupID, &ev, &dis, &createdAt, &updatedAt, &u.PersonalWorkspaceID); err != nil {
 		return nil, err
+	}
+	if bal.Valid {
+		u.BalanceUSD = bal.Float64
+	} else {
+		// No personal workspace behind this user. The old COALESCE quietly
+		// served users.balance_usd here — a column frozen at the v13
+		// migration, by now $8k adrift across 302 users — which is a
+		// plausible-looking wrong number, the worst kind. $0 is at least
+		// honest (nothing can be spent that is not there) and the log line is
+		// the signal that a workspace pointer broke.
+		log.Errorf("saas: user %d (personal_workspace_id=%d) has no workspace row — balance unavailable, reporting $0",
+			u.ID, u.PersonalWorkspaceID)
 	}
 	u.EmailVerified = ev != 0
 	u.Disabled = dis != 0
@@ -46,9 +61,9 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 
 // userCols / userFrom load a user joined to their personal workspace so that
 // User.BalanceUSD reflects the live wallet (balance moved to workspaces in v13;
-// users.balance_usd is frozen). COALESCE falls back to the frozen column if the
-// personal workspace pointer isn't set yet (mid-migration / pre-create).
-const userCols = `u.id, u.email, u.pw_hash, u.role, COALESCE(w.balance_usd, u.balance_usd), u.group_id, u.email_verified, u.disabled, u.created_at, u.updated_at, u.personal_workspace_id`
+// users.balance_usd is frozen and deliberately NOT read here — see scanUser
+// for why a missing workspace reports $0 rather than the frozen value).
+const userCols = `u.id, u.email, u.pw_hash, u.role, w.balance_usd, u.group_id, u.email_verified, u.disabled, u.created_at, u.updated_at, u.personal_workspace_id`
 
 const userFrom = ` FROM users u LEFT JOIN workspaces w ON w.id = u.personal_workspace_id`
 

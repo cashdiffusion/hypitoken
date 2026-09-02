@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -36,10 +38,22 @@ import (
 //
 // Recovery therefore needs no guesswork and no estimate: re-derive each row's
 // price through the same Lookup + MultiplierFor the live path uses, and settle
-// the total. The one thing it must not do is bill twice, hence the idempotency
-// key — reconciling the same window again is a no-op, so the command is safe to
-// re-run after a partial failure, and safe to run when you are not sure whether
-// someone already ran it.
+// it. The one thing it must not do is bill twice, hence the idempotency key:
+// one per dropped ROW, derived from the row itself, so any window that covers
+// a row a second time is a no-op for that row. The command is safe to re-run
+// after a partial failure, safe to run when you are not sure whether someone
+// already ran it, and safe to run over a window that overlaps an earlier one.
+//
+// That last property is new. The key used to name the (window, token, provider)
+// group, which made the guarantee conditional on typing the same --from/--to
+// byte for byte: two overlapping windows minted two keys for the rows they
+// shared and billed them twice. Nothing in the command's own help said so.
+//
+// The index has no dropped rows before reconcileFloor. Until 2026-08-09 the
+// proxy wrote billed_usd into cost_usd, and the rows now in the index for that
+// period were backfilled from the wallet ledger, every one of them a charge
+// that succeeded. A window reaching back further finds nothing to repair and
+// says so, rather than implying the period was clean.
 func runReconcileChargesCmd(args []string) {
 	fs := flag.NewFlagSet("reconcile-charges", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "path to config file")
@@ -94,12 +108,43 @@ func runReconcileChargesCmd(args []string) {
 	}
 }
 
-// dropped is one (token, provider) pair's worth of unbilled traffic.
+// reconcileFloor is the first instant the request index carries rows from
+// which a dropped charge can be told apart from a settled one (commit d73215e
+// split cost_usd from billed_usd; before it the two were the same number, and
+// the index for the earlier period is a ledger backfill — successful charges
+// only). Windows are clamped to it.
+var reconcileFloor = time.Date(2026, time.August, 9, 12, 13, 10, 0, time.UTC) // 20:13:10 HKT
+
+// droppedRow is one request whose charge was not written.
+type droppedRow struct {
+	TS          int64 // UnixNano, as stored
+	ClientToken string
+	Provider    string
+	Model       string
+	CostUSD     float64 // official upstream cost, pre-multiplier
+	Input       int64
+	Output      int64
+	CacheRead   int64
+	CacheCreate int64
+}
+
+// idemKey names this row's settlement. Content-derived, so it is the same key
+// from any window that covers the row, and stable across an index rebuild
+// (req.id is not: it is assigned on ingest).
+func (r droppedRow) idemKey() string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%d|%s|%s|%s|%.8f|%d|%d|%d|%d",
+		r.TS, r.ClientToken, r.Provider, r.Model, r.CostUSD, r.Input, r.Output, r.CacheRead, r.CacheCreate)))
+	return "reconcile:row:" + hex.EncodeToString(h[:16])
+}
+
+// dropped is one (token, provider) pair's worth of unbilled traffic — the unit
+// the report is read in. Settlement happens per row.
 type dropped struct {
 	ClientToken string
 	Provider    string
+	Rows        []droppedRow
 	Requests    int64
-	CostUSD     float64 // official upstream cost, pre-multiplier
+	CostUSD     float64
 	Input       int64
 	Output      int64
 	CacheRead   int64
@@ -117,21 +162,32 @@ type settlement struct {
 	// Unresolved records why a group could not be priced (deleted token,
 	// deleted workspace). Such rows are reported and skipped, never guessed at.
 	Unresolved string
-	// SettledUSD is non-zero when this group's idempotency key is already in
-	// the ledger — an earlier run repaired it, and this one will not move money.
-	SettledUSD float64
+	// SettledUSD / SettledRows is what an earlier run already put on the
+	// ledger for this group's rows; this run will not move it again.
+	SettledUSD  float64
+	SettledRows int
 }
 
 func reconcileCharges(logDir, saasPath string, maxOverdraftUSD float64, from, to time.Time, apply bool) error {
-	groups, err := readDroppedCharges(logDir, from, to)
+	if from.Before(reconcileFloor) {
+		fmt.Printf("note: the request index cannot show dropped charges before %s; window start moved up from %s\n",
+			reconcileFloor.Format(time.RFC3339), from.Format(time.RFC3339))
+		from = reconcileFloor
+		if !to.After(from) {
+			fmt.Println("nothing to do: the whole window predates the index's first live row")
+			return nil
+		}
+	}
+	rows, err := readDroppedCharges(logDir, from, to)
 	if err != nil {
 		return err
 	}
-	if len(groups) == 0 {
+	if len(rows) == 0 {
 		fmt.Printf("no dropped charges found between %s and %s\n",
 			from.Format(time.RFC3339), to.Format(time.RFC3339))
 		return nil
 	}
+	groups := groupDropped(rows)
 
 	// A dry run reports; it has no reason to hold a writable handle on a
 	// database the server is using. See OpenReadOnly — attaching read-write to
@@ -184,10 +240,13 @@ func reconcileCharges(logDir, saasPath string, maxOverdraftUSD float64, from, to
 	// Nothing in the request log records that a dropped charge was later
 	// recovered, so ask the ledger before reporting: an already-repaired window
 	// must not look like a fresh outage.
-	keys := make([]string, 0, len(settlements))
+	var keys []string
 	for _, s := range settlements {
-		if s.Unresolved == "" {
-			keys = append(keys, idemKeyFor(from, to, s.TokenID, s.Provider))
+		if s.Unresolved != "" {
+			continue
+		}
+		for _, r := range s.Rows {
+			keys = append(keys, r.idemKey())
 		}
 	}
 	settled, err := sdb.SettledIdemKeys(ctx, keys)
@@ -198,8 +257,11 @@ func reconcileCharges(logDir, saasPath string, maxOverdraftUSD float64, from, to
 		if settlements[i].Unresolved != "" {
 			continue
 		}
-		if amt, ok := settled[idemKeyFor(from, to, settlements[i].TokenID, settlements[i].Provider)]; ok {
-			settlements[i].SettledUSD = amt
+		for _, r := range settlements[i].Rows {
+			if amt, ok := settled[r.idemKey()]; ok {
+				settlements[i].SettledUSD += amt
+				settlements[i].SettledRows++
+			}
 		}
 	}
 
@@ -210,16 +272,31 @@ func reconcileCharges(logDir, saasPath string, maxOverdraftUSD float64, from, to
 		fmt.Println("\ndry run — nothing was written. Re-run with --apply to settle.")
 		return nil
 	}
-	return applySettlements(ctx, sdb, settlements, from, to, maxOverdraftUSD)
+	return applySettlements(ctx, sdb, settlements, maxOverdraftUSD)
 }
 
-// idemKeyFor names one settlement. One key per (window, token, provider), so
-// re-running a window is a no-op rather than a second debit. Defined once
-// because the report and the apply path must agree on it exactly: if they
-// drifted, the report would say "unsettled" about rows apply would then refuse
-// to settle, or worse, the other way round.
-func idemKeyFor(from, to time.Time, tokenID int64, provider string) string {
-	return fmt.Sprintf("reconcile:%d-%d:tok%d:%s", from.Unix(), to.Unix(), tokenID, provider)
+// groupDropped folds rows into (token, provider) groups, in first-seen order.
+func groupDropped(rows []droppedRow) []dropped {
+	idx := make(map[string]int)
+	var out []dropped
+	for _, r := range rows {
+		k := r.ClientToken + "\x00" + r.Provider
+		i, ok := idx[k]
+		if !ok {
+			i = len(out)
+			idx[k] = i
+			out = append(out, dropped{ClientToken: r.ClientToken, Provider: r.Provider})
+		}
+		g := &out[i]
+		g.Rows = append(g.Rows, r)
+		g.Requests++
+		g.CostUSD += r.CostUSD
+		g.Input += r.Input
+		g.Output += r.Output
+		g.CacheRead += r.CacheRead
+		g.CacheCreate += r.CacheCreate
+	}
+	return out
 }
 
 // buildUnmasker returns a function mapping a masked client_token back to its
@@ -256,14 +333,22 @@ func buildUnmasker(ctx context.Context, sdb *saasdb.DB) (func(masked string) (se
 	}, nil
 }
 
-// readDroppedCharges pulls the unbilled rows out of the request index.
+// readDroppedCharges pulls the unbilled rows out of the request index, one per
+// request, in log order.
 //
-// Read-only and query_only: the server normally has this database open, and
-// the whole point of the 2026-08-22 incident is what happens when a second
-// process disturbs a live SQLite file. mode=ro cannot create or checkpoint the
-// WAL, and query_only refuses writes at the statement level, so this cannot be
-// the thing that takes production down again.
-func readDroppedCharges(logDir string, from, to time.Time) ([]dropped, error) {
+// The index is opened strictly read-only: the whole point of the 2026-08-22
+// incident is what happens when a second process disturbs a live SQLite file.
+// mode=ro cannot create or checkpoint the WAL, and query_only refuses writes at
+// the statement level, so this cannot be the thing that takes production down
+// again.
+//
+// cache_create is read alone. It used to be summed with cache_create_1h, but
+// cc-core defines CacheCreate1hTokens as the SUBSET of CacheCreateTokens
+// written at the 1h TTL (usage.Counts), so adding the two counted every 1h
+// write twice on the ledger row. Money was never affected — the amount comes
+// from cost_usd, not from the token columns — but the ledger's token meta
+// would have disagreed with the request log for any row carrying a 1h write.
+func readDroppedCharges(logDir string, from, to time.Time) ([]droppedRow, error) {
 	path := logDir + "/requests.db"
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("request index %s: %w", path, err)
@@ -276,29 +361,29 @@ func readDroppedCharges(logDir string, from, to time.Time) ([]dropped, error) {
 
 	// req.ts is UnixNano, not Unix seconds.
 	rows, err := rdb.Query(`
-		SELECT client_token, provider, COUNT(*), SUM(cost_usd),
-		       SUM(input), SUM(output), SUM(cache_read), SUM(cache_create) + SUM(cache_create_1h)
+		SELECT ts, client_token, provider, model, cost_usd,
+		       input, output, cache_read, cache_create
 		FROM req
 		WHERE ts >= ? AND ts < ?
 		  AND attempt_only = 0
 		  AND cost_usd > 0
 		  AND user_id = 0
 		  AND client_token <> ''
-		GROUP BY client_token, provider`,
+		ORDER BY ts, id`,
 		from.UnixNano(), to.UnixNano())
 	if err != nil {
 		return nil, fmt.Errorf("query request index: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var out []dropped
+	var out []droppedRow
 	for rows.Next() {
-		var d dropped
-		if err := rows.Scan(&d.ClientToken, &d.Provider, &d.Requests, &d.CostUSD,
-			&d.Input, &d.Output, &d.CacheRead, &d.CacheCreate); err != nil {
+		var r droppedRow
+		if err := rows.Scan(&r.TS, &r.ClientToken, &r.Provider, &r.Model, &r.CostUSD,
+			&r.Input, &r.Output, &r.CacheRead, &r.CacheCreate); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
-		out = append(out, d)
+		out = append(out, r)
 	}
 	return out, rows.Err()
 }
@@ -310,12 +395,12 @@ func printSettlementReport(ss []settlement, from, to time.Time, apply bool) {
 	}
 	fmt.Printf("%s — dropped charges between %s and %s\n\n", mode,
 		from.Format(time.RFC3339), to.Format(time.RFC3339))
-	fmt.Printf("%-14s %-10s %8s %12s %6s %12s  %s\n",
-		"TOKEN", "PROVIDER", "REQS", "COST_USD", "MULT", "OWED_USD", "WORKSPACE")
+	fmt.Printf("%-14s %-10s %8s %12s %6s %12s %12s  %s\n",
+		"TOKEN", "PROVIDER", "REQS", "COST_USD", "MULT", "OWED_USD", "SETTLED", "WORKSPACE")
 
-	var totalCost, totalOwed float64
+	var totalCost, totalOwed, totalSettled float64
 	var totalReqs int64
-	var unresolved, alreadySettled int
+	var unresolved, partlySettled int
 	for _, s := range ss {
 		tok := s.ClientToken
 		if len(tok) > 13 {
@@ -326,27 +411,28 @@ func printSettlementReport(ss []settlement, from, to time.Time, apply bool) {
 		case s.Unresolved != "":
 			ws = "SKIPPED: " + s.Unresolved
 			unresolved++
-		case s.SettledUSD > 0:
-			ws += fmt.Sprintf("  [already settled $%.6f]", s.SettledUSD)
-			alreadySettled++
+		case s.SettledRows > 0:
+			ws += fmt.Sprintf("  [%d/%d row(s) already settled]", s.SettledRows, len(s.Rows))
+			partlySettled++
 		}
-		fmt.Printf("%-14s %-10s %8d %12.6f %6.3f %12.6f  %s\n",
-			tok, s.Provider, s.Requests, s.CostUSD, s.Multiplier, s.OwedUSD, ws)
+		fmt.Printf("%-14s %-10s %8d %12.6f %6.3f %12.6f %12.6f  %s\n",
+			tok, s.Provider, s.Requests, s.CostUSD, s.Multiplier, s.OwedUSD, s.SettledUSD, ws)
 		totalCost += s.CostUSD
 		totalOwed += s.OwedUSD
+		totalSettled += s.SettledUSD
 		totalReqs += s.Requests
 	}
-	fmt.Printf("\n%-14s %-10s %8d %12.6f %6s %12.6f\n", "TOTAL", "", totalReqs, totalCost, "", totalOwed)
+	fmt.Printf("\n%-14s %-10s %8d %12.6f %6s %12.6f %12.6f\n", "TOTAL", "", totalReqs, totalCost, "", totalOwed, totalSettled)
 	if unresolved > 0 {
 		fmt.Printf("%d group(s) skipped because the token could not be resolved.\n", unresolved)
 	}
-	if alreadySettled > 0 {
-		fmt.Printf("%d group(s) were already settled by an earlier run; re-running moves no money.\n", alreadySettled)
+	if partlySettled > 0 {
+		fmt.Printf("%d group(s) have rows an earlier run already settled; re-running moves no money for those rows.\n", partlySettled)
 	}
 }
 
-func applySettlements(ctx context.Context, sdb *saasdb.DB, ss []settlement, from, to time.Time, maxOverdraftUSD float64) error {
-	var settled, replayed, skipped int
+func applySettlements(ctx context.Context, sdb *saasdb.DB, ss []settlement, maxOverdraftUSD float64) error {
+	var settled, replayed, clamped, skipped int
 	var settledUSD float64
 	fmt.Println()
 	for _, s := range ss {
@@ -354,55 +440,73 @@ func applySettlements(ctx context.Context, sdb *saasdb.DB, ss []settlement, from
 			skipped++
 			continue
 		}
-		key := idemKeyFor(from, to, s.TokenID, s.Provider)
-		res, err := sdb.ChargeWorkspaceIdem(ctx, saasdb.IdemChargeReq{
-			IdempotencyKey: key,
-			Product:        "reconcile",
-			WorkspaceID:    s.WorkspaceID,
-			UserID:         s.UserID,
-			AmountUSD:      s.OwedUSD,
-			Ref:            fmt.Sprintf("token=%d model=%s-reconcile", s.TokenID, s.Provider),
-			Note: fmt.Sprintf("backfilled %d request(s) whose charge was dropped between %s and %s (official $%.6f x %.3f)",
-				s.Requests, from.Format(time.RFC3339), to.Format(time.RFC3339), s.CostUSD, s.Multiplier),
-			MaxOverdraftUSD: maxOverdraftUSD,
-			Meta: saasdb.ChargeMeta{
-				TokenID:           s.TokenID,
-				Model:             s.Provider + "-reconcile",
-				InputTokens:       s.Input,
-				OutputTokens:      s.Output,
-				CacheReadTokens:   s.CacheRead,
-				CacheCreateTokens: s.CacheCreate,
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("settle %s: %w", key, err)
+		var groupUSD float64
+		var groupSettled, groupReplayed, groupClamped int
+		var lastBal float64
+		for _, r := range s.Rows {
+			owed := r.CostUSD * s.Multiplier
+			if owed <= 0 {
+				continue
+			}
+			at := time.Unix(0, r.TS).UTC()
+			res, err := sdb.ChargeWorkspaceIdem(ctx, saasdb.IdemChargeReq{
+				IdempotencyKey: r.idemKey(),
+				Product:        "reconcile",
+				WorkspaceID:    s.WorkspaceID,
+				UserID:         s.UserID,
+				AmountUSD:      owed,
+				Ref:            fmt.Sprintf("token=%d model=%s", s.TokenID, r.Model),
+				Note: fmt.Sprintf("backfilled: charge for the %s request at %s was dropped (official $%.6f x %.3f)",
+					r.Provider, at.Format(time.RFC3339), r.CostUSD, s.Multiplier),
+				MaxOverdraftUSD: maxOverdraftUSD,
+				Meta: saasdb.ChargeMeta{
+					TokenID:           s.TokenID,
+					Model:             r.Model,
+					InputTokens:       r.Input,
+					OutputTokens:      r.Output,
+					CacheReadTokens:   r.CacheRead,
+					CacheCreateTokens: r.CacheCreate,
+				},
+			})
+			if err != nil {
+				return fmt.Errorf("settle %s: %w", r.idemKey(), err)
+			}
+			lastBal = res.NewBalanceUSD
+			switch {
+			case res.TxID == 0:
+				// Clamped to nothing by the overdraft floor: the wallet is
+				// already at its limit, the key stays unclaimed, and a later
+				// run can still collect it if the customer tops up.
+				groupClamped++
+			case res.Replayed:
+				groupReplayed++
+			default:
+				groupSettled++
+				groupUSD += res.ChargedUSD
+			}
 		}
-		if res.TxID == 0 {
-			// Clamped to nothing by the overdraft floor: the wallet is already
-			// at its limit, the key stays unclaimed, and a later run can still
-			// collect it if the customer tops up.
-			fmt.Printf("  ws%-4d %-10s clamped to $0 by the overdraft floor (owed $%.6f)\n",
-				s.WorkspaceID, s.Provider, s.OwedUSD)
-			skipped++
-			continue
+		fmt.Printf("  ws%-4d %-10s settled %d row(s) $%.6f", s.WorkspaceID, s.Provider, groupSettled, groupUSD)
+		if groupReplayed > 0 {
+			fmt.Printf("; %d already settled", groupReplayed)
 		}
-		verb := "settled"
-		if res.ChargedUSD == 0 {
-			verb = "already settled"
-			replayed++
-		} else {
-			settled++
-			settledUSD += res.ChargedUSD
+		if groupClamped > 0 {
+			fmt.Printf("; %d clamped to $0 by the overdraft floor", groupClamped)
 		}
-		fmt.Printf("  ws%-4d %-10s %s $%.6f (balance now $%.4f)\n",
-			s.WorkspaceID, s.Provider, verb, res.ChargedUSD, res.NewBalanceUSD)
+		fmt.Printf(" (balance now $%.4f)\n", lastBal)
+		settled += groupSettled
+		replayed += groupReplayed
+		clamped += groupClamped
+		settledUSD += groupUSD
 	}
-	fmt.Printf("\nsettled %d group(s) totalling $%.6f", settled, settledUSD)
+	fmt.Printf("\nsettled %d row(s) totalling $%.6f", settled, settledUSD)
 	if replayed > 0 {
 		fmt.Printf("; %d already settled by an earlier run", replayed)
 	}
+	if clamped > 0 {
+		fmt.Printf("; %d clamped", clamped)
+	}
 	if skipped > 0 {
-		fmt.Printf("; %d skipped", skipped)
+		fmt.Printf("; %d group(s) skipped", skipped)
 	}
 	fmt.Println()
 	return nil

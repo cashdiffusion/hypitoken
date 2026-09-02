@@ -484,7 +484,7 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 				// Responses reports usage as input_tokens/output_tokens, not
 				// the Chat Completions prompt_/completion_ pair, so this needs
 				// the Codex extractor rather than extractOpenAIUsageFromJSON.
-				counts.Add(extractCodexBackendUsageFromJSON(payload))
+				mergeCodexUsage(&counts, extractCodexBackendUsageFromJSON(payload))
 			}
 			if usage.MissingUsage(counts) {
 				_ = resp.Body.Close()
@@ -538,7 +538,7 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 			}
 			writeResponseHeaders(c, resp)
 			_, _ = c.Writer.Write(respBody)
-			counts.Add(parsed)
+			mergeCodexUsage(&counts, parsed)
 		}
 	}
 	_ = resp.Body.Close()
@@ -560,6 +560,7 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
+	var billingErr string
 	if resp.StatusCode < 400 {
 		s.usage.Record(a.ID, a.Label, counts)
 		// outcome.Billable gates on OBSERVED usage — never on an estimate. A
@@ -575,6 +576,11 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 				billed, err := s.saas.Charge(chargeCtx(c), info, auth.ProviderOpenAI, model, counts, costUSD)
 				if err != nil {
 					log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
+					// Nobody was debited, so the row must not carry the
+					// official price as revenue; the marker is what makes the
+					// drop findable.
+					billedUSD = 0
+					billingErr = billingDropped(err)
 				} else {
 					billedUSD = billed
 					userID = info.UserID
@@ -620,7 +626,7 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		Stream:      stream,
 		Path:        path,
 		Attempts:    attempts,
-		Error:       errField,
+		Error:       joinLogError(errField, billingErr),
 	})
 	return false, true
 }
@@ -831,7 +837,7 @@ func streamSSEOpenAI(c *gin.Context, reader *bufio.Reader, counts *usage.Counts,
 				terminal = true
 			case len(payload) > 0 && payload[0] == '{':
 				// Accounting first, on the untouched payload.
-				counts.Add(extractOpenAIUsageFromJSON(payload))
+				mergeCodexUsage(counts, extractOpenAIUsageFromJSON(payload))
 				if codexTerminalEvent(payload) {
 					terminal = true
 				}
@@ -939,6 +945,46 @@ type openaiUsage struct {
 	OutputTokensDetails struct {
 		ReasoningTokens int64 `json:"reasoning_tokens"`
 	} `json:"output_tokens_details"`
+}
+
+// mergeCodexUsage overlays one usage report onto dst with overwrite-if-positive
+// semantics — the contract mergeSSEUsage already gives the Anthropic stream,
+// and one the Codex paths used to lack.
+//
+// They summed instead (counts.Add on every frame that carried a usage object).
+// That is only correct while the upstream reports usage exactly once per
+// response, which today it does: on response.completed for /v1/responses, on
+// the final chunk for chat/completions. Nothing guaranteed it. The moment an
+// intermediate event carries a usage snapshot — a running total, which is what
+// every other cumulative stream format does — Add bills the prompt twice, and
+// no assertion anywhere would notice. Each OpenAI usage object is the total for
+// its response, so the last one seen is the answer; taking it, rather than the
+// sum, is what makes the second copy harmless.
+//
+// Requests latches: it marks "usage was observed", and a later event that omits
+// a field must not clear it or add to it.
+func mergeCodexUsage(dst *usage.Counts, u usage.Counts) {
+	if dst == nil {
+		return
+	}
+	if u.InputTokens > 0 {
+		dst.InputTokens = u.InputTokens
+	}
+	if u.OutputTokens > 0 {
+		dst.OutputTokens = u.OutputTokens
+	}
+	if u.CacheReadTokens > 0 {
+		dst.CacheReadTokens = u.CacheReadTokens
+	}
+	if u.CacheCreateTokens > 0 {
+		dst.CacheCreateTokens = u.CacheCreateTokens
+	}
+	if u.CacheCreate1hTokens > 0 {
+		dst.CacheCreate1hTokens = u.CacheCreate1hTokens
+	}
+	if u.Requests > 0 && dst.Requests == 0 {
+		dst.Requests = 1
+	}
 }
 
 func (u openaiUsage) toCounts() usage.Counts {

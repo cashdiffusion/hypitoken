@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -56,6 +57,9 @@ const (
 type codexWSTurnBill struct {
 	turn usage.Counts
 	dur  time.Duration
+	// seq numbers the turn within its session; it names the charge slot
+	// ("turn:<seq>") so a retried settlement replays its own row and no other.
+	seq int
 }
 
 var codexWSUpgrader = gorillaws.Upgrader{
@@ -329,15 +333,17 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	go func() {
 		defer billWG.Done()
 		for tb := range billCh {
-			s.billCodexWSTurn(c, a, model, clientToken, clientName, tb.turn, tb.dur)
+			s.billCodexWSTurn(c, a, model, clientToken, clientName, tb.turn, tb.dur, tb.seq)
 		}
 	}()
+	turnSeq := 0 // only the pump goroutine calls billTurn, so no lock
 	billTurn := func(turn usage.Counts, dur time.Duration) {
-		tb := codexWSTurnBill{turn: turn, dur: dur}
+		turnSeq++
+		tb := codexWSTurnBill{turn: turn, dur: dur, seq: turnSeq}
 		select {
 		case billCh <- tb:
 		default:
-			s.billCodexWSTurn(c, a, model, clientToken, clientName, tb.turn, tb.dur)
+			s.billCodexWSTurn(c, a, model, clientToken, clientName, tb.turn, tb.dur, tb.seq)
 		}
 	}
 	s.pumpCodexWS(c.Request.Context(), clientConn, up, a, clientGroup, ident, &counts, billTurn)
@@ -383,7 +389,21 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 		// terminal event bills only its own turn's delta. turnStart bounds the
 		// per-turn duration reported to the request log.
 		var billed usage.Counts
+		// turn is the current turn's usage, overlaid overwrite-if-positive
+		// (mergeCodexUsage) from whichever events carry it; counts, the
+		// session total, only ever grows by whole turns. Summing every usage
+		// object straight into counts — the old shape — was right only while
+		// upstream reported usage once per turn, and nothing enforced that.
+		var turn usage.Counts
 		turnStart := time.Now()
+		defer func() {
+			// A turn cut off before its terminal event is not billed (no
+			// terminal, no settlement), but any usage it did report still
+			// belongs to the session total the close-time ledger fold reads.
+			if turn.Requests > 0 {
+				counts.Add(turn)
+			}
+		}()
 		for {
 			_ = up.SetReadDeadline(time.Now().Add(codexWSReadDeadline))
 			mt, data, err := up.ReadMessage()
@@ -398,14 +418,20 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 				if rid := codexResponseID(data); rid != "" {
 					s.codexRespAccount.Bind(group, rid, a.ID)
 				}
-				counts.Add(extractCodexBackendUsageFromJSON(data))
+				mergeCodexUsage(&turn, extractCodexBackendUsageFromJSON(data))
 				var shed, capacity bool
 				if out, shed, capacity = codexerr.ClientFrame(data); shed {
 					log.Warnf("codex ws: %s shed a turn (capacity=%t): %s",
 						a.ID, capacity, truncate(data, 200))
 				}
 				if codexTerminalEvent(data) {
-					counts.Requests++
+					// One request per turn, whether or not usage was observed
+					// (a shed turn still ends). The delta below carries its
+					// own Requests=1, so the session total and the per-turn
+					// bill agree on what a turn is.
+					turn.Requests = 1
+					counts.Add(turn)
+					turn = usage.Counts{}
 					if onTurn != nil {
 						onTurn(codexTurnDelta(*counts, billed), time.Since(turnStart))
 						billed = *counts
@@ -511,19 +537,24 @@ func codexTurnDelta(cur, billed usage.Counts) usage.Counts {
 // whole session when the socket closes, so per-turn settlement never
 // double-counts it. One request-log row is emitted per turn, so the admin panel
 // shows each turn's real cost as it happens rather than one hour-long row.
-func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToken, clientName string, turn usage.Counts, dur time.Duration) {
+func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToken, clientName string, turn usage.Counts, dur time.Duration, seq int) {
 	// CostUSD = official upstream price, BilledUSD = wallet debit.
 	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
+	var billingErr string
 	if turn.Requests > 0 && clientToken != "" {
 		official := s.pricing.Cost(auth.ProviderOpenAI, model, turn)
 		costUSD = official
 		billedUSD = official
 		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
-			billed, err := s.saas.Charge(chargeCtx(c), info, auth.ProviderOpenAI, model, turn, official)
+			billed, err := s.saas.Charge(chargeCtxSlot(c, fmt.Sprintf("turn:%d", seq)), info, auth.ProviderOpenAI, model, turn, official)
 			if err != nil {
-				log.Warnf("saas: ws charge failed for token user=%d: %v", info.UserID, err)
+				log.Warnf("saas: ws charge failed for token=%d user=%d turn=%d: %v", info.TokenID, info.UserID, seq, err)
+				// Nobody was debited, so the row must not carry the official
+				// price as revenue; the marker is what makes the drop findable.
+				billedUSD = 0
+				billingErr = billingDropped(err)
 			} else {
 				billedUSD = billed
 				userID = info.UserID
@@ -543,6 +574,10 @@ func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToke
 		Input:       turn.InputTokens,
 		Output:      turn.OutputTokens,
 		CacheRead:   turn.CacheReadTokens,
+		// CacheCreate was missing from this row while Cost and Charge above
+		// both counted it — the ledger and the log would have disagreed the
+		// day upstream first reported a cache write on a WS turn.
+		CacheCreate: turn.CacheCreateTokens,
 		CostUSD:     costUSD,
 		BilledUSD:   billedUSD,
 		UserID:      userID,
@@ -551,6 +586,7 @@ func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToke
 		DurationMs:  dur.Milliseconds(),
 		Stream:      true,
 		Path:        "/v1/responses",
+		Error:       billingErr,
 	})
 }
 

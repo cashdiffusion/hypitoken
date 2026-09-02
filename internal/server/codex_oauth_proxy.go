@@ -245,7 +245,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			})
 			return false, true
 		}
-		counts.Add(extractCodexBackendUsageFromJSON(payload))
+		mergeCodexUsage(&counts, extractCodexBackendUsageFromJSON(payload))
 		// Allowlist, not a hop-by-hop denylist. Forwarding everything else
 		// handed the caller our pool's operational state: the x-codex-*
 		// rate-limit headers (the serving account's window utilisation and
@@ -434,6 +434,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
+	var billingErr string
 	if resp.StatusCode < 400 && counts.Requests > 0 && clientToken != "" {
 		official := s.pricing.Cost(auth.ProviderOpenAI, model, counts)
 		costUSD = official
@@ -444,6 +445,10 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 			billed, err := s.saas.Charge(chargeCtx(c), info, auth.ProviderOpenAI, model, counts, official)
 			if err != nil {
 				log.Warnf("saas: charge failed for token=%d user=%d: %v", info.TokenID, info.UserID, err)
+				// Nobody was debited, so the row must not carry the official
+				// price as revenue; the marker is what makes the drop findable.
+				billedUSD = 0
+				billingErr = billingDropped(err)
 			} else {
 				billedUSD = billed
 				userID = info.UserID
@@ -472,7 +477,7 @@ func (s *Server) doForwardCodexOAuth(c *gin.Context, a *auth.Auth, path string, 
 		Stream:      stream,
 		Path:        path,
 		Attempts:    attempts,
-		Error:       streamErr,
+		Error:       joinLogError(streamErr, billingErr),
 	})
 	if resp.StatusCode < 400 {
 		a.MarkSuccess()
@@ -531,7 +536,7 @@ func aggregateCodexResponseStream(r io.Reader, counts *usage.Counts) (out []byte
 							if len(ev.Response) == 0 {
 								return nil, "", errors.New("response.completed missing response field")
 							}
-							counts.Add(extractCodexBackendUsageFromJSON(payload))
+							mergeCodexUsage(counts, extractCodexBackendUsageFromJSON(payload))
 							payload, perr := patchResponseOutput(ev.Response, byIndex, fallback)
 							return payload, "", perr
 						}
@@ -712,7 +717,7 @@ func streamSSECodexBackend(c *gin.Context, resp *http.Response, counts *usage.Co
 				case bytes.HasPrefix(trim, []byte("data:")):
 					payload := bytes.TrimSpace(trim[5:])
 					if len(payload) > 0 && payload[0] == '{' {
-						counts.Add(extractCodexBackendUsageFromJSON(payload))
+						mergeCodexUsage(counts, extractCodexBackendUsageFromJSON(payload))
 
 						if codexerr.Classify(payload) == codexerr.ClassRetryable {
 							if !sentAny {

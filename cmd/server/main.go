@@ -438,6 +438,14 @@ func main() {
 		if cfg.SaaS.MaxOverdraftUSD != nil {
 			adapter.MaxOverdraftUSD = *cfg.SaaS.MaxOverdraftUSD
 		}
+		// A wallet refusing debits is the same condition the integrity checker
+		// pages on — the database is not taking writes — so it goes to the same
+		// inbox through the same template rather than a second alert channel.
+		if alert := integrityAlerter(mailer, cfg.SaaS.SiteName, cfg.SaaS.AdminEmail); alert != nil {
+			adapter.AlertDrop = func(detail string) {
+				alert(saasdb.IntegrityAlert{Source: "billing", Detail: detail, At: time.Now()})
+			}
+		}
 		adapter.Arena = arenaSvc
 		// Deferred inviter payout (reward_on=first_spend). Left nil while the
 		// programme is suspended, otherwise conversions recorded before the
