@@ -3,12 +3,27 @@ import { useTranslation } from "react-i18next";
 import type { Credential } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-/* The five (plus one fallback) states a credential can be in, evaluated in
+/* The six (plus one fallback) states a credential can be in, evaluated in
  * strict precedence. `paused` deliberately exists as its own state: a channel
  * that tripped the circuit breaker after repeated upstream errors otherwise
  * looks identical to an idle healthy one — which is exactly how a silently
- * dead relay goes unnoticed. */
-export type CredStatusKey = "disabled" | "quota" | "paused" | "hardFail" | "healthy" | "cooldown";
+ * dead relay goes unnoticed.
+ *
+ * `throttled` exists for the opposite reason. Upstream throttling and a filled
+ * quota window share one field on the credential (the pool parks both by
+ * setting a cooldown), so a 30-second "rate limit exceeded" used to render
+ * exactly like an account that had burned its weekly allowance. Operators read
+ * that as an outage and started clearing quotas by hand on credentials that
+ * were 11% used and would have recovered on their own. quota_usage_limit is
+ * what tells the two apart. */
+export type CredStatusKey =
+  | "disabled"
+  | "quota"
+  | "throttled"
+  | "paused"
+  | "hardFail"
+  | "healthy"
+  | "cooldown";
 
 export interface CredStatus {
   key: CredStatusKey;
@@ -33,6 +48,15 @@ const STATES: Record<CredStatusKey, Omit<CredStatus, "key">> = {
     labelKey: "admin.creds.status.quota",
     tone: "text-warning",
     dot: "bg-warning",
+    live: false,
+  },
+  throttled: {
+    labelKey: "admin.creds.status.throttled",
+    // Muted, not warning: this state clears itself in seconds and needs no
+    // operator. Giving it the same amber as a filled quota is what made a
+    // routine throttle look like an incident.
+    tone: "text-muted-foreground",
+    dot: "bg-muted-foreground",
     live: false,
   },
   paused: {
@@ -68,7 +92,9 @@ export function credStatus(c: Credential): CredStatus {
   const key: CredStatusKey = c.disabled
     ? "disabled"
     : c.quota_exceeded
-      ? "quota"
+      ? c.quota_usage_limit
+        ? "quota"
+        : "throttled"
       : c.quarantined_until
         ? "paused"
         : c.hard_failure

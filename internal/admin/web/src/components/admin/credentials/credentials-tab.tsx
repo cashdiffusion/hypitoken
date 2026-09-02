@@ -44,7 +44,15 @@ const PAGE = 12;
 // each response re-rendered the whole card grid. Nothing on this page is
 // time-critical — a cleared cooldown showing 30s late is fine.
 const POLL_MS = 30_000;
-const HEALTH_FILTERS = ["all", "healthy", "quota", "paused", "hardFail", "disabled"] as const;
+const HEALTH_FILTERS = [
+  "all",
+  "healthy",
+  "quota",
+  "throttled",
+  "paused",
+  "hardFail",
+  "disabled",
+] as const;
 type HealthFilter = (typeof HEALTH_FILTERS)[number];
 const SORTS = ["default", "recent", "usage24h", "cost", "name"] as const;
 type Sort = (typeof SORTS)[number];
@@ -213,7 +221,7 @@ export function CredentialsTab() {
     for (const c of scoped) {
       const k = credStatus(c).key;
       if (k === "healthy") healthy++;
-      else if (k === "quota" || k === "paused" || k === "cooldown") cooling++;
+      else if (k === "quota" || k === "throttled" || k === "paused" || k === "cooldown") cooling++;
       else if (k === "hardFail") failed++;
       active += c.active_clients;
       capacity += c.max_concurrent;

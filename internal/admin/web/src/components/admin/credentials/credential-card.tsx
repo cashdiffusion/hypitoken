@@ -8,6 +8,7 @@ import {
   Power,
   RefreshCw,
   ShieldOff,
+  Timer,
   Trash2,
 } from "lucide-react";
 import { memo, type ReactNode } from "react";
@@ -24,6 +25,15 @@ export type CardAction = "refresh" | "clear-quota" | "clear-failure" | "toggle";
 /* AlertBand — a full-bleed tinted strip between the card header and body.
  * Carries *why* a credential is degraded plus its recovery time, so an
  * operator never has to open anything to know whether to act. */
+/* secondsUntil — whole seconds from now to an ISO stamp, floored at 0.
+ * A throttle pause is measured in seconds, so an absolute wall-clock time is
+ * the least useful way to render it; the credential list polls, so this stays
+ * close enough without a per-card timer. */
+function secondsUntil(iso: string): number {
+  const ms = Date.parse(iso) - Date.now();
+  return ms > 0 ? Math.round(ms / 1000) : 0;
+}
+
 function AlertBand({
   tone,
   icon,
@@ -161,19 +171,33 @@ export const CredentialCard = memo(function CredentialCard({
         </div>
       </div>
 
-      {c.quota_exceeded && (
-        <AlertBand
-          tone="warning"
-          icon={<AlertTriangle className="size-3.5" />}
-          label={t("admin.creds.alerts.quotaTitle")}
-        >
-          {c.quota_reset_at
-            ? t("admin.creds.alerts.quotaReset", {
-                at: new Date(c.quota_reset_at).toLocaleString(),
-              })
-            : t("admin.creds.alerts.quotaNoReset")}
-        </AlertBand>
-      )}
+      {c.quota_exceeded &&
+        (c.quota_usage_limit ? (
+          <AlertBand
+            tone="warning"
+            icon={<AlertTriangle className="size-3.5" />}
+            label={t("admin.creds.alerts.quotaTitle")}
+          >
+            {c.quota_reset_at
+              ? t("admin.creds.alerts.quotaReset", {
+                  at: new Date(c.quota_reset_at).toLocaleString(),
+                })
+              : t("admin.creds.alerts.quotaNoReset")}
+          </AlertBand>
+        ) : (
+          /* Upstream throttling, not a filled window. Muted and worded so the
+           * operator leaves it alone: it expires by itself, and the request
+           * that hit it has already been retried on another credential. */
+          <AlertBand
+            tone="muted"
+            icon={<Timer className="size-3.5" />}
+            label={t("admin.creds.alerts.throttleTitle")}
+          >
+            {c.quota_reset_at
+              ? t("admin.creds.alerts.throttleBody", { s: secondsUntil(c.quota_reset_at) })
+              : t("admin.creds.alerts.throttleNoReset")}
+          </AlertBand>
+        ))}
       {c.quarantined_until && (
         <AlertBand
           tone="warning"
