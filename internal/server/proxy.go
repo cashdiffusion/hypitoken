@@ -1131,6 +1131,10 @@ func billingModelFor(a *auth.Auth, clientModel string) string {
 //	faultUpstream   → MarkFailure,     withheld + retried on another credential
 //	faultClient     → no health change, forwarded verbatim, never retried
 //
+// A transport error never reaches a status code and is classified by hand as
+// the upstream-side class: the relay was unreachable, which says nothing about
+// this request and is exactly what a differently-hosted relay survives.
+//
 // Only the upstream-side classes touch health, so one client sending
 // malformed requests can no longer degrade a channel that is serving
 // everyone else correctly.
@@ -1199,16 +1203,25 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 			})
 			return false, true, nil
 		}
-		log.Warnf("proxy(apikey): upstream transport error via %s: %v", a.ID, err)
+		// A transport failure is the same class of event as a 5xx — the relay
+		// is unreachable, not wrong about this request — and is exactly what a
+		// different credential is most likely to survive, because relays sit
+		// behind different hosts and proxies. So withhold it and roll back to
+		// the failover loop instead of handing the client a bare 502. The
+		// Claude OAuth path and both Codex paths already did this; this was the
+		// last forward path that gave up on the first connection error.
+		log.Warnf("proxy(apikey): upstream transport error via %s: %v — retrying on another credential", a.ID, err)
 		a.MarkFailure(fmt.Sprintf("transport: %v", err))
-		writeAPIError(c, auth.NormalizeProvider(a.Provider), APIError{Status: http.StatusBadGateway, Code: "service_connection_error", Message: "The model service could not be reached. Please try again."})
 		s.emitLog(requestlog.Record{
 			Client: clientName, ClientToken: maskClientToken(clientToken),
 			Provider: auth.NormalizeProvider(a.Provider), AuthID: a.ID, AuthLabel: a.Label, AuthKind: "apikey",
-			Model: model, Stream: stream, Path: path, Status: 502,
-			DurationMs: time.Since(start).Milliseconds(), Attempts: attempts, Error: err.Error(),
+			Model: model, Stream: stream, Path: path, Status: http.StatusBadGateway,
+			DurationMs: time.Since(start).Milliseconds(), Attempts: attempts,
+			Error: "upstream transport error", AttemptOnly: true,
 		})
-		return false, true, nil
+		return true, false, &deferredResponse{
+			status: http.StatusBadGateway, authID: a.ID, authLabel: a.Label, authKind: "apikey",
+		}
 	}
 
 	// Decompress upstream gzip/br before reading. Some relays emit gzipped
@@ -1350,10 +1363,14 @@ func (s *Server) doForwardAnthropicAPIKey(c *gin.Context, a *auth.Auth, path str
 		// $0). Same fix the Codex path already carries. Peek is non-consuming.
 		if stream && responseIsSSE(resp.Header, bodyBuf) {
 			declareSSE(c)
-			// Headers are already committed above (the 4xx branch needs them),
-			// so commit=nil — no cross-credential retry on this verbatim
-			// passthrough path. The relay still adds keepalive + truncation
-			// detection so a broken stream is logged, not silently swallowed.
+			// commit=nil: the headers are already committed above, so this
+			// relay cannot fail over. It does not need to — an upstream that
+			// produces no bytes at all never reaches here, because an empty
+			// body fails validateAnthropicResponse above and is withheld and
+			// retried as a contract violation. By the time a stream starts,
+			// bytes have reached the client and the exchange is committed. The
+			// relay still adds keepalive + truncation detection so a broken
+			// stream is logged, not silently swallowed.
 			res := streamSSE(c, resp, &counts, &sub, rewriteClientModel, nil)
 			if !res.sawTerminal && !isClientDisconnect(c.Request.Context(), res.err) {
 				log.Warnf("proxy(apikey): SSE truncated mid-stream via %s (events=%d, bytes=%d, %s): %v",
