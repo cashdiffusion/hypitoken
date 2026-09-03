@@ -276,7 +276,12 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 			// \x-escaped string. Cap it so a binary reply can't dump a screenful.
 			log.Warnf("codex ws: upstream dial via %s failed (status=%d): %s", cand.ID, status, truncate([]byte(derr.Error()), 200))
 			switch status {
-			case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+			case http.StatusUnauthorized:
+				// Same treatment as the HTTP path (codex_auth_reject.go): the
+				// handshake body carries the backend's rejection of the bearer.
+				s.rejectCodexBearer(cand, accessToken, []byte(derr.Error()))
+				s.pool.Unstick(provider, clientToken, slotID)
+			case http.StatusForbidden, http.StatusTooManyRequests:
 				s.pool.ReportUpstreamError(cand, status, retryAfter)
 				s.pool.Unstick(provider, clientToken, slotID)
 			default:

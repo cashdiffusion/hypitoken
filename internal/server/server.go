@@ -77,6 +77,11 @@ type Server struct {
 	// would 400 with "signature in thinking" on the new account).
 	switchTracker *thinkingsig.SwitchTracker
 
+	// codexRefreshGate serialises the forced token refresh a ChatGPT 401
+	// triggers (codex_auth_reject.go); codexRefresh lets tests stub the exchange.
+	codexRefreshGate refreshGate
+	codexRefresh     func(ctx context.Context, a *auth.Auth) error
+
 	// codexRespAccount binds a Codex response id to the credential that produced
 	// it, namespaced by credential group. Backs the cross-group previous_response_id
 	// safety boundary on the WS path. Always initialized (cheap; janitor goroutine).
