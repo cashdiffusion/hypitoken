@@ -229,6 +229,26 @@ func (db *DB) walletIdemOnce(ctx context.Context, req IdemChargeReq, kind string
 	return IdemChargeResult{TxID: txID, ChargedUSD: moved, NewBalanceUSD: newBal, Clamped: clamped}, nil
 }
 
+// The two idempotency lookups, shared with the query-plan test.
+//
+// Both carry a redundant-looking `AND idem_key <> ”`. It is not redundant.
+// idx_wallet_tx_idem is PARTIAL (`WHERE idem_key <> ”`, see migration v22), and
+// SQLite only uses a partial index when the query's WHERE clause contains the
+// index's own predicate — it will infer `x IS NOT NULL` from `x = ?`, but it
+// will not infer `x <> ”`. Without the guard, `WHERE idem_key = ?` planned as
+// SCAN wallet_tx: 1.39M rows, ~0.4s, and walletIdemOnce runs it INSIDE the
+// BEGIN IMMEDIATE transaction, i.e. while holding the ledger's only write lock.
+// On 2026-09-03 that held the lock for the length of a table scan on every
+// proxy charge, every other writer waited out busy_timeout and returned
+// SQLITE_BUSY, and the drained connection pool stalled 1ms reads for 5–15s —
+// operations read it as a "database deadlock" and rolled v0.36.99 back.
+// TestIdemLookupsUseThePartialIndex pins the plan.
+const idemLookupSQL = `SELECT id, workspace_id, user_id, kind, amount_usd FROM wallet_tx WHERE idem_key = ? AND idem_key <> ''`
+
+func idemSettledSQL(placeholders string) string {
+	return `SELECT idem_key, amount_usd FROM wallet_tx WHERE idem_key IN (` + placeholders + `) AND idem_key <> ''`
+}
+
 // rowQuerier is satisfied by both *DB and *sql.Tx, so the replay lookup runs
 // unchanged inside the movement transaction and standalone after losing the
 // insert race.
@@ -250,8 +270,7 @@ func findIdemRow(ctx context.Context, q rowQuerier, req IdemChargeReq, kind stri
 		haveBal bool
 	)
 	scanErr := q.QueryRowContext(ctx,
-		`SELECT id, workspace_id, user_id, kind, amount_usd FROM wallet_tx WHERE idem_key = ?`,
-		req.IdempotencyKey).Scan(&id, &wsID, &userID, &rowKind, &amount)
+		idemLookupSQL, req.IdempotencyKey).Scan(&id, &wsID, &userID, &rowKind, &amount)
 	if scanErr != nil {
 		if errors.Is(scanErr, sql.ErrNoRows) {
 			return IdemChargeResult{}, false, nil
@@ -322,8 +341,7 @@ func (db *DB) SettledIdemKeys(ctx context.Context, keys []string) (map[string]fl
 		return out, nil
 	}
 	placeholders := strings.Repeat("?,", len(args)-1) + "?"
-	rows, err := db.QueryContext(ctx,
-		`SELECT idem_key, amount_usd FROM wallet_tx WHERE idem_key IN (`+placeholders+`)`, args...)
+	rows, err := db.QueryContext(ctx, idemSettledSQL(placeholders), args...)
 	if err != nil {
 		return nil, err
 	}

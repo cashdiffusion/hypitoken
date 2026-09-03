@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -356,5 +357,37 @@ func TestIsUniqueViolationMatchesDriver(t *testing.T) {
 		`INSERT INTO wallet_tx (user_id, workspace_id, kind, amount_usd, ref, note, created_at)
 		 VALUES (?, ?, 'charge', -1, '', '', 0)`, uid, wsID); err != nil {
 		t.Fatalf("second unkeyed insert rejected — the index is not partial: %v", err)
+	}
+}
+
+// TestIdemLookupsUseThePartialIndex pins the query plan of both idempotency
+// lookups to idx_wallet_tx_idem. The index is partial, and SQLite will not use
+// it for a bare `idem_key = ?`; dropping the `<> ”` guard silently turns every
+// proxy charge into a full ledger scan under the write lock (2026-09-03).
+func TestIdemLookupsUseThePartialIndex(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+	for name, q := range map[string]string{
+		"lookup":  idemLookupSQL,
+		"settled": idemSettledSQL("?"),
+	} {
+		rows, err := d.QueryContext(ctx, "EXPLAIN QUERY PLAN "+q, "a")
+		if err != nil {
+			t.Fatalf("%s: explain: %v", name, err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatalf("%s: scan: %v", name, err)
+			}
+			plan = append(plan, detail)
+		}
+		_ = rows.Close()
+		joined := strings.Join(plan, " | ")
+		if !strings.Contains(joined, "idx_wallet_tx_idem") || strings.Contains(joined, "SCAN wallet_tx") {
+			t.Fatalf("%s: plan does not use idx_wallet_tx_idem: %s", name, joined)
+		}
 	}
 }
