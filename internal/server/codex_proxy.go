@@ -884,7 +884,16 @@ func streamSSEOpenAI(c *gin.Context, reader *bufio.Reader, counts *usage.Counts,
 		Next:             next,
 	})
 	out.sawTerminal = r.SawTerminal
-	out.clientGone = isClientDisconnect(ctx, r.Err)
+	// Relay drains the upstream body past the terminal event, and Codex CLI
+	// closes its socket the moment it has read `response.completed`. The
+	// request context is therefore routinely canceled AFTER the turn is
+	// complete, and that cancellation surfaces here as a read error on the
+	// (context-bound) upstream body. It is not a hang-up: the user got the
+	// whole answer. Counting it as one turned 76% of a day's "client canceled"
+	// rows (294 of 388, all carrying usage and billed) into a fake 7–15% error
+	// rate on the panel. Only a disconnect BEFORE the terminal event is a
+	// cancellation.
+	out.clientGone = !r.SawTerminal && isClientDisconnect(ctx, r.Err)
 	return out
 }
 

@@ -3,10 +3,12 @@ package server
 import (
 	"bufio"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/gin-gonic/gin"
 
@@ -230,6 +232,47 @@ func TestCodexStreamCanceledContextReportsClientGone(t *testing.T) {
 	}
 	if o := usage.ClassifyStreamOutcome(counts, gone); o.CredentialFault() {
 		t.Fatal("client cancellation must not be charged against credential health")
+	}
+}
+
+// A hang-up AFTER the terminal event is a completed turn, not a cancellation.
+// Codex CLI closes its socket as soon as it has read `response.completed`,
+// while Relay is still draining the upstream body — so the read error under a
+// canceled context is the normal end of a successful turn. In production this
+// mislabelled 294 of 388 "client canceled" rows in six hours (all with usage,
+// all billed) and showed the panel a 7–15% error rate that did not exist.
+func TestCodexStreamHangupAfterTerminalIsNotACancel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+	cancel()
+
+	const sse = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":12,\"output_tokens\":3}}}\n\n"
+	// The whole stream, terminal event included, then the context-bound
+	// upstream body fails with the cancellation instead of a clean EOF.
+	body := io.MultiReader(strings.NewReader(sse), iotest.ErrReader(context.Canceled))
+
+	var counts usage.Counts
+	res := streamSSEOpenAI(c, bufio.NewReader(body), &counts, "")
+	if !res.sawTerminal {
+		t.Fatal("the terminal event was on the wire and must be observed")
+	}
+	if res.clientGone {
+		t.Fatal("a disconnect after the terminal event is a completed turn, not a client cancel")
+	}
+	o := usage.ClassifyStreamOutcome(counts, res.clientGone)
+	if o != usage.StreamComplete {
+		t.Fatalf("outcome=%v want StreamComplete", o)
+	}
+	if counts.InputTokens != 12 || counts.OutputTokens != 3 {
+		t.Fatalf("usage lost: %+v", counts)
+	}
+	if w.Body.String() != sse {
+		t.Fatalf("client must receive the full stream, got %q", w.Body.String())
 	}
 }
 
