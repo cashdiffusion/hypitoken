@@ -19,7 +19,9 @@ import (
 	"github.com/wjsoj/cc-core/codexws"
 	"github.com/wjsoj/cc-core/downstream"
 	"github.com/wjsoj/cc-core/mimicry"
+	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/cc-core/requestlog"
+	"github.com/wjsoj/cc-core/servicetier"
 	"github.com/wjsoj/cc-core/usage"
 )
 
@@ -55,6 +57,7 @@ const (
 
 // codexWSTurnBill is one completed WS turn queued for asynchronous settlement.
 type codexWSTurnBill struct {
+	meta servicetier.Turn
 	turn usage.Counts
 	dur  time.Duration
 	// seq numbers the turn within its session; it names the charge slot
@@ -250,6 +253,9 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 			Identity:    &candIdent,
 			BetaValue:   betaValue,
 		})
+		if hint := mimicry.CodexRoutingHint(model, servicetier.Request(firstFrame)); hint != "" {
+			header[mimicry.CodexRoutingHintHeader] = []string{hint}
+		}
 		conn, resp, derr := codexws.Dial(c.Request.Context(), codexws.DialConfig{
 			URL:       wsURL,
 			Header:    header,
@@ -310,7 +316,17 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	// Relay the first frame upstream, then run the bidirectional pump. The
 	// rebind runs AFTER the previous_response_id strip above, so the final bytes
 	// are the byte-splicing rewriter's, not a map round-trip's.
+	firstFrame, _, err = servicetier.NormalizeRequest(firstFrame)
+	if err != nil {
+		closeCodexWS(clientConn, gorillaws.ClosePolicyViolation, "invalid service tier")
+		return
+	}
 	firstFrame = rebindCodexFrame(firstFrame, ident, a)
+	tierTracker := &servicetier.TurnTracker{}
+	if !tierTracker.Sent(firstFrame) {
+		closeCodexWS(clientConn, gorillaws.ClosePolicyViolation, "invalid turn metadata")
+		return
+	}
 	_ = up.SetWriteDeadline(time.Now().Add(codexWSWriteDeadline))
 	if err := up.WriteMessage(codexws.TextMessage, firstFrame); err != nil {
 		log.Warnf("codex ws: first upstream write via %s failed: %v", a.ID, err)
@@ -338,20 +354,20 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 	go func() {
 		defer billWG.Done()
 		for tb := range billCh {
-			s.billCodexWSTurn(c, a, model, clientToken, clientName, tb.turn, tb.dur, tb.seq)
+			s.billCodexWSTurn(c, a, codexBillingTurnModel(model, tb.meta), clientToken, clientName, tb.turn, tb.dur, tb.seq, pricing.CostOptions{ServiceTier: tb.meta.Requested, ResponseServiceTier: tb.meta.Observed})
 		}
 	}()
 	turnSeq := 0 // only the pump goroutine calls billTurn, so no lock
 	billTurn := func(turn usage.Counts, dur time.Duration) {
 		turnSeq++
-		tb := codexWSTurnBill{turn: turn, dur: dur, seq: turnSeq}
+		tb := codexWSTurnBill{meta: tierTracker.LastCompleted(), turn: turn, dur: dur, seq: turnSeq}
 		select {
 		case billCh <- tb:
 		default:
-			s.billCodexWSTurn(c, a, model, clientToken, clientName, tb.turn, tb.dur, tb.seq)
+			s.billCodexWSTurn(c, a, codexBillingTurnModel(model, tb.meta), clientToken, clientName, tb.turn, tb.dur, tb.seq, pricing.CostOptions{ServiceTier: tb.meta.Requested, ResponseServiceTier: tb.meta.Observed})
 		}
 	}
-	s.pumpCodexWS(c.Request.Context(), clientConn, up, a, clientGroup, ident, &counts, billTurn)
+	s.pumpCodexWS(c.Request.Context(), clientConn, up, a, clientGroup, ident, &counts, billTurn, tierTracker)
 	close(billCh)
 	billWG.Wait() // drain every queued turn before the request returns
 
@@ -372,7 +388,11 @@ func (s *Server) handleCodexResponsesWS(c *gin.Context) {
 // upstream->client direction; the cross-group previous_response_id rewrite is
 // applied on the client->upstream direction for follow-up turns. Both relay
 // goroutines are joined before returning so counts is safe for billing.
-func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up codexws.Conn, a *auth.Auth, group string, ident mimicry.CodexFrameIdentity, counts *usage.Counts, onTurn func(turn usage.Counts, dur time.Duration)) {
+func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up codexws.Conn, a *auth.Auth, group string, ident mimicry.CodexFrameIdentity, counts *usage.Counts, onTurn func(turn usage.Counts, dur time.Duration), tierTrackers ...*servicetier.TurnTracker) {
+	var tierTracker *servicetier.TurnTracker
+	if len(tierTrackers) > 0 {
+		tierTracker = tierTrackers[0]
+	}
 	done := make(chan struct{})
 	var once sync.Once
 	stop := func() {
@@ -420,6 +440,7 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 			// what upstream actually said.
 			out := data
 			if mt == codexws.TextMessage && len(data) > 0 {
+				tierTracker.Observe(data)
 				if rid := codexResponseID(data); rid != "" {
 					s.codexRespAccount.Bind(group, rid, a.ID)
 				}
@@ -430,6 +451,7 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 						a.ID, capacity, truncate(data, 200))
 				}
 				if codexTerminalEvent(data) {
+					tierTracker.Complete()
 					// One request per turn, whether or not usage was observed
 					// (a shed turn still ends). The delta below carries its
 					// own Requests=1, so the session total and the per-turn
@@ -486,7 +508,19 @@ func (s *Server) pumpCodexWS(ctx context.Context, client *gorillaws.Conn, up cod
 				// onward, which is the same disclosure as leaking it on turn one
 				// — and would make session_id disagree with itself inside one
 				// connection. Strip first, rewrite second, same as the first frame.
+				if codexWSFrameIsResponseCreate(data) {
+					var tierErr error
+					data, _, tierErr = servicetier.NormalizeRequest(data)
+					if tierErr != nil {
+						closeCodexWS(client, gorillaws.ClosePolicyViolation, "invalid service tier")
+						return
+					}
+				}
 				data = rebindCodexFrame(data, ident, a)
+				if !tierTracker.Sent(data) {
+					closeCodexWS(client, gorillaws.ClosePolicyViolation, "too many pending turns")
+					return
+				}
 			}
 			_ = up.SetWriteDeadline(time.Now().Add(codexWSWriteDeadline))
 			// Echo the frame's own type, for the mirror-image reason: only text
@@ -542,14 +576,21 @@ func codexTurnDelta(cur, billed usage.Counts) usage.Counts {
 // whole session when the socket closes, so per-turn settlement never
 // double-counts it. One request-log row is emitted per turn, so the admin panel
 // shows each turn's real cost as it happens rather than one hour-long row.
-func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToken, clientName string, turn usage.Counts, dur time.Duration, seq int) {
+func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToken, clientName string, turn usage.Counts, dur time.Duration, seq int, options ...pricing.CostOptions) {
+	billingOptions := pricing.CostOptions{}
+	if len(options) > 0 {
+		billingOptions = options[0]
+	}
+	billingOptions.CodexOAuth = a.Kind == auth.KindOAuth
+	var priced pricing.CostResult
 	// CostUSD = official upstream price, BilledUSD = wallet debit.
 	var costUSD, billedUSD float64
 	var userID int64
 	var multiplier float64
 	var billingErr string
 	if turn.Requests > 0 && clientToken != "" {
-		official := s.pricing.Cost(auth.ProviderOpenAI, model, turn)
+		priced = s.pricing.CostWithOptions(auth.ProviderOpenAI, billingModelFor(a, model), turn, billingOptions)
+		official := priced.CostUSD
 		costUSD = official
 		billedUSD = official
 		if info, ok := saasInfoFrom(c); ok && s.saas != nil {
@@ -569,16 +610,19 @@ func (s *Server) billCodexWSTurn(c *gin.Context, a *auth.Auth, model, clientToke
 		s.usage.RecordClient(clientToken, clientName, turn, billedUSD)
 	}
 	s.emitLog(requestlog.Record{
-		Client:      clientName,
-		ClientToken: maskClientToken(clientToken),
-		Provider:    auth.ProviderOpenAI,
-		AuthID:      a.ID,
-		AuthLabel:   a.Label,
-		AuthKind:    "oauth",
-		Model:       model,
-		Input:       turn.InputTokens,
-		Output:      turn.OutputTokens,
-		CacheRead:   turn.CacheReadTokens,
+		RequestedServiceTier: billingOptions.ServiceTier,
+		UpstreamServiceTier:  billingOptions.ResponseServiceTier,
+		ServiceTier:          priced.Tier.Billing,
+		Client:               clientName,
+		ClientToken:          maskClientToken(clientToken),
+		Provider:             auth.ProviderOpenAI,
+		AuthID:               a.ID,
+		AuthLabel:            a.Label,
+		AuthKind:             "oauth",
+		Model:                model,
+		Input:                turn.InputTokens,
+		Output:               turn.OutputTokens,
+		CacheRead:            turn.CacheReadTokens,
 		// CacheCreate was missing from this row while Cost and Charge above
 		// both counted it — the ledger and the log would have disagreed the
 		// day upstream first reported a cache write on a WS turn.
@@ -671,4 +715,18 @@ func codexResponseID(payload []byte) string {
 		return ""
 	}
 	return ev.Response.ID
+}
+
+func codexBillingTurnModel(fallback string, turn servicetier.Turn) string {
+	if turn.Model != "" {
+		return turn.Model
+	}
+	return fallback
+}
+
+func codexWSFrameIsResponseCreate(frame []byte) bool {
+	var event struct {
+		Type string `json:"type"`
+	}
+	return json.Unmarshal(frame, &event) == nil && event.Type == "response.create"
 }

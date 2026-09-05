@@ -106,7 +106,7 @@ nano ~/.codex/config.toml
 
 ```toml
 model_provider = "hypitoken"
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 model_reasoning_effort = "high"     # high / medium / low / minimal
 disable_response_storage = true     # 第三方网关必须关掉 response 存储
 
@@ -142,7 +142,7 @@ notepad "$env:USERPROFILE\.codex\config.toml"
 
 ```toml
 model_provider = "hypitoken"
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 model_reasoning_effort = "high"     # high / medium / low / minimal
 disable_response_storage = true     # 第三方网关必须关掉 response 存储
 
@@ -175,7 +175,7 @@ nano ~/.codex/config.toml
 
 ```toml
 model_provider = "hypitoken"
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 model_reasoning_effort = "high"     # high / medium / low / minimal
 disable_response_storage = true     # 第三方网关必须关掉 response 存储
 
@@ -213,10 +213,15 @@ chmod 600 ~/.codex/auth.json
 
 | 值 | 适合的场景 |
 | --- | --- |
-| `high` | 架构设计、跨文件重构、疑难 bug。最慢也最贵，但成功率最高。 |
+| `ultra` | 最高推理强度，并自动拆分委派子任务。仅 `gpt-6-astra` 与 `gpt-5.6-sol` 支持。 |
+| `max` | 最高推理深度，留给最难的问题。 |
+| `xhigh` | 比 `high` 更深一档的推理强度。 |
+| `high` | 架构设计、跨文件重构、疑难 bug。较慢也较贵，但成功率最高。 |
 | `medium` | 日常写代码、改 bug 的默认选择。 |
 | `low` | 简单改动、格式化、写注释，追求响应速度。 |
 | `minimal` | 几乎不推理，只做机械转换（翻译、改名、套模板）时最省。 |
+
+> `xhigh`、`max`、`ultra` 只有声明支持的模型才接受——`gpt-6-astra` 支持 `low` 到 `ultra`，更老的档位到 `high` 为止。模型会拒绝它不支持的强度值。
 
 > 推理强度越高，思考 token 越多，计费也越高。拿不准就先用 `medium`。
 
@@ -281,19 +286,22 @@ codex
 OpenAI 侧提供的模型 ID：
 
 ```
+gpt-6-astra
 gpt-5.6-sol  gpt-5.6-terra  gpt-5.6-luna
 gpt-5.5  gpt-5.4  gpt-5.4-mini
 ```
 
-`gpt-5.6-sol` 是旗舰，`gpt-5.6-terra` 兼顾能力与成本，`gpt-5.6-luna` 面向高并发的成本敏感场景。
+`gpt-6-astra` 是旗舰，复杂、吃力的任务优先用它。`gpt-5.6-sol` 仍是性价比之选——价格是 astra 的一半，同样属于前沿模型。`gpt-5.6-terra` 兼顾能力与成本，`gpt-5.6-luna` 面向高并发的成本敏感场景。
+
+> `gpt-6-astra` 需要 Codex CLI **0.153.0 及以上**。更旧的客户端不会被上游下发该模型，会回落到自带的默认模型。
 
 `GET /v1/models` 返回的是**实际可用集合**（随上游套餐变化），控制台的模型列表为准：
 
 ```bash
-codex --model gpt-5.6-sol "帮我优化这段代码"
+codex --model gpt-6-astra "帮我优化这段代码"
 ```
 
-> 模型名可以带后缀并被正确识别计费，例如 `gpt-5.6-sol(high)`。
+> 模型名可以带后缀并被正确识别计费，例如 `gpt-6-astra(high)`。
 
 ## 七、在自动化 / Agent 中使用
 
@@ -304,7 +312,7 @@ codex --model gpt-5.6-sol "帮我优化这段代码"
 codex exec "把 README 里的安装步骤更新成 Node 22"
 
 # 指定模型
-codex exec --model gpt-5.6-sol "给所有导出函数补 JSDoc"
+codex exec --model gpt-6-astra "给所有导出函数补 JSDoc"
 ```
 
 配置照常从 `~/.codex/config.toml` + `~/.codex/auth.json` 读取；在 CI 里没有这两个文件时，直接给环境变量 `OPENAI_BASE_URL` 和 `OPENAI_API_KEY` 即可。

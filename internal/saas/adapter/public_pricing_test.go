@@ -114,8 +114,11 @@ func TestPublicPricingCarriesCacheRates(t *testing.T) {
 	}
 
 	// gpt-5.6 is the line that exposed the gap: the catalogue charges a
-	// cache-write rate the hardcoded page rendered as "—".
-	for _, m := range []string{"openai/gpt-5.6-sol", "openai/gpt-5.6-terra", "openai/gpt-5.6-luna"} {
+	// cache-write rate the hardcoded page rendered as "—". gpt-6-astra joined
+	// them on 2026-09-05 — it publishes a cache-write rate too ($12.50/1M,
+	// 1.25x input), and it is the flagship, so a "—" there is the costliest
+	// version of the same bug.
+	for _, m := range []string{"openai/gpt-6-astra", "openai/gpt-5.6-sol", "openai/gpt-5.6-terra", "openai/gpt-5.6-luna"} {
 		card, ok := got.Models[m]
 		if !ok {
 			t.Errorf("%s missing", m)

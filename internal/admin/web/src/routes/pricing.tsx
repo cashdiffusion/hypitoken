@@ -92,10 +92,11 @@ const PRESENTATION: Record<string, { display: string; tier: string }> = {
   "claude-sonnet-5": { display: "Claude Sonnet 5", tier: "balanced" },
   "claude-sonnet-4-6": { display: "Claude Sonnet 4.6", tier: "standard" },
   "claude-haiku-4-5": { display: "Claude Haiku 4.5", tier: "fast" },
-  "gpt-5.6-sol": { display: "GPT-5.6 Sol", tier: "flagship" },
-  "gpt-5.6-terra": { display: "GPT-5.6 Terra", tier: "advanced" },
+  "gpt-6-astra": { display: "GPT-6 Astra", tier: "flagship" },
+  "gpt-5.6-sol": { display: "GPT-5.6 Sol", tier: "advanced" },
+  "gpt-5.6-terra": { display: "GPT-5.6 Terra", tier: "balanced" },
   "gpt-5.6-luna": { display: "GPT-5.6 Luna", tier: "fast" },
-  "gpt-5.5": { display: "GPT-5.5", tier: "flagship" },
+  "gpt-5.5": { display: "GPT-5.5", tier: "standard" },
   "gpt-5.4": { display: "GPT-5.4", tier: "advanced" },
   "gpt-5.4-mini": { display: "GPT-5.4 mini", tier: "fast" },
 };
@@ -117,9 +118,20 @@ const DATED_SUFFIX = /-\d{8}$/;
 //
 // Order is explicit rather than sorted by price because sol and gpt-5.5 carry
 // the same $5.00 input rate, so a price sort put gpt-5.5 in the flagship slot
-// on an alphabetical tiebreak. sol is the flagship; say so rather than hoping
-// the sort agrees.
+// on an alphabetical tiebreak. Say which model is the flagship rather than
+// hoping the sort agrees.
+//
+// gpt-6-astra took the flagship slot on 2026-09-05. It is priority 1 in the
+// upstream Codex catalogue and the model the CLI now defaults to, and sol moved
+// down a tier rather than out — it is still sold and still the value pick at
+// $5/$30 against astra's $10/$50.
+//
+// Deliberately NOT here: gpt-reserve and codex-auto-review. Both are
+// visibility "hide" upstream, i.e. the vendor CLI never lists them, and neither
+// has a published rate. A price page is an offer; do not advertise a model we
+// cannot quote.
 const SOLD_OPENAI = [
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",

@@ -21,7 +21,7 @@ interface Row {
 const ROWS: Row[] = [
   { id: "oauth · max-7f3a", kind: "oauth", model: "haiku", base: 142, usage: 0.62 },
   { id: "oauth · pro-1b9c", kind: "oauth", model: "haiku", base: 168, usage: 0.41 },
-  { id: "apikey · sk-•2c", kind: "apikey", model: "gpt-5.5", base: 96, usage: 0.78 },
+  { id: "apikey · sk-•2c", kind: "apikey", model: "astra", base: 96, usage: 0.78 },
   { id: "oauth · team-d4", kind: "oauth", model: "haiku", base: 211, usage: 0.27 },
 ];
 

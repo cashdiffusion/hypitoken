@@ -106,7 +106,7 @@ Add:
 
 ```toml
 model_provider = "hypitoken"
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 model_reasoning_effort = "high"     # high / medium / low / minimal
 disable_response_storage = true     # third-party gateways cannot store responses
 
@@ -142,7 +142,7 @@ notepad "$env:USERPROFILE\.codex\config.toml"
 
 ```toml
 model_provider = "hypitoken"
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 model_reasoning_effort = "high"     # high / medium / low / minimal
 disable_response_storage = true     # third-party gateways cannot store responses
 
@@ -175,7 +175,7 @@ Add:
 
 ```toml
 model_provider = "hypitoken"
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 model_reasoning_effort = "high"     # high / medium / low / minimal
 disable_response_storage = true     # third-party gateways cannot store responses
 
@@ -213,10 +213,17 @@ chmod 600 ~/.codex/auth.json
 
 | Value | When to use it |
 | --- | --- |
-| `high` | Architecture work, cross-file refactors, hard bugs. Slowest and priciest, highest success rate. |
+| `ultra` | Maximum reasoning with automatic task delegation. `gpt-6-astra` and `gpt-5.6-sol` only. |
+| `max` | Maximum reasoning depth, for the hardest problems. |
+| `xhigh` | Extra reasoning depth above `high`. |
+| `high` | Architecture work, cross-file refactors, hard bugs. Slower and pricier, highest success rate. |
 | `medium` | The default for everyday coding and bug fixing. |
 | `low` | Small edits, formatting, comments — when you want the answer fast. |
 | `minimal` | Barely reasons at all; cheapest for mechanical transforms (translating, renaming, filling templates). |
+
+> `xhigh`, `max` and `ultra` are only accepted by models that advertise them —
+> `gpt-6-astra` supports `low` through `ultra`, while the older tiers stop at
+> `high`. A model rejects an effort it does not support.
 
 > Higher effort means more thinking tokens, which cost more. When in doubt start at `medium`.
 
@@ -281,20 +288,26 @@ write a Python script that lists every filename in the current directory
 OpenAI-side model IDs on offer:
 
 ```
+gpt-6-astra
 gpt-5.6-sol  gpt-5.6-terra  gpt-5.6-luna
 gpt-5.5  gpt-5.4  gpt-5.4-mini
 ```
 
-`gpt-5.6-sol` is the flagship, `gpt-5.6-terra` balances capability against
-cost, and `gpt-5.6-luna` targets cost-sensitive, high-volume workloads.
+`gpt-6-astra` is the flagship and the model to reach for on complex, demanding
+work. `gpt-5.6-sol` remains the value pick — half astra's rate and still a
+frontier model. `gpt-5.6-terra` balances capability against cost, and
+`gpt-5.6-luna` targets cost-sensitive, high-volume workloads.
+
+> `gpt-6-astra` needs Codex CLI **0.153.0 or newer**. Older clients are not
+> offered it by the upstream plan and will fall back to their own default.
 
 `GET /v1/models` returns the **live set** actually available (it moves with the upstream plan); the console's model list is authoritative.
 
 ```bash
-codex --model gpt-5.6-sol "optimise this code"
+codex --model gpt-6-astra "optimise this code"
 ```
 
-> Model names may carry a suffix and still bill correctly, e.g. `gpt-5.6-sol(high)`.
+> Model names may carry a suffix and still bill correctly, e.g. `gpt-6-astra(high)`.
 
 ## 7. Using it headlessly
 
@@ -305,7 +318,7 @@ codex --model gpt-5.6-sol "optimise this code"
 codex exec "update the install steps in README to Node 22"
 
 # pick a model
-codex exec --model gpt-5.6-sol "add JSDoc to every exported function"
+codex exec --model gpt-6-astra "add JSDoc to every exported function"
 ```
 
 Config still comes from `~/.codex/config.toml` + `~/.codex/auth.json`; in a CI box that has neither, just set `OPENAI_BASE_URL` and `OPENAI_API_KEY` as environment variables.

@@ -20,7 +20,9 @@ import (
 	"github.com/wjsoj/cc-core/codexerr"
 	"github.com/wjsoj/cc-core/downstream"
 	"github.com/wjsoj/cc-core/mimicry"
+	"github.com/wjsoj/cc-core/pricing"
 	"github.com/wjsoj/cc-core/requestlog"
+	"github.com/wjsoj/cc-core/servicetier"
 	ccstream "github.com/wjsoj/cc-core/stream"
 	"github.com/wjsoj/cc-core/usage"
 )
@@ -168,15 +170,22 @@ func (s *Server) fetchCodexAPIKeyModels(ctx context.Context, a *auth.Auth) ([]co
 // delegated to doForwardCodexOAuth (codex_oauth_proxy.go), a full
 // implementation that forwards to the ChatGPT Codex backend.
 func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body []byte, stream bool, model, clientToken, clientName, slotID string, start time.Time, attempts int) (retry, done bool) {
+	// Validate before map-based sanitizers or model rewrites can collapse
+	// duplicate keys and make the outbound tier ambiguous.
+	validatedBody, _, validationErr := servicetier.NormalizeRequest(body)
+	if validationErr != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": validationErr.Error()}})
+		return false, true
+	}
+	body = validatedBody
 	if a.Kind == auth.KindOAuth {
 		return s.doForwardCodexOAuth(c, a, path, body, stream, model, clientToken, clientName, slotID, start, attempts)
 	}
 
 	// API-key passthrough. We do not inject any Codex-CLI mimicry, do not
-	// use uTLS, and do not normalize the request body (compact whitelist /
-	// stream_options injection). The only allowed request-side change is the
-	// per-credential model rewrite (and matching response-side rewrite) so
-	// model_map'd relay vendors keep working.
+	// use uTLS, or apply the OAuth compact whitelist. Service-tier aliases
+	// are normalized for forwarding/billing, stream usage is requested, and
+	// per-credential model rewrites preserve relay vendor compatibility.
 	//
 	// Health tracking shares classifyUpstreamStatus with the Anthropic
 	// API-key path (upstream_health.go). Retryable faults — 429, 5xx,
@@ -257,6 +266,13 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		}
 	}
 
+	normalizedBody, outboundTier, tierErr := servicetier.NormalizeRequest(upstreamBody)
+	if tierErr != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": tierErr.Error()}})
+		return false, true
+	}
+	upstreamBody = normalizedBody
+
 	ctx := c.Request.Context()
 	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upURL, bytes.NewReader(upstreamBody))
 	if err != nil {
@@ -323,6 +339,10 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		return true, false
 	}
 
+	// Observe original bytes before protocol conversion or response scrubbing.
+	tierObserver := servicetier.ObserveBody(resp.Body)
+	resp.Body = tierObserver
+	var priced pricing.CostResult
 	var counts usage.Counts
 	var errSnippet string
 	// streamTruncated records an upstream that stopped without a terminal
@@ -567,7 +587,8 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		// stream the relay failed to account for costs the customer $0; the
 		// credential's breaker, not the customer's wallet, absorbs it.
 		if outcome.Billable(counts) && clientToken != "" {
-			costUSD = s.pricing.Cost(auth.ProviderOpenAI, model, counts)
+			priced = s.pricing.CostWithOptions(auth.ProviderOpenAI, billingModelFor(a, model), counts, pricing.CostOptions{ServiceTier: outboundTier, ResponseServiceTier: tierObserver.Observed(), CodexOAuth: false})
+			costUSD = priced.CostUSD
 			billedUSD = costUSD
 			// Codex apikey path used to skip the SaaS Charge funnel entirely,
 			// so wallets weren't deducted for Codex traffic. Route it through
@@ -606,27 +627,30 @@ func (s *Server) doForwardCodex(c *gin.Context, a *auth.Auth, path string, body 
 		errField = fmt.Sprintf("upstream %d: %s", resp.StatusCode, truncate([]byte(errSnippet), 200))
 	}
 	s.emitLog(requestlog.Record{
-		Client:      clientName,
-		ClientToken: maskClientToken(clientToken),
-		Provider:    auth.ProviderOpenAI,
-		AuthID:      a.ID,
-		AuthLabel:   a.Label,
-		AuthKind:    "apikey",
-		Model:       model,
-		Input:       counts.InputTokens,
-		Output:      counts.OutputTokens,
-		CacheRead:   counts.CacheReadTokens,
-		CacheCreate: counts.CacheCreateTokens,
-		UserID:      userID,
-		Multiplier:  multiplier,
-		CostUSD:     costUSD,
-		BilledUSD:   billedUSD,
-		Status:      logStatus,
-		DurationMs:  time.Since(start).Milliseconds(),
-		Stream:      stream,
-		Path:        path,
-		Attempts:    attempts,
-		Error:       joinLogError(errField, billingErr),
+		RequestedServiceTier: outboundTier,
+		UpstreamServiceTier:  tierObserver.Observed(),
+		ServiceTier:          priced.Tier.Billing,
+		Client:               clientName,
+		ClientToken:          maskClientToken(clientToken),
+		Provider:             auth.ProviderOpenAI,
+		AuthID:               a.ID,
+		AuthLabel:            a.Label,
+		AuthKind:             "apikey",
+		Model:                model,
+		Input:                counts.InputTokens,
+		Output:               counts.OutputTokens,
+		CacheRead:            counts.CacheReadTokens,
+		CacheCreate:          counts.CacheCreateTokens,
+		UserID:               userID,
+		Multiplier:           multiplier,
+		CostUSD:              costUSD,
+		BilledUSD:            billedUSD,
+		Status:               logStatus,
+		DurationMs:           time.Since(start).Milliseconds(),
+		Stream:               stream,
+		Path:                 path,
+		Attempts:             attempts,
+		Error:                joinLogError(errField, billingErr),
 	})
 	return false, true
 }
