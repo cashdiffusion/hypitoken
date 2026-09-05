@@ -36,10 +36,15 @@ func TestCodexFastWalletMultiplierOnce(t *testing.T) {
 	c.Request = httptest.NewRequest("GET", "/v1/responses", nil)
 	c.Set("saas_info", SaaSTokenInfo{UserID: 1, TokenID: 1})
 	s.billCodexWSTurn(c, cred, "gpt-5.5", "fast-wallet", "tester", usage.Counts{InputTokens: 600, OutputTokens: 200, CacheReadTokens: 400, Requests: 1}, time.Second, 1, pricing.CostOptions{ServiceTier: "priority", ResponseServiceTier: "default"})
-	if spy.calls != 1 || math.Abs(spy.official-.023) > 1e-12 {
+	// The credential is KindOAuth, and billCodexWSTurn derives CodexOAuth from
+	// the credential rather than from the caller — so this is a ChatGPT
+	// subscription and the requested "priority" buys no premium. It used to
+	// expect .023 (2.5x) here, which charged the wallet for an upstream cost
+	// the subscription never incurred.
+	if spy.calls != 1 || math.Abs(spy.official-.0092) > 1e-12 {
 		t.Fatalf("wallet input %g calls %d", spy.official, spy.calls)
 	}
-	if got := s.usage.WeeklyCostUSD("fast-wallet"); math.Abs(got-.0046) > 1e-12 {
-		t.Fatalf("billed cost %g want .0046", got)
+	if got := s.usage.WeeklyCostUSD("fast-wallet"); math.Abs(got-.00184) > 1e-12 {
+		t.Fatalf("billed cost %g want .00184", got)
 	}
 }

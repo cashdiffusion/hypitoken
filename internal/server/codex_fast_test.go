@@ -69,14 +69,25 @@ func TestCodexFastHTTPBilling(t *testing.T) {
 						if got := <-seen; got != wantTier {
 							t.Fatalf("wire tier %q want %q", got, wantTier)
 						}
+						// An OAuth credential is a ChatGPT subscription: the plan
+						// price is flat, so no service tier moves the bill in
+						// either direction. Fast and Flex are API price-page
+						// tiers that only an API key can buy. This used to
+						// expect 2.5x for a requested tier and 0.5x for an
+						// observed flex on the OAuth path too, which invented
+						// an upstream cost the subscription never incurred —
+						// see cc-core servicetier.ResolveOpenAI.
 						ratio := 1.0
-						if tier != "" {
-							ratio = 2.5
-						}
-						if observed == "flex" {
-							ratio = 0.5
-						} else if observed == "default" && !oauth {
-							ratio = 1
+						if !oauth {
+							if tier != "" {
+								ratio = 2.5
+							}
+							switch observed {
+							case "flex":
+								ratio = 0.5
+							case "default":
+								ratio = 1
+							}
 						}
 						want := 0.0092 * ratio
 						if got := s.usage.WeeklyCostUSD("fast-test-token"); math.Abs(got-want) > 1e-12 {
@@ -181,10 +192,13 @@ func TestCodexFastWSBillingPerTurn(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("billing queue did not drain")
 	}
-	// First: (600*5 + 200*30 + 400*.5)/1M *2.5 = .023.
-	// Second: (600*10 + 200*50 + 400*1)/1M = .0164.
-	if got := s.usage.WeeklyCostUSD("fast-ws-token"); math.Abs(got-.0394) > 1e-12 {
-		t.Fatalf("two-turn cost %.8f want .0394", got)
+	// Both turns run on an OAuth credential, i.e. a ChatGPT subscription, so
+	// the first turn's "fast" buys no premium — it used to be multiplied by
+	// 2.5 here for a total of .0394.
+	// First:  (600*5  + 200*30 + 400*.5)/1M = .0092.
+	// Second: (600*10 + 200*50 + 400*1 )/1M = .0164.
+	if got := s.usage.WeeklyCostUSD("fast-ws-token"); math.Abs(got-.0256) > 1e-12 {
+		t.Fatalf("two-turn cost %.8f want .0256", got)
 	}
 }
 
