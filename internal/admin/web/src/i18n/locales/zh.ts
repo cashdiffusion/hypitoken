@@ -456,6 +456,11 @@ export default {
       oneClickHint:
         "CC Switch 会自动帮你写好客户端配置，无需手动改文件。需先安装 CC Switch 桌面版。",
       openInCCSwitch: "在 CC Switch 中打开",
+      ccNothingHappened: "点了没反应？",
+      ccNothingHappenedHint:
+        '浏览器只负责把链接交给 CC Switch，无法得知它是否收到。如果没有任何反应：先确认已安装 CC Switch 并至少启动过一次，再点一次；或者复制链接手动粘进 CC Switch。Linux 上如果发行版包里的 "CC Switch.desktop" 的 Exec 行缺少 %u，URL 会被吞掉——能正常工作的是 cc-switch-handler.desktop。',
+      ccCopyLink: "复制导入链接",
+      ccGetApp: "获取 CC Switch",
       orManual: "或手动配置",
       step2Env: "环境变量（当前终端）",
       step2EnvHint: "粘贴到终端执行，然后在同一个会话里运行 claude。",

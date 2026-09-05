@@ -474,6 +474,11 @@ export default {
       oneClickHint:
         "CC Switch writes the client config for you — no manual file editing. Requires the CC Switch desktop app.",
       openInCCSwitch: "Open in CC Switch",
+      ccNothingHappened: "Nothing happened?",
+      ccNothingHappenedHint:
+        'The browser hands the link to the CC Switch app and cannot tell whether it arrived. If nothing opened: make sure CC Switch is installed and has been launched at least once, then try again — or copy the link and paste it into CC Switch. On Linux, a distro package that ships "CC Switch.desktop" with an Exec line missing %u will swallow the URL; cc-switch-handler.desktop is the one that works.',
+      ccCopyLink: "Copy import link",
+      ccGetApp: "Get CC Switch",
       orManual: "or configure manually",
       step2Env: "Environment variables (this shell)",
       step2EnvHint: "Paste into your terminal, then run claude in the same session.",

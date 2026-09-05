@@ -6,7 +6,7 @@
 // through `labels` (defaults to English); hypitoken passes i18n strings,
 // CPA-Claude uses the defaults. If you edit one copy, sync the other.
 // ─────────────────────────────────────────────────────────────────────────
-import { ArrowRightLeft, Check, Copy, MessageSquare, Terminal } from "lucide-react";
+import { ArrowRightLeft, Check, Copy, ExternalLink, MessageSquare, Terminal } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,6 +20,7 @@ import {
   codexInstall,
   type OnboardingConfig,
   type OnboardingOS,
+  openDeepLink,
 } from "@/lib/onboarding-links";
 import { cn, copyToClipboard } from "@/lib/utils";
 
@@ -27,6 +28,10 @@ export interface OnboardingLabels {
   oneClick: string;
   oneClickHint: string;
   openInCCSwitch: string;
+  ccNothingHappened: string;
+  ccNothingHappenedHint: string;
+  ccCopyLink: string;
+  ccGetApp: string;
   orManual: string;
   step1Install: string;
   step2Config: string;
@@ -48,6 +53,11 @@ const DEFAULT_LABELS: OnboardingLabels = {
   oneClickHint:
     "CC Switch writes the client config for you — no manual file editing. Requires the CC Switch desktop app.",
   openInCCSwitch: "Open in CC Switch",
+  ccNothingHappened: "Nothing happened?",
+  ccNothingHappenedHint:
+    'The browser hands the link to the CC Switch app; it cannot tell whether the app received it. If nothing opened, copy the link and paste it into CC Switch, or install the app first. On Linux, a package-provided "CC Switch.desktop" whose Exec line lacks %u will swallow the URL — prefer cc-switch-handler.desktop.',
+  ccCopyLink: "Copy import link",
+  ccGetApp: "Get CC Switch",
   orManual: "or configure manually",
   step1Install: "1. Install the CLI",
   step2Config: "2. Configure",
@@ -117,6 +127,86 @@ function OSPills({ os, setOS }: { os: OnboardingOS; setOS: (o: OnboardingOS) => 
   );
 }
 
+/**
+ * One-click CC Switch import.
+ *
+ * A custom-scheme navigation is fire-and-forget: the page cannot observe
+ * whether the OS found a handler, whether the app was installed, or whether it
+ * accepted the payload. So the click reveals a fallback instead of assuming
+ * success — that "click does nothing, with no explanation" was the entire
+ * failure mode this replaces.
+ */
+function CCSwitchCard({
+  app,
+  config,
+  L,
+}: {
+  app: "claude" | "codex";
+  config: OnboardingConfig;
+  L: OnboardingLabels;
+}) {
+  const [tried, setTried] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const url = buildCCSwitchURL(config, app);
+
+  return (
+    <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-foreground">{L.oneClick}</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">{L.oneClickHint}</div>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          className="shrink-0 gap-1.5"
+          onClick={() => {
+            setTried(true);
+            openDeepLink(url);
+          }}
+        >
+          <ArrowRightLeft className="h-3.5 w-3.5" />
+          {L.openInCCSwitch}
+        </Button>
+      </div>
+
+      {tried && (
+        <div className="mt-3 border-t border-primary/20 pt-3">
+          <div className="text-xs font-medium text-foreground">{L.ccNothingHappened}</div>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+            {L.ccNothingHappenedHint}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1.5 text-xs"
+              onClick={async () => {
+                await copyToClipboard(url);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+            >
+              {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+              {copied ? L.copied : L.ccCopyLink}
+            </Button>
+            <a
+              href="https://ccswitch.io"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {L.ccGetApp}
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export interface ClientOnboardingProps {
   config: OnboardingConfig;
   labels?: Partial<OnboardingLabels>;
@@ -137,23 +227,7 @@ export function ClientOnboarding({ config, labels, initialOS }: ClientOnboarding
   const cb = (code: string) => <CodeBlock code={code} copyLabel={L.copy} copiedLabel={L.copied} />;
 
   const ccSwitchButton = (app: "claude" | "codex") => (
-    <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-foreground">{L.oneClick}</div>
-          <div className="mt-0.5 text-xs text-muted-foreground">{L.oneClickHint}</div>
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          className="shrink-0 gap-1.5"
-          onClick={() => window.open(buildCCSwitchURL(config, app), "_blank")}
-        >
-          <ArrowRightLeft className="h-3.5 w-3.5" />
-          {L.openInCCSwitch}
-        </Button>
-      </div>
-    </div>
+    <CCSwitchCard app={app} config={config} L={L} />
   );
 
   const manualDivider = (
@@ -231,7 +305,7 @@ export function ClientOnboarding({ config, labels, initialOS }: ClientOnboarding
             size="sm"
             variant="outline"
             className="shrink-0 gap-1.5"
-            onClick={() => window.open(buildCherryStudioURL(config), "_blank")}
+            onClick={() => openDeepLink(buildCherryStudioURL(config))}
           >
             <ArrowRightLeft className="h-3.5 w-3.5" />
             {L.importToCherry}
