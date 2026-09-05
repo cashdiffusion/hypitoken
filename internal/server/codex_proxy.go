@@ -60,6 +60,16 @@ func (s *Server) handleCodexResponsesCompact(c *gin.Context) {
 // upstream's authoritative /v1/models listing. Returned shape matches
 // OpenAI's: {"object":"list","data":[{id, object, owned_by}, ...]}.
 func (s *Server) handleCodexModels(c *gin.Context) {
+	// A Codex client asks the same URL but wants a different document. It is
+	// identified by the client_version query parameter, which no OpenAI-API
+	// client sends, and it wants the ChatGPT backend's manifest shape. Handing
+	// it the OpenAI list below does not fail loudly — it cannot parse it, falls
+	// back to the models compiled into its own build, and never sees anything
+	// this gateway added after that build shipped.
+	if clientVersion, ok := auth.CodexModelsRequest(c.Request.URL.Query()); ok {
+		s.serveCodexModelsManifest(c, clientVersion)
+		return
+	}
 	seen := map[string]bool{}
 	var data []gin.H
 
@@ -114,6 +124,57 @@ func (s *Server) handleCodexModels(c *gin.Context) {
 		data = []gin.H{}
 	}
 	c.JSON(200, gin.H{"object": "list", "data": data})
+}
+
+// serveCodexModelsManifest answers a Codex client's model-picker refresh.
+//
+// The manifest is proxied from upstream with an OAuth credential rather than
+// assembled here, so a model the ChatGPT backend adds tomorrow shows up without
+// a release. That is sub2api's design; CLIProxyAPI instead ships a hand-edited
+// JSON catalog, which is why adding one model there is a 260-line diff.
+//
+// The fallback matters for a deployment with no OAuth credential to borrow —
+// an API-key-only pool still has to answer this route with the right SHAPE, or
+// its users hit the same silent picker fallback.
+func (s *Server) serveCodexModelsManifest(c *gin.Context, clientVersion string) {
+	if oauthCred := s.anyCodexOAuthCredential(); oauthCred != nil {
+		body, err := s.codexManifests.Get(clientVersion, func() ([]byte, error) {
+			return auth.FetchCodexModelsManifest(c.Request.Context(), oauthCred, clientVersion, s.cfg.UseUTLS)
+		})
+		if err != nil {
+			// A stale body is still returned alongside the error, so this is a
+			// log line and not a failure whenever anything was ever cached.
+			log.Warnf("codex: models manifest refresh via %s failed: %v", oauthCred.ID, err)
+		}
+		if len(body) > 0 {
+			c.Data(200, "application/json; charset=utf-8", auth.FilterCodexManifest(body, clientVersion))
+			return
+		}
+	}
+
+	// No OAuth credential, or upstream has never answered: synthesize from the
+	// catalog the plain listing uses, so both routes agree about what exists.
+	models := auth.CodexModelsForPlan("")
+	c.Data(200, "application/json; charset=utf-8", auth.SynthesizeCodexModelsManifest(models, clientVersion))
+}
+
+// anyCodexOAuthCredential picks a healthy OpenAI OAuth credential to borrow for
+// the manifest fetch. Any of them will do — the manifest varies by plan tier,
+// not by account, and FilterCodexManifest re-applies the caller's version floor
+// afterwards regardless of which one answered.
+func (s *Server) anyCodexOAuthCredential() *auth.Auth {
+	for _, st := range s.pool.Status() {
+		if auth.NormalizeProvider(st.Auth.Provider) != auth.ProviderOpenAI {
+			continue
+		}
+		if st.Auth.Disabled || st.Auth.Kind != auth.KindOAuth {
+			continue
+		}
+		if live := s.pool.FindByID(st.Auth.ID); live != nil {
+			return live
+		}
+	}
+	return nil
 }
 
 type codexUpstreamModel struct{ id, ownedBy string }
