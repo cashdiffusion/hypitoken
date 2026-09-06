@@ -137,14 +137,30 @@ func (s *Server) handleCodexModels(c *gin.Context) {
 // an API-key-only pool still has to answer this route with the right SHAPE, or
 // its users hit the same silent picker fallback.
 func (s *Server) serveCodexModelsManifest(c *gin.Context, clientVersion string) {
-	if oauthCred := s.anyCodexOAuthCredential(); oauthCred != nil {
+	if creds := s.codexManifestCredentials(); len(creds) > 0 {
 		body, err := s.codexManifests.Get(clientVersion, func() ([]byte, error) {
-			return auth.FetchCodexModelsManifest(c.Request.Context(), oauthCred, clientVersion, s.cfg.UseUTLS)
+			// Try credentials in turn rather than trusting one. They do not
+			// share an egress: each carries its own SOCKS5 proxy, and one of
+			// those returning "general SOCKS server failure" for chatgpt.com
+			// while every other credential serves traffic normally is exactly
+			// what pinned this endpoint to the synthesized fallback in
+			// production. The request path has always failed over; this had
+			// not.
+			var lastErr error
+			for _, cred := range creds {
+				body, err := auth.FetchCodexModelsManifest(c.Request.Context(), cred, clientVersion, s.cfg.UseUTLS)
+				if err == nil {
+					return body, nil
+				}
+				lastErr = err
+				log.Warnf("codex: models manifest via %s failed, trying the next credential: %v", cred.ID, err)
+			}
+			return nil, lastErr
 		})
 		if err != nil {
 			// A stale body is still returned alongside the error, so this is a
 			// log line and not a failure whenever anything was ever cached.
-			log.Warnf("codex: models manifest refresh via %s failed: %v", oauthCred.ID, err)
+			log.Warnf("codex: models manifest refresh failed on all %d credentials: %v", len(creds), err)
 		}
 		if len(body) > 0 {
 			c.Data(200, "application/json; charset=utf-8", auth.FilterCodexManifest(body, clientVersion))
@@ -158,22 +174,28 @@ func (s *Server) serveCodexModelsManifest(c *gin.Context, clientVersion string) 
 	c.Data(200, "application/json; charset=utf-8", auth.SynthesizeCodexModelsManifest(models, clientVersion))
 }
 
-// anyCodexOAuthCredential picks an OpenAI OAuth credential to borrow for the
-// manifest fetch, preferring a healthy one.
+// codexManifestCredentials lists the OpenAI OAuth credentials worth borrowing
+// for a manifest fetch, healthy ones first.
 //
-// "Any will do" was the first version of this and it was wrong: it took the
-// first credential in pool order regardless of health, and on one deployment
-// that happened to be an account whose refresh token upstream had invalidated.
-// Every picker refresh then re-attempted a doomed token refresh — 34 in 30
-// minutes — so the cache never populated, the endpoint always fell back, and a
-// refresh endpoint that had already said no kept being asked.
+// It returns a LIST rather than a pick, because the two ways this went wrong in
+// production were both "the one we chose cannot do it":
 //
-// Health is what varies between accounts here; the manifest itself does not,
-// beyond the plan tier. A hard-failed credential is skipped entirely, and an
-// unhealthy-but-not-dead one is only used if nothing better exists — better a
-// long-shot fetch than none at all.
-func (s *Server) anyCodexOAuthCredential() *auth.Auth {
-	var fallback *auth.Auth
+//   - the first credential in pool order had a refresh token upstream had
+//     invalidated, so every picker refresh re-attempted a doomed refresh;
+//   - the first HEALTHY credential's SOCKS5 proxy answered "general SOCKS
+//     server failure" for chatgpt.com while ten other credentials served
+//     traffic normally, pinning the endpoint to the synthesized fallback.
+//
+// Credentials do not share an egress, so a failure is a property of the
+// credential, not of the destination. Hard-failed ones are skipped outright;
+// unhealthy-but-not-dead ones go last, since a long-shot fetch still beats
+// having none.
+//
+// Capped, because this runs on a request path and the point is to survive one
+// or two bad egresses, not to sweep the whole pool.
+func (s *Server) codexManifestCredentials() []*auth.Auth {
+	const maxCandidates = 4
+	var healthy, degraded []*auth.Auth
 	for _, st := range s.pool.Status() {
 		if auth.NormalizeProvider(st.Auth.Provider) != auth.ProviderOpenAI {
 			continue
@@ -186,13 +208,21 @@ func (s *Server) anyCodexOAuthCredential() *auth.Auth {
 			continue
 		}
 		if live.IsHealthy() {
-			return live
-		}
-		if fallback == nil {
-			fallback = live
+			healthy = append(healthy, live)
+		} else {
+			degraded = append(degraded, live)
 		}
 	}
-	return fallback
+	// A fresh slice rather than appending onto healthy: the two are separate
+	// buckets and reusing one's backing array to hold both is how a caller
+	// later reading healthy gets degraded entries it never asked for.
+	out := make([]*auth.Auth, 0, len(healthy)+len(degraded))
+	out = append(out, healthy...)
+	out = append(out, degraded...)
+	if len(out) > maxCandidates {
+		out = out[:maxCandidates]
+	}
+	return out
 }
 
 type codexUpstreamModel struct{ id, ownedBy string }
