@@ -138,7 +138,21 @@ func (s *Server) handleCodexModels(c *gin.Context) {
 // its users hit the same silent picker fallback.
 func (s *Server) serveCodexModelsManifest(c *gin.Context, clientVersion string) {
 	if creds := s.codexManifestCredentials(); len(creds) > 0 {
-		body, err := s.codexManifests.Get(clientVersion, func() ([]byte, error) {
+		// Fetch with OUR pinned client version, not the caller's, and cache
+		// under one key for everyone.
+		//
+		// Upstream filters the catalog by the client_version in the query — it
+		// returned 9 models for 0.153.4, 8 for 0.147.0 and 3 for 0.120.0 — so
+		// forwarding the caller's version reintroduces the vendor's rollout
+		// gate at the source, where no amount of not-filtering on our side can
+		// undo it. gpt-6-astra vanished again for every client below 0.153.0
+		// for exactly this reason, one deploy after it was fixed.
+		//
+		// What the caller asked for still shapes the ANSWER — see
+		// FilterCodexManifest, which trims reasoning levels an older client
+		// cannot render — but it no longer shapes the question.
+		fetchVersion := mimicry.DefaultCodexProfile().ModelsClientVersion
+		body, err := s.codexManifests.Get(fetchVersion, func() ([]byte, error) {
 			// Try credentials in turn rather than trusting one. They do not
 			// share an egress: each carries its own SOCKS5 proxy, and one of
 			// those returning "general SOCKS server failure" for chatgpt.com
@@ -148,7 +162,7 @@ func (s *Server) serveCodexModelsManifest(c *gin.Context, clientVersion string) 
 			// not.
 			var lastErr error
 			for _, cred := range creds {
-				body, err := auth.FetchCodexModelsManifest(c.Request.Context(), cred, clientVersion, s.cfg.UseUTLS)
+				body, err := auth.FetchCodexModelsManifest(c.Request.Context(), cred, fetchVersion, s.cfg.UseUTLS)
 				if err == nil {
 					return body, nil
 				}
