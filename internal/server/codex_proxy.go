@@ -158,11 +158,22 @@ func (s *Server) serveCodexModelsManifest(c *gin.Context, clientVersion string) 
 	c.Data(200, "application/json; charset=utf-8", auth.SynthesizeCodexModelsManifest(models, clientVersion))
 }
 
-// anyCodexOAuthCredential picks a healthy OpenAI OAuth credential to borrow for
-// the manifest fetch. Any of them will do — the manifest varies by plan tier,
-// not by account, and FilterCodexManifest re-applies the caller's version floor
-// afterwards regardless of which one answered.
+// anyCodexOAuthCredential picks an OpenAI OAuth credential to borrow for the
+// manifest fetch, preferring a healthy one.
+//
+// "Any will do" was the first version of this and it was wrong: it took the
+// first credential in pool order regardless of health, and on one deployment
+// that happened to be an account whose refresh token upstream had invalidated.
+// Every picker refresh then re-attempted a doomed token refresh — 34 in 30
+// minutes — so the cache never populated, the endpoint always fell back, and a
+// refresh endpoint that had already said no kept being asked.
+//
+// Health is what varies between accounts here; the manifest itself does not,
+// beyond the plan tier. A hard-failed credential is skipped entirely, and an
+// unhealthy-but-not-dead one is only used if nothing better exists — better a
+// long-shot fetch than none at all.
 func (s *Server) anyCodexOAuthCredential() *auth.Auth {
+	var fallback *auth.Auth
 	for _, st := range s.pool.Status() {
 		if auth.NormalizeProvider(st.Auth.Provider) != auth.ProviderOpenAI {
 			continue
@@ -170,11 +181,18 @@ func (s *Server) anyCodexOAuthCredential() *auth.Auth {
 		if st.Auth.Disabled || st.Auth.Kind != auth.KindOAuth {
 			continue
 		}
-		if live := s.pool.FindByID(st.Auth.ID); live != nil {
+		live := s.pool.FindByID(st.Auth.ID)
+		if live == nil || live.IsHardFailed() {
+			continue
+		}
+		if live.IsHealthy() {
 			return live
 		}
+		if fallback == nil {
+			fallback = live
+		}
 	}
-	return nil
+	return fallback
 }
 
 type codexUpstreamModel struct{ id, ownedBy string }
